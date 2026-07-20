@@ -215,29 +215,309 @@ function sanitizeXml(text: string): string {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-/** Two-step vision model picker: choose provider first, then model. */
-async function pickVisionModel(
-	ctx: ExtensionContext,
+
+const FILTER_OPTION = "🔍 Type to filter models...";
+const CHANGE_PROVIDER_OPTION = "← Change provider";
+
+type PickIterationResult =
+	| { kind: "continue" }
+	| { kind: "provider"; provider: string }
+	| { kind: "done" };
+
+function providerSortComparator(
+	a: string,
+	b: string,
+	currentProvider: string,
+): number {
+	if (a === currentProvider) return -1;
+	if (b === currentProvider) return 1;
+	return a.localeCompare(b);
+}
+
+function buildProviderItems(
+	providers: string[],
+	vision: ExtensionContext["modelRegistry"]["getAll"],
+	currentProvider: string,
+): string[] {
+	return providers.map((p) => {
+		const count = vision.filter((m) => m.provider === p).length;
+		const star = p === currentProvider ? " ★" : "";
+		return `${p}${star} (${count} model${count !== 1 ? "s" : ""})`;
+	});
+}
+
+function buildModelItems(
+	models: ExtensionContext["modelRegistry"]["getAll"],
+	labelWidth: number,
+): string[] {
+	return models.map(
+		(m) => `${(m.name ?? m.id).padEnd(labelWidth)} [${m.provider}]`,
+	);
+}
+
+function labelWidthForModels(
+	models: ExtensionContext["modelRegistry"]["getAll"],
+): number {
+	return Math.min(
+		40,
+		Math.max(...models.map((m) => (m.name ?? m.id).length)),
+	);
+}
+
+function persistModelSelection(
+	m: ExtensionContext["modelRegistry"]["getAll"][number],
 	persisted: VisionConfig,
 	writePersisted: (next: VisionConfig) => VisionConfig,
+	registry: ExtensionContext["modelRegistry"],
+): VisionConfig {
+	const next = writePersisted({
+		...persisted,
+		provider: m.provider,
+		modelId: m.id,
+	});
+	return next;
+}
+
+async function selectFromFilteredModels(
+	ctx: ExtensionContext,
+	filtered: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	query: string,
+): Promise<boolean> {
+	if (filtered.length === 1) {
+		const next = persistModelSelection(
+			filtered[0]!,
+			persisted,
+			writePersisted,
+			ctx.modelRegistry,
+		);
+		ctx.ui.notify(
+			`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
+			"info",
+		);
+		return true;
+	}
+
+	const fLabelWidth = labelWidthForModels(filtered);
+	const fItems = buildModelItems(filtered, fLabelWidth);
+	const fPicked = await ctx.ui.select(
+		`Filter: "${query}" (${filtered.length} matches)`,
+		fItems,
+	);
+	if (!fPicked) return false;
+	const fIdx = fItems.indexOf(fPicked);
+	if (fIdx < 0) return false;
+	const next = persistModelSelection(
+		filtered[fIdx]!,
+		persisted,
+		writePersisted,
+		ctx.modelRegistry,
+	);
+	ctx.ui.notify(
+		`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
+		"info",
+	);
+	return true;
+}
+
+async function runFilterFlow(
+	ctx: ExtensionContext,
+	models: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<boolean> {
+	const query = await ctx.ui.input(
+		"Filter models",
+		"Type part of a model name...",
+	);
+	if (!query) return false;
+	const filtered = models.filter((m) => fuzzyMatches(m.name ?? m.id, query));
+	if (filtered.length === 0) {
+		ctx.ui.notify(
+			`[vision-proxy] No models match "${query}".`,
+			"warning",
+		);
+		return false;
+	}
+	return selectFromFilteredModels(
+		ctx,
+		filtered,
+		persisted,
+		writePersisted,
+		query,
+	);
+}
+
+async function handleModelSelection(
+	ctx: ExtensionContext,
+	picked: string,
+	baseItems: string[],
+	models: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<boolean> {
+	if (picked === FILTER_OPTION) return false;
+	if (picked === CHANGE_PROVIDER_OPTION) return false;
+	const baseIdx = baseItems.indexOf(picked);
+	if (baseIdx < 0) return false;
+	const next = persistModelSelection(
+		models[baseIdx]!,
+		persisted,
+		writePersisted,
+		ctx.modelRegistry,
+	);
+	ctx.ui.notify(
+		`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
+		"info",
+	);
+	return true;
+}
+
+async function handleChangeProvider(
+	ctx: ExtensionContext,
+	providerItems: string[],
+	providerSet: string[],
+): Promise<PickIterationResult> {
+	const selected = await ctx.ui.select("Pick provider", providerItems);
+	if (!selected) return { kind: "continue" };
+	const idx = providerItems.indexOf(selected);
+	if (idx < 0) return { kind: "continue" };
+	return { kind: "provider", provider: providerSet[idx]! };
+}
+
+async function handleFilterOption(
+	ctx: ExtensionContext,
+	models: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<PickIterationResult> {
+	const done = await runFilterFlow(ctx, models, persisted, writePersisted);
+	return done ? { kind: "done" } : { kind: "continue" };
+}
+
+async function handleModelOption(
+	ctx: ExtensionContext,
+	picked: string,
+	baseItems: string[],
+	models: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<PickIterationResult> {
+	const done = await handleModelSelection(
+		ctx,
+		picked,
+		baseItems,
+		models,
+		persisted,
+		writePersisted,
+	);
+	return done ? { kind: "done" } : { kind: "continue" };
+}
+
+async function handlePickedItem(
+	ctx: ExtensionContext,
+	picked: string | undefined,
+	baseItems: string[],
+	models: ExtensionContext["modelRegistry"]["getAll"],
+	providerItems: string[],
+	providerSet: string[],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<PickIterationResult> {
+	if (!picked) return { kind: "done" };
+	if (picked === CHANGE_PROVIDER_OPTION)
+		return handleChangeProvider(ctx, providerItems, providerSet);
+	if (picked === FILTER_OPTION)
+		return handleFilterOption(ctx, models, persisted, writePersisted);
+	return handleModelOption(
+		ctx,
+		picked,
+		baseItems,
+		models,
+		persisted,
+		writePersisted,
+	);
+}
+
+function continueOrReturnProvider(
+	result: PickIterationResult,
+): string | "done" | "continue" {
+	if (result.kind === "done") return "done";
+	if (result.kind === "provider") return result.provider;
+	return "continue";
+}
+
+function buildSelectionItems(
+	baseItems: string[],
+	providerSet: string[],
+): string[] {
+	const items: string[] = [];
+	if (providerSet.length > 1) items.push(CHANGE_PROVIDER_OPTION);
+	if (baseItems.length > 8) items.push(FILTER_OPTION);
+	items.push(...baseItems);
+	return items;
+}
+
+async function pickModelForProvider(
+	ctx: ExtensionContext,
+	providerPicked: string,
+	providerSet: string[],
+	providerItems: string[],
+	vision: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<string | undefined> {
+	const models = vision.filter((m) => m.provider === providerPicked);
+	const labelWidth = labelWidthForModels(models);
+
+	// eslint-disable-next-line no-constant-condition
+	while (true) {
+		const baseItems = buildModelItems(models, labelWidth);
+		const items = buildSelectionItems(baseItems, providerSet);
+		const picked = await ctx.ui.select(
+			`Pick vision model (${providerPicked})`,
+			items,
+		);
+		const result = await handlePickedItem(
+			ctx,
+			picked,
+			baseItems,
+			models,
+			providerItems,
+			providerSet,
+			persisted,
+			writePersisted,
+		);
+		const next = continueOrReturnProvider(result);
+		if (next === "done") return undefined;
+		if (next !== "continue") providerPicked = next;
+	}
+}
+
+function initialProvider(providerSet: string[], currentProvider: string): string {
+	if (providerSet.length === 1) return providerSet[0]!;
+	return currentProvider;
+}
+
+function prepareVisionModels(
+	ctx: ExtensionContext,
 	envModel: boolean,
-): Promise<void> {
+): ExtensionContext["modelRegistry"]["getAll"] | null {
 	if (envModel) {
 		ctx.ui.notify(
 			"[vision-proxy] PI_VISION_PROXY_MODEL is set - env overrides commands. Unset to change.",
 			"warning",
 		);
-		return;
+		return null;
 	}
-
 	if (!ctx.hasUI) {
 		ctx.ui.notify(
 			"[vision-proxy] Pick needs UI. Use /vision-proxy model provider/id.",
 			"warning",
 		);
-		return;
+		return null;
 	}
-
 	const vision = ctx.modelRegistry
 		.getAll()
 		.filter((m) => m.input.includes("image"));
@@ -246,155 +526,40 @@ async function pickVisionModel(
 			"[vision-proxy] No vision-capable models in registry.",
 			"error",
 		);
-		return;
+		return null;
 	}
+	return vision;
+}
+
+/** Two-step vision model picker: choose provider first, then model. */
+async function pickVisionModel(
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	envModel: boolean,
+): Promise<void> {
+	const vision = prepareVisionModels(ctx, envModel);
+	if (vision === null) return;
 
 	const currentProvider = persisted.provider;
-
-	// Build sorted provider list: current provider first (★), then alphabetical
 	const providerSet = [...new Set(vision.map((m) => m.provider))];
-	// fallow-ignore-next-line complexity
-	providerSet.sort((a, b) => {
-		if (a === currentProvider && b !== currentProvider) return -1;
-		if (b === currentProvider && a !== currentProvider) return 1;
-		return a.localeCompare(b);
-	});
+	providerSet.sort((a, b) => providerSortComparator(a, b, currentProvider));
+	const providerItems = buildProviderItems(providerSet, vision, currentProvider);
+	let providerPicked = initialProvider(providerSet, currentProvider);
 
-	// Build provider display items
-	const providerItems = providerSet.map((p) => {
-		const count = vision.filter((m) => m.provider === p).length;
-		const star = p === currentProvider ? " ★" : "";
-		return `${p}${star} (${count} model${count !== 1 ? "s" : ""})`;
-	});
-
-	// Skip provider step if only 1 provider - go straight to model list
-	let providerPicked: string;
-	if (providerSet.length === 1) {
-		providerPicked = providerSet[0];
-	} else {
-		// Start directly at the model list for the current (★) provider
-		// User can navigate back to pick a different provider
-		providerPicked = currentProvider;
-	}
-
-	// Provider selection loop - re-enters when user picks "← Change provider"
 	// eslint-disable-next-line no-constant-condition
 	while (true) {
-		// Step 2: pick model within provider (with filter support)
-		const models = vision.filter((m) => m.provider === providerPicked);
-		const labelWidth = Math.min(
-			40,
-			Math.max(...models.map((m) => (m.name ?? m.id).length)),
+		const nextProvider = await pickModelForProvider(
+			ctx,
+			providerPicked,
+			providerSet,
+			providerItems,
+			vision,
+			persisted,
+			writePersisted,
 		);
-		const FILTER_OPTION = "🔍 Type to filter models...";
-		const CHANGE_PROVIDER_OPTION = "← Change provider";
-
-		// Build the base model list (without control options)
-		const buildModelItems = (): string[] =>
-			models.map(
-				(m) => `${(m.name ?? m.id).padEnd(labelWidth)} [${m.provider}]`,
-			);
-
-		// eslint-disable-next-line no-constant-condition
-		while (true) {
-			const baseItems = buildModelItems();
-			const items: string[] = [];
-			if (providerSet.length > 1) items.push(CHANGE_PROVIDER_OPTION);
-			if (baseItems.length > 8) items.push(FILTER_OPTION);
-			items.push(...baseItems);
-
-			const picked = await ctx.ui.select(
-				`Pick vision model (${providerPicked})`,
-				items,
-			);
-			if (!picked) return; // cancelled
-
-			// Handle control options
-			if (picked === CHANGE_PROVIDER_OPTION) {
-				const selected = await ctx.ui.select("Pick provider", providerItems);
-				if (!selected) continue; // cancelled - back to model list
-				const idx = providerItems.indexOf(selected);
-				if (idx < 0) continue;
-				providerPicked = providerSet[idx];
-				break; // restart model list for new provider
-			}
-
-			if (picked === FILTER_OPTION) {
-				const query = await ctx.ui.input(
-					"Filter models",
-					"Type part of a model name...",
-				);
-				if (!query) continue; // cancelled or empty - back to full list
-				const filtered = models.filter((m) =>
-					fuzzyMatches(m.name ?? m.id, query),
-				);
-				if (filtered.length === 0) {
-					ctx.ui.notify(
-						`[vision-proxy] No models match "${query}".`,
-						"warning",
-					);
-					continue;
-				}
-				if (filtered.length === 1) {
-					// Single match - select it immediately
-					const m = filtered[0];
-					const next = writePersisted({
-						...persisted,
-						provider: m.provider,
-						modelId: m.id,
-					});
-					ctx.ui.notify(
-						`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
-						"info",
-					);
-					return;
-				}
-				// Show filtered selection (no control options - pure pick)
-				const fLabelWidth = Math.min(
-					40,
-					Math.max(...filtered.map((m) => (m.name ?? m.id).length)),
-				);
-				const fItems = filtered.map(
-					(m) => `${(m.name ?? m.id).padEnd(fLabelWidth)} [${m.provider}]`,
-				);
-				const fPicked = await ctx.ui.select(
-					`Filter: "${query}" (${filtered.length} matches)`,
-					fItems,
-				);
-				if (!fPicked) continue; // cancelled - back to full list
-				const fIdx = fItems.indexOf(fPicked);
-				if (fIdx < 0) continue;
-				const m = filtered[fIdx];
-				const next = writePersisted({
-					...persisted,
-					provider: m.provider,
-					modelId: m.id,
-				});
-				ctx.ui.notify(
-					`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
-					"info",
-				);
-				return;
-			}
-
-			// Normal model selection
-			const baseIdx =
-				picked === FILTER_OPTION || picked === CHANGE_PROVIDER_OPTION
-					? -1
-					: baseItems.indexOf(picked);
-			if (baseIdx < 0) continue;
-			const m = models[baseIdx];
-			const next = writePersisted({
-				...persisted,
-				provider: m.provider,
-				modelId: m.id,
-			});
-			ctx.ui.notify(
-				`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
-				"info",
-			);
-			return;
-		}
+		if (nextProvider === undefined) return;
+		providerPicked = nextProvider;
 	}
 }
 

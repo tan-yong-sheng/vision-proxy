@@ -11,7 +11,7 @@ import {
 import { MAX_TOOL_CALLS_PER_TURN, _toolCache, _toolCallCount } from "./shared.js";
 
 /** Build the error response when the analyze_image tool is disabled. */
-function toolDisabledError(
+export function toolDisabledError(
 	config: VisionConfig,
 ): { content: Array<{ type: "text"; text: string }> } | null {
 	if (config.tool !== "on") {
@@ -38,7 +38,7 @@ function toolDisabledError(
 }
 
 /** Build the error response when the per-turn tool call limit is exceeded. */
-function toolRateLimitError(): { content: Array<{ type: "text"; text: string }> } | null {
+export function toolRateLimitError(): { content: Array<{ type: "text"; text: string }> } | null {
 	_toolCallCount.value++;
 	if (_toolCallCount.value > MAX_TOOL_CALLS_PER_TURN) {
 		return {

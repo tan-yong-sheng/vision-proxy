@@ -9,7 +9,7 @@ import { basename, dirname, extname, join, parse, relative } from "node:path";
 import type { ImageContent as PiAiImage } from "@earendil-works/pi-ai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import imageSize from "image-size";
-import { Image } from "imagescript";
+import type { Image as ImageScriptImage } from "imagescript";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type ProxyMode = "fallback" | "always" | "off";
@@ -142,6 +142,15 @@ export class LRUCache<K, V> {
 		while (this.map.size > this._maxSize) {
 			const first = this.map.keys().next().value;
 			if (first !== undefined) this.map.delete(first);
+		}
+	}
+
+	/** Evict entries down to current maxSize. Call when maxSize is lowered to release memory. */
+	trim(): void {
+		while (this.map.size > this._maxSize) {
+			const first = this.map.keys().next().value;
+			if (first === undefined) break;
+			this.map.delete(first);
 		}
 	}
 
@@ -1687,10 +1696,11 @@ function isOversized(width: number, height: number): boolean {
 async function safeCropImage(
 	imageBytes: Buffer,
 	crop: ResolvedCrop,
-): Promise<Image | null> {
+): Promise<ImageScriptImage | null> {
 	const dims = extractDimensions(imageBytes);
 	if (dims && isOversized(dims.width, dims.height)) return null;
 
+	const { Image } = await import("imagescript");
 	const img = await Image.decode(new Uint8Array(imageBytes));
 	if (isOversized(img.width, img.height)) return null;
 
@@ -1698,7 +1708,7 @@ async function safeCropImage(
 }
 
 async function encodeCroppedImage(
-	cropped: Image,
+	cropped: ImageScriptImage,
 	mimeType?: string,
 ): Promise<Buffer> {
 	const encoded =

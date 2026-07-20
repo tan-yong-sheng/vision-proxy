@@ -478,6 +478,7 @@ export async function handleAnalyzeImage(
 	config: VisionConfig,
 ): Promise<string> {
 	const { question, reason, crop: crops } = params;
+	_toolCache.trim();
 	const setup = await resolveAnalyzeSetup(params, config, ctx);
 	if (!setup.ok) return setup.error;
 

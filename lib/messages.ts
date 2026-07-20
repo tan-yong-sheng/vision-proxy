@@ -159,7 +159,7 @@ function transformMessageContent(
 }
 
 /** Transform messages, replacing images with cached descriptions. */
-function transformMessages(
+export function transformMessages(
 	messages: ContextEvent["messages"],
 	descriptions: Map<string, string>,
 ): { messages: ContextEvent["messages"]; modified: boolean } {

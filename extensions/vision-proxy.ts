@@ -1145,9 +1145,151 @@ async function callVisionModel(
 	);
 }
 
+let _toolRegistered = false;
+
+const TOGGLE_MAP: Record<string, boolean> = {
+	yes: true,
+	true: true,
+	"1": true,
+	on: true,
+	no: false,
+	false: false,
+	"0": false,
+	off: false,
+};
+
+type NumericConfigKey = "maxImagesPerCall" | "maxBatch" | "cacheSize";
+
+async function handleModeCommand(
+	sub: string,
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	env: EnvFlags,
+): Promise<boolean> {
+	if (env.mode) {
+		ctx.ui.notify(
+			"[vision-proxy] PI_VISION_PROXY_MODE is set - env overrides commands. Unset to change.",
+			"warning",
+		);
+		return false;
+	}
+	if (!["fallback", "always", "off"].includes(sub)) {
+		ctx.ui.notify("Usage: /vision-proxy fallback|always|off", "warning");
+		return false;
+	}
+	const next = writePersisted({ ...persisted, mode: sub as ProxyMode });
+	ctx.ui.notify(
+		`Vision proxy: ${modeLabel(next.mode)}`,
+		next.mode === "off" ? "warning" : "info",
+	);
+	return true;
+}
+
+async function handleModelCommand(
+	value: string,
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	envModel: boolean,
+): Promise<void> {
+	if (envModel) {
+		ctx.ui.notify(
+			"[vision-proxy] PI_VISION_PROXY_MODEL is set - env overrides commands. Unset to change.",
+			"warning",
+		);
+		return;
+	}
+	const parsed = parseModelString(value);
+	if (!parsed) {
+		ctx.ui.notify(
+			"Usage: /vision-proxy model provider/model-id\nExample: /vision-proxy model anthropic/claude-sonnet-4-5",
+			"warning",
+		);
+		return;
+	}
+	const next = writePersisted({ ...persisted, ...parsed });
+	ctx.ui.notify(`Vision proxy model: ${modelLabel(next)}`, "info");
+}
+
+async function handleContextCommand(
+	valueLower: string,
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	currentStatus: string,
+): Promise<void> {
+	const nextValue = TOGGLE_MAP[valueLower];
+	if (nextValue === undefined) {
+		ctx.ui.notify(
+			`[vision-proxy] Conversation context: ${currentStatus}. Use /vision-proxy context on|off.`,
+			"info",
+		);
+		return;
+	}
+	writePersisted({ ...persisted, includeContext: nextValue });
+	const label = nextValue ? "ON" : "OFF";
+	const level = nextValue ? "info" : "warning";
+	ctx.ui.notify(`[vision-proxy] Conversation context: ${label}`, level);
+}
+
+async function handleToolCommand(
+	valueLower: string,
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	envTool: boolean,
+	effective: VisionConfig,
+): Promise<boolean> {
+	if (envTool) {
+		ctx.ui.notify(
+			"[vision-proxy] PI_VISION_PROXY_TOOL is set - env overrides commands. Unset to change.",
+			"warning",
+		);
+		return false;
+	}
+	if (valueLower === "on") {
+		writePersisted({ ...persisted, tool: "on" });
+		ctx.ui.notify(`[vision-proxy] analyze_image tool: ON`, "info");
+		return true;
+	}
+	if (valueLower === "off") {
+		writePersisted({ ...persisted, tool: "off" });
+		ctx.ui.notify(
+			`[vision-proxy] analyze_image tool: OFF (existing calls will return disabled error)`,
+			"warning",
+		);
+		return false;
+	}
+	ctx.ui.notify(
+		`[vision-proxy] Tool: ${effective.tool}. Use /vision-proxy tool on|off.`,
+		"info",
+	);
+	return false;
+}
+
+async function handleNumericCommand(
+	sub: string,
+	value: string,
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	envKey: NumericConfigKey,
+	label: string,
+	min: number,
+	max: number,
+): Promise<void> {
+	const n = Number.parseInt(value, 10);
+	if (!Number.isFinite(n) || n < min || n > max) {
+		ctx.ui.notify(`Usage: /vision-proxy ${sub} <${min}-${max}>`, "warning");
+		return;
+	}
+	writePersisted({ ...persisted, [envKey]: n });
+	ctx.ui.notify(`[vision-proxy] ${label}: ${n}`, "info");
+}
+
 // ── Extension ──────────────────────────────────────────────────────────────
 export default function (pi: ExtensionAPI) {
-	let _toolRegistered = false;
 
 	/** Register or unregister the analyze_image tool based on config. */
 	function syncToolRegistration(config: VisionConfig) {
@@ -1699,26 +1841,16 @@ export default function (pi: ExtensionAPI) {
 
 		// ── Set mode ────────────────────────────────────────
 		if (sub === "fallback" || sub === "always" || sub === "off") {
-			if (env.mode) {
-				ctx.ui.notify(
-					"[vision-proxy] PI_VISION_PROXY_MODE is set - env overrides commands. Unset to change.",
-					"warning",
+			const changed = await handleModeCommand(sub, ctx, persisted, writePersisted, env);
+			if (changed) {
+				syncToolRegistration(
+					resolveConfig(
+						ctx.sessionManager.getEntries(),
+						process.env,
+						_fileConfig,
+					),
 				);
-				return;
 			}
-			const next = writePersisted({ ...persisted, mode: sub });
-			ctx.ui.notify(
-				`Vision proxy: ${modeLabel(next.mode)}`,
-				next.mode === "off" ? "warning" : "info",
-			);
-			// Sync tool registration on mode change
-			syncToolRegistration(
-				resolveConfig(
-					ctx.sessionManager.getEntries(),
-					process.env,
-					_fileConfig,
-				),
-			);
 			return;
 		}
 
@@ -1730,23 +1862,7 @@ export default function (pi: ExtensionAPI) {
 
 		// ── Set model ───────────────────────────────────────
 		if (sub === "model") {
-			if (env.model) {
-				ctx.ui.notify(
-					"[vision-proxy] PI_VISION_PROXY_MODEL is set - env overrides commands. Unset to change.",
-					"warning",
-				);
-				return;
-			}
-			const parsed = parseModelString(value);
-			if (!parsed) {
-				ctx.ui.notify(
-					"Usage: /vision-proxy model provider/model-id\nExample: /vision-proxy model anthropic/claude-sonnet-4-5",
-					"warning",
-				);
-				return;
-			}
-			const next = writePersisted({ ...persisted, ...parsed });
-			ctx.ui.notify(`Vision proxy model: ${modelLabel(next)}`, "info");
+			await handleModelCommand(value, ctx, persisted, writePersisted, env.model);
 			return;
 		}
 
@@ -1759,56 +1875,19 @@ export default function (pi: ExtensionAPI) {
 				);
 				return;
 			}
-			if (isTrue(valueLower)) {
-				writePersisted({ ...persisted, includeContext: true });
-				ctx.ui.notify("[vision-proxy] Conversation context: ON", "info");
-				return;
-			}
-			if (isFalse(valueLower)) {
-				writePersisted({ ...persisted, includeContext: false });
-				ctx.ui.notify("[vision-proxy] Conversation context: OFF", "warning");
-				return;
-			}
-			ctx.ui.notify(
-				`[vision-proxy] Conversation context: ${effective.includeContext ? "ON" : "OFF"}. Use /vision-proxy context on|off.`,
-				"info",
-			);
+			const currentStatus = effective.includeContext ? "ON" : "OFF";
+			await handleContextCommand(valueLower, ctx, persisted, writePersisted, currentStatus);
 			return;
 		}
 
 		// ── Tool on/off ────────────────────────────────────
 		if (sub === "tool") {
-			if (env.tool) {
-				ctx.ui.notify(
-					"[vision-proxy] PI_VISION_PROXY_TOOL is set - env overrides commands. Unset to change.",
-					"warning",
-				);
-				return;
-			}
-			if (valueLower === "on") {
-				const next = writePersisted({ ...persisted, tool: "on" });
+			const needsSync = await handleToolCommand(valueLower, ctx, persisted, writePersisted, env.tool, effective);
+			if (needsSync) {
 				syncToolRegistration(
-					resolveConfig(
-						ctx.sessionManager.getEntries(),
-						process.env,
-						_fileConfig,
-					),
+					resolveConfig(ctx.sessionManager.getEntries(), process.env, _fileConfig),
 				);
-				ctx.ui.notify(`[vision-proxy] analyze_image tool: ON`, "info");
-				return;
 			}
-			if (valueLower === "off") {
-				writePersisted({ ...persisted, tool: "off" });
-				ctx.ui.notify(
-					`[vision-proxy] analyze_image tool: OFF (existing calls will return disabled error)`,
-					"warning",
-				);
-				return;
-			}
-			ctx.ui.notify(
-				`[vision-proxy] Tool: ${effective.tool}. Use /vision-proxy tool on|off.`,
-				"info",
-			);
 			return;
 		}
 
@@ -1821,16 +1900,7 @@ export default function (pi: ExtensionAPI) {
 				);
 				return;
 			}
-			const n = Number.parseInt(value, 10);
-			if (!Number.isFinite(n) || n < 1 || n > 20) {
-				ctx.ui.notify(
-					"Usage: /vision-proxy max-images-per-call <1-20>",
-					"warning",
-				);
-				return;
-			}
-			writePersisted({ ...persisted, maxImagesPerCall: n });
-			ctx.ui.notify(`[vision-proxy] Max images per call: ${n}`, "info");
+			await handleNumericCommand(sub, value, ctx, persisted, writePersisted, "maxImagesPerCall", "Max images per call", 1, 20);
 			return;
 		}
 
@@ -1843,13 +1913,7 @@ export default function (pi: ExtensionAPI) {
 				);
 				return;
 			}
-			const n = Number.parseInt(value, 10);
-			if (!Number.isFinite(n) || n < 1 || n > 10) {
-				ctx.ui.notify("Usage: /vision-proxy max-batch <1-10>", "warning");
-				return;
-			}
-			writePersisted({ ...persisted, maxBatch: n });
-			ctx.ui.notify(`[vision-proxy] Max batch: ${n}`, "info");
+			await handleNumericCommand(sub, value, ctx, persisted, writePersisted, "maxBatch", "Max batch", 1, 10);
 			return;
 		}
 
@@ -1862,13 +1926,7 @@ export default function (pi: ExtensionAPI) {
 				);
 				return;
 			}
-			const n = Number.parseInt(value, 10);
-			if (!Number.isFinite(n) || n < 0 || n > 500) {
-				ctx.ui.notify("Usage: /vision-proxy cache-size <0-500>", "warning");
-				return;
-			}
-			writePersisted({ ...persisted, cacheSize: n });
-			ctx.ui.notify(`[vision-proxy] Cache size: ${n}`, "info");
+			await handleNumericCommand(sub, value, ctx, persisted, writePersisted, "cacheSize", "Cache size", 0, 500);
 			return;
 		}
 

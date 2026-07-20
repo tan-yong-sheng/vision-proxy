@@ -30,7 +30,6 @@ import {
 	fuzzyMatches,
 	getGroundingFormat,
 	hashImageData,
-	IMAGE_PATH_PLACEHOLDER,
 	isPathAllowed,
 	isValidNamedRegion,
 	LRUCache,

@@ -158,13 +158,13 @@ export interface LegacyImage {
 // ── Constants ──────────────────────────────────────────────────────────────
 export const CUSTOM_TYPE_CONFIG = "vision-proxy-config";
 export const CUSTOM_TYPE_DESCRIPTION = "vision-proxy-description";
-export const CUSTOM_TYPE_TOOL_CALL = "vision-proxy-tool-call";
+const CUSTOM_TYPE_TOOL_CALL = "vision-proxy-tool-call";
 export const CUSTOM_TYPE_JOINT = "vision-proxy-joint-description";
 export const CUSTOM_TYPE_COMMAND = "vision-proxy-command";
-export const CUSTOM_TYPE_SKIP = "vision-proxy-skip";
+const CUSTOM_TYPE_SKIP = "vision-proxy-skip";
 
 /** Models explicitly excluded from grounding (PRD FR-4.1.1). */
-export const GROUNDING_EXCLUDED_MODELS = [
+const GROUNDING_EXCLUDED_MODELS = [
 	"anthropic/claude",
 	"openai/gpt-4o",
 	"openai/gpt-5",
@@ -376,12 +376,12 @@ function parseCropArg(arg: string): CropEntry | string {
 	return `Error: unknown crop form "${form}". Use r=<region>, n=<x>,<y>,<w>,<h>, or p=<x>,<y>,<w>,<h>.`;
 }
 
-export const RECENT_MESSAGE_COUNT = 8;
-export const ASSISTANT_TRUNCATE_CHARS = 500;
-export const CONTEXT_MAX_CHARS = 3000;
-export const HASH_HEX_LEN = 32;
-export const PROVIDER_PATTERN = /^[a-zA-Z0-9_-]+$/;
-export const MODEL_ID_PATTERN = /^[a-zA-Z0-9_./:-]+$/;
+const RECENT_MESSAGE_COUNT = 8;
+const ASSISTANT_TRUNCATE_CHARS = 500;
+const CONTEXT_MAX_CHARS = 3000;
+const HASH_HEX_LEN = 32;
+const PROVIDER_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const MODEL_ID_PATTERN = /^[a-zA-Z0-9_./:-]+$/;
 
 export const DEFAULT_CONFIG: VisionConfig = {
 	mode: "fallback",
@@ -420,7 +420,7 @@ export const DEFAULT_CONFIG: VisionConfig = {
 
 // ── Persistent file storage ────────────────────────────────────────────────
 /** Path to the persistent config file stored alongside settings.json */
-export function getPersistentConfigPath(agentDir?: string): string {
+function getPersistentConfigPath(agentDir?: string): string {
 	const base = agentDir ?? join(os.homedir(), ".pi", "agent");
 	return join(base, "vision-proxy.json");
 }
@@ -476,7 +476,7 @@ export async function writePersistentFile(
 }
 
 // ── Config resolution ──────────────────────────────────────────────────────
-export function readPersistedConfig(
+function readPersistedConfig(
 	entries: readonly SessionEntry[],
 ): Partial<VisionConfig> {
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -736,14 +736,14 @@ const EXT_TO_MIME: Record<string, string> = {
 
 const IMAGE_EXT_ALT = "jpg|jpeg|png|gif|webp|bmp|tiff|tif|ico|avif";
 
-export const IMAGE_PATH_PLACEHOLDER =
+const IMAGE_PATH_PLACEHOLDER =
 	"[image file — see vision proxy description]";
 
 /**
  * Path-aware placeholder that preserves the original file path so the model
  * can use it in tool calls like analyze_image.
  */
-export function imageFilePlaceholder(filePath: string): string {
+function imageFilePlaceholder(filePath: string): string {
 	return `[Image: ${filePath}]`;
 }
 
@@ -941,7 +941,7 @@ export async function readImageFileWithReason(
 /**
  * Read an image file. Returns null on any failure. Prefer readImageFileWithReason for diagnostics.
  */
-export async function readImageFile(
+async function readImageFile(
 	filePath: string,
 ): Promise<PiAiImage | null> {
 	return (await readImageFileWithReason(filePath)).image;
@@ -1302,7 +1302,7 @@ export function resolveCropEntry(
 }
 
 /** Maximum length for telemetry fields stored in session entries. */
-export const TELEMETRY_MAX_LEN = 200;
+const TELEMETRY_MAX_LEN = 200;
 
 /** Characters considered unsafe in telemetry log fields. */
 const TELEMETRY_UNSAFE_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
@@ -1324,7 +1324,7 @@ export function cropSignature(crop: ResolvedCrop): string {
 
 // ── Image cropping (ImageScript) ────────────────────────────────────────────
 /** Whether ImageScript is available for cropping. */
-export const hasCropper = true;
+const hasCropper = true;
 
 /**
  * Crop an image buffer to the given pixel rectangle using ImageScript.
@@ -1451,6 +1451,31 @@ export function buildToolCacheKey(
 
 // ── Fence builders ────────────────────────────────────────────────────────
 
+/** Append width, height, and optional filename parts for a fence. */
+function addImageMetaParts(
+	parts: string[],
+	meta: ImageMeta,
+	crop?: ResolvedCrop,
+): void {
+	const width = crop ? crop.width : meta.width;
+	const height = crop ? crop.height : meta.height;
+	parts.push(`width="${width}"`, `height="${height}"`);
+	if (meta.filename) parts.push(`filename="${escapeAttr(meta.filename)}"`);
+}
+
+/** Build the shared attribute parts for description/analysis fences. */
+function buildFenceParts(
+	hash: string,
+	meta?: ImageMeta,
+	crop?: ResolvedCrop,
+): string[] {
+	const imageAttr = crop ? `${hash}#crop:${cropSignature(crop)}` : hash;
+	const parts: string[] = [`image="${escapeAttr(imageAttr)}"`];
+	if (meta) addImageMetaParts(parts, meta, crop);
+	if (crop) parts.push(`crop_origin="${crop.x},${crop.y}"`);
+	return parts;
+}
+
 /**
  * Build a `<vision_proxy_description>` fence with image metadata.
  */
@@ -1460,19 +1485,7 @@ export function buildDescriptionFence(
 	meta?: ImageMeta,
 	crop?: ResolvedCrop,
 ): string {
-	let imageAttr = hash;
-	if (crop) imageAttr += `#crop:${cropSignature(crop)}`;
-
-	const parts: string[] = [`image="${escapeAttr(imageAttr)}"`];
-	if (meta) {
-		parts.push(`width="${crop?.width ?? meta.width}"`);
-		parts.push(`height="${crop?.height ?? meta.height}"`);
-		if (meta.filename) parts.push(`filename="${escapeAttr(meta.filename)}"`);
-	}
-	if (crop) {
-		parts.push(`crop_origin="${crop.x},${crop.y}"`);
-	}
-
+	const parts = buildFenceParts(hash, meta, crop);
 	return `<vision_proxy_description ${parts.join(" ")}\n>\n${fenceUntrusted(description)}\n</vision_proxy_description>`;
 }
 
@@ -1486,22 +1499,10 @@ export function buildAnalysisFence(
 	crop?: ResolvedCrop,
 	groundingFormat?: GroundingFormat,
 ): string {
-	let imageAttr = hash;
-	if (crop) imageAttr += `#crop:${cropSignature(crop)}`;
-
-	const parts: string[] = [`image="${escapeAttr(imageAttr)}"`];
-	if (meta) {
-		parts.push(`width="${crop?.width ?? meta.width}"`);
-		parts.push(`height="${crop?.height ?? meta.height}"`);
-		if (meta.filename) parts.push(`filename="${escapeAttr(meta.filename)}"`);
-	}
-	if (crop) {
-		parts.push(`crop_origin="${crop.x},${crop.y}"`);
-	}
+	const parts = buildFenceParts(hash, meta, crop);
 	if (groundingFormat && groundingFormat !== "none") {
 		parts.push(`grounding_format="${groundingFormat}"`);
 	}
-
 	return `<vision_proxy_analysis ${parts.join(" ")}\n>\n${fenceUntrusted(analysis)}\n</vision_proxy_analysis>`;
 }
 

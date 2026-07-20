@@ -531,11 +531,7 @@ async function analyzeImages(
 				return { hash, description: null, error: "aborted" };
 			}
 
-			const text = response.content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("\n")
-				.trim();
+			const text = extractTextFromResponse(response);
 
 			return {
 				hash,
@@ -822,11 +818,7 @@ async function handleAnalyzeImage(
 			return "Error: analysis was cancelled.";
 		}
 
-		const text = response.content
-			.filter((c): c is { type: "text"; text: string } => c.type === "text")
-			.map((c) => c.text)
-			.join("\n")
-			.trim();
+		const text = extractTextFromResponse(response);
 
 		if (!text) {
 			return "Error: vision model returned an empty response.";
@@ -878,6 +870,21 @@ async function handleAnalyzeImage(
 	} catch (err) {
 		return `Error: vision model call failed: ${err instanceof Error ? err.message : String(err)}`;
 	}
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Extract plain text from a PiAi completion response. */
+function extractTextFromResponse(
+	response: {
+		content: Array<{ type: string; text?: string }>;
+	},
+): string {
+	return response.content
+		.filter((c): c is { type: "text"; text: string } => c.type === "text")
+		.map((c) => c.text)
+		.join("\n")
+		.trim();
 }
 
 // ── Extension ──────────────────────────────────────────────────────────────
@@ -1823,11 +1830,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 
-				const text = response.content
-					.filter((c): c is { type: "text"; text: string } => c.type === "text")
-					.map((c) => c.text)
-					.join("\n")
-					.trim();
+				const text = extractTextFromResponse(response);
 
 				if (!text) {
 					ctx.ui.notify(

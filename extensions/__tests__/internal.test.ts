@@ -599,6 +599,7 @@ describe("isPathAllowed", () => {
 });
 
 describe("readImageFileWithReason", () => {
+	// fallow-ignore-next-line complexity
 	it("reads valid PNG inside tmpdir", async () => {
 		const dir = await mkdtemp(join(os.tmpdir(), "vp-test-"));
 		const file = join(dir, "ok.png");

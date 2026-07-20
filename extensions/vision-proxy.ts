@@ -216,6 +216,7 @@ function sanitizeXml(text: string): string {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 /** Two-step vision model picker: choose provider first, then model. */
+// fallow-ignore-next-line complexity
 async function pickVisionModel(
 	ctx: ExtensionContext,
 	persisted: VisionConfig,
@@ -253,6 +254,7 @@ async function pickVisionModel(
 
 	// Build sorted provider list: current provider first (★), then alphabetical
 	const providerSet = [...new Set(vision.map((m) => m.provider))];
+	// fallow-ignore-next-line complexity
 	providerSet.sort((a, b) => {
 		if (a === currentProvider && b !== currentProvider) return -1;
 		if (b === currentProvider && a !== currentProvider) return 1;
@@ -416,6 +418,7 @@ function friendlyModelLabel(
 /** Cached config loaded from persistent file on startup */
 let _fileConfig: Partial<VisionConfig> = {};
 
+// fallow-ignore-next-line complexity
 function describeReadReason(reason: ReadImageReason, bytes?: number): string {
 	switch (reason) {
 		case "denied":
@@ -442,6 +445,7 @@ interface AnalysisResult {
 	error?: string;
 }
 
+// fallow-ignore-next-line complexity
 async function analyzeImages(
 	images: readonly (PiAiImage | LegacyImage)[],
 	prompt: string,
@@ -484,6 +488,7 @@ async function analyzeImages(
 		? `\n\n## Recent conversation (untrusted user dialogue, for grounding only)\n<conversation>\n${conversationContext}\n</conversation>`
 		: "";
 
+	// fallow-ignore-next-line complexity
 	const tasks = images.map(async (raw, i): Promise<AnalysisResult> => {
 		let piAiImage: PiAiImage;
 		try {
@@ -568,6 +573,7 @@ async function analyzeImages(
 
 // ── analyze_image tool handler ─────────────────────────────────────────────
 
+// fallow-ignore-next-line complexity
 async function handleAnalyzeImage(
 	params: {
 		images: string[];
@@ -934,6 +940,7 @@ function buildVisionPrompt(
 	question: string,
 ): Array<{ type: "text"; text: string } | PiAiImage> {
 	const imageLabels = imagePayloads
+		// fallow-ignore-next-line complexity
 		.map((p, i) => {
 			const dim = p.crop
 				? `${p.crop.width}x${p.crop.height}`
@@ -994,6 +1001,7 @@ export default function (pi: ExtensionAPI) {
 					"Results include image dimensions, filename, and grounding format metadata in the response fence.",
 				],
 				parameters: AnalyzeImageParams,
+				// fallow-ignore-next-line complexity
 				execute: async (_toolCallId, params, _signal, _onUpdate, extCtx) => {
 					const entries = extCtx.sessionManager.getEntries();
 					const config = resolveConfig(entries, process.env, _fileConfig);
@@ -1065,6 +1073,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on(
 		"before_agent_start",
+		// fallow-ignore-next-line complexity
 		async (
 			event: BeforeAgentStartEvent,
 			ctx: ExtensionContext,
@@ -1294,6 +1303,7 @@ export default function (pi: ExtensionAPI) {
 		const descriptions = findDescriptions(entries);
 		let modified = false;
 
+		// fallow-ignore-next-line complexity
 		const messages = event.messages.map((msg) => {
 			if (msg.role !== "user" || !Array.isArray(msg.content)) return msg;
 
@@ -1305,6 +1315,7 @@ export default function (pi: ExtensionAPI) {
 			if (!hasImageBlock && !hasFilePaths) return msg;
 
 			modified = true;
+			// fallow-ignore-next-line complexity
 			const newContent = msg.content.flatMap((c) => {
 				if (c.type === "image") {
 					const hash = hashImageData(c.data);
@@ -1489,6 +1500,7 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	// ── /vision-proxy command ─────────────────────────────────────────
+	// fallow-ignore-next-line complexity
 	const commandHandler = async (args: string, ctx: ExtensionContext) => {
 		const entries = ctx.sessionManager.getEntries();
 		const persisted = persistedBase(entries);

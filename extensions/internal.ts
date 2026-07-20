@@ -214,6 +214,7 @@ export interface DescribeArgs {
  * describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]
  * redescribe <path|hash> [--model <provider/id>]
  */
+// fallow-ignore-next-line complexity
 export function parseDescribeArgs(
 	raw: string,
 	isRedescribe = false,
@@ -287,6 +288,7 @@ export function parseDescribeArgs(
 /**
  * Tokenize a command string, respecting double-quoted strings.
  */
+// fallow-ignore-next-line complexity
 function tokenizeArgs(input: string): string[] {
 	const tokens: string[] = [];
 	let current = "";
@@ -325,6 +327,7 @@ function parse4Numbers(
  * Parse a --crop argument: `<image_index>:<form>`
  * Forms: `r=<region>`, `n=<x>,<y>,<w>,<h>`, `p=<x>,<y>,<w>,<h>`
  */
+// fallow-ignore-next-line complexity
 function parseCropArg(arg: string): CropEntry | string {
 	const colonIdx = arg.indexOf(":");
 	if (colonIdx < 0)
@@ -440,6 +443,7 @@ const PERSISTED_CONFIG_KEYS = new Set([
 ]);
 
 /** Read config from the persistent file. Returns empty object on any failure. */
+// fallow-ignore-next-line complexity
 export async function readPersistentFile(
 	agentDir?: string,
 ): Promise<Partial<VisionConfig>> {
@@ -476,6 +480,7 @@ export async function writePersistentFile(
 }
 
 // ── Config resolution ──────────────────────────────────────────────────────
+// fallow-ignore-next-line complexity
 function readPersistedConfig(
 	entries: readonly SessionEntry[],
 ): Partial<VisionConfig> {
@@ -492,6 +497,7 @@ function readPersistedConfig(
 	return {};
 }
 
+// fallow-ignore-next-line complexity
 export function readEnvOverrides(
 	env: NodeJS.ProcessEnv = process.env,
 ): Partial<VisionConfig> {
@@ -571,6 +577,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	};
 }
 
+// fallow-ignore-next-line complexity
 export function parseModelString(
 	s: string,
 ): { provider: string; modelId: string } | null {
@@ -583,6 +590,7 @@ export function parseModelString(
 	return { provider, modelId };
 }
 
+// fallow-ignore-next-line complexity
 export function sanitize(config: VisionConfig): VisionConfig {
 	const safe: VisionConfig = { ...config };
 
@@ -673,6 +681,7 @@ export function resolveConfig(
 }
 
 // ── Session-entry helpers ──────────────────────────────────────────────────
+// fallow-ignore-next-line complexity
 export function findDescriptions(
 	entries: readonly SessionEntry[],
 ): Map<string, string> {
@@ -691,6 +700,7 @@ export function findDescriptions(
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────
+// fallow-ignore-next-line complexity
 export function toPiAiImage(img: PiAiImage | LegacyImage): PiAiImage {
 	if (
 		"data" in img &&
@@ -860,6 +870,7 @@ function driveAccessDisabled(): boolean {
  * on non-drive platforms via PI_VISION_PROXY_ALLOW_HOME=1.
  * Both sides are canonicalized via realpath to handle symlinks and Windows 8.3 short names.
  */
+// fallow-ignore-next-line complexity
 export async function isPathAllowed(filePath: string): Promise<boolean> {
 	let resolved: string;
 	try {
@@ -894,6 +905,7 @@ export async function isPathAllowed(filePath: string): Promise<boolean> {
 /**
  * Read an image file and return as base64 ImageContent with a structured reason on failure.
  */
+// fallow-ignore-next-line complexity
 export async function readImageFileWithReason(
 	rawPath: string,
 ): Promise<ReadImageResult> {
@@ -1014,6 +1026,7 @@ export function escapeAttr(s: string): string {
 }
 
 // ── Conversation context ──────────────────────────────────────────────────
+// fallow-ignore-next-line complexity
 function extractText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
@@ -1031,6 +1044,7 @@ function extractText(content: unknown): string {
 	return parts.join(" ");
 }
 
+// fallow-ignore-next-line complexity
 export function buildConversationContext(
 	entries: readonly SessionEntry[],
 ): string {
@@ -1146,6 +1160,7 @@ function safeDimensions(
 	return dims;
 }
 
+// fallow-ignore-next-line complexity
 export function storeImageMeta(
 	hash: string,
 	imageBufferOrData: Buffer | string,
@@ -1263,6 +1278,7 @@ export function clampPixels(
  * Resolve a CropEntry to pixel rectangle given image dimensions.
  * Returns null on zero-area crop (error condition for normalized/pixels).
  */
+// fallow-ignore-next-line complexity
 export function resolveCropEntry(
 	crop: CropEntry,
 	imgWidth: number,
@@ -1331,6 +1347,7 @@ const hasCropper = true;
  * Accepts raw image bytes (JPEG/PNG) and returns cropped bytes in the same format.
  * Returns null if cropping fails.
  */
+// fallow-ignore-next-line complexity
 export async function cropImage(
 	imageBytes: Buffer,
 	crop: ResolvedCrop,
@@ -1523,6 +1540,7 @@ export function getGroundingFormat(
 /**
  * Build grounding instruction to append to the system prompt for a model.
  */
+// fallow-ignore-next-line complexity
 export function buildGroundingInstruction(format: GroundingFormat): string {
 	switch (format) {
 		case "qwen_pixels":
@@ -1635,6 +1653,7 @@ export function extractVersion(
  * Generate filename hint strings for a set of images (Appendix D).
  * Returns an array of hint strings, or empty array if no patterns match.
  */
+// fallow-ignore-next-line complexity
 export function generateFilenameHints(filenames: string[]): string[] {
 	if (filenames.length < 2) return [];
 

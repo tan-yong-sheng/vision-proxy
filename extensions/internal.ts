@@ -310,6 +310,17 @@ function tokenizeArgs(input: string): string[] {
 	return tokens;
 }
 
+/** Parse 4 comma-separated numbers from a string after a prefix. */
+function parse4Numbers(
+	form: string,
+	prefix: string,
+): number[] | string {
+	const parts = form.slice(prefix.length).split(",").map(Number);
+	if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n)))
+		return `Error: expected 4 numbers after "${prefix}"`;
+	return parts as unknown as number[];
+}
+
 /**
  * Parse a --crop argument: `<image_index>:<form>`
  * Forms: `r=<region>`, `n=<x>,<y>,<w>,<h>`, `p=<x>,<y>,<w>,<h>`
@@ -334,9 +345,8 @@ function parseCropArg(arg: string): CropEntry | string {
 
 	// Normalized: n=<x>,<y>,<w>,<h>
 	if (form.startsWith("n=")) {
-		const parts = form.slice(2).split(",").map(Number);
-		if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n)))
-			return `Error: normalized crop must be n=<x>,<y>,<w>,<h>. Got: ${form}`;
+		const parts = parse4Numbers(form, "n=");
+		if (typeof parts === "string") return parts;
 		return {
 			image_index: idx,
 			normalized: {
@@ -350,9 +360,8 @@ function parseCropArg(arg: string): CropEntry | string {
 
 	// Pixels: p=<x>,<y>,<w>,<h>
 	if (form.startsWith("p=")) {
-		const parts = form.slice(2).split(",").map(Number);
-		if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n)))
-			return `Error: pixel crop must be p=<x>,<y>,<w>,<h>. Got: ${form}`;
+		const parts = parse4Numbers(form, "p=");
+		if (typeof parts === "string") return parts;
 		return {
 			image_index: idx,
 			pixels: {

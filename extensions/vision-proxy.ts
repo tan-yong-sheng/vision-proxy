@@ -599,7 +599,7 @@ function visionAuthHasKey(
 }
 
 /** Fetch vision model and API key, notifying the user on failure. */
-async function resolveVisionModel(
+async function resolveVisionModelAndAuth(
 	config: VisionConfig,
 	ctx: ExtensionContext,
 ): Promise<
@@ -740,7 +740,7 @@ async function analyzeImages(
 	config: VisionConfig,
 	ctx: ExtensionContext,
 ): Promise<AnalysisResult[] | null> {
-	const resolved = await resolveVisionModel(config, ctx);
+	const resolved = await resolveVisionModelAndAuth(config, ctx);
 	if (!resolved.ok) return null;
 
 	ctx.ui.notify(
@@ -1643,14 +1643,6 @@ async function handleToolCommand(
 	return false;
 }
 
-/** Determine whether a parsed integer is outside the allowed range. */
-function isInvalidInt(n: number, min: number, max: number): boolean {
-	if (!Number.isFinite(n)) return true;
-	if (n < min) return true;
-	if (n > max) return true;
-	return false;
-}
-
 async function handleNumericCommand(
 	sub: string,
 	value: string,
@@ -1806,7 +1798,7 @@ type InteractiveChoiceResult = { modeChanged: boolean; toolChanged: boolean };
 type InteractiveHandler = () => Promise<InteractiveChoiceResult>;
 
 async function runInteractiveChoice(
-	choice: string,
+	choice: string | undefined,
 	ctx: ExtensionContext,
 	effective: VisionConfig,
 	persisted: VisionConfig,
@@ -1843,6 +1835,7 @@ async function runInteractiveChoice(
 			return { modeChanged: false, toolChanged: false };
 		}],
 	]);
+	if (!choice) return { modeChanged: false, toolChanged: false };
 	for (const [prefix, handler] of handlers) {
 		if (choice.startsWith(prefix)) return await handler();
 	}

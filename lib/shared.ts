@@ -229,11 +229,15 @@ export function prepareVisionModels(
 		return null;
 	}
 	const allModels = ctx.modelRegistry.getAll();
-	if (allModels.length === 0) {
-		ctx.ui.notify("[vision-proxy] No models in registry.", "error");
+	const visionModels = allModels.filter((m) => m.input.includes("image"));
+	if (visionModels.length === 0) {
+		ctx.ui.notify(
+			"[vision-proxy] No vision-capable models in registry.",
+			"error",
+		);
 		return null;
 	}
-	return allModels;
+	return visionModels;
 }
 
 /** Two-step vision model picker: choose provider first, then model. */

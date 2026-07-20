@@ -13,6 +13,7 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { join, parse } from "node:path";
 import {
+	applyDescribeFlags,
 	buildConversationContext,
 	buildDescriptionFence,
 	buildAnalysisFence,
@@ -1601,6 +1602,34 @@ describe("parseDescribeArgs (redescribe)", () => {
 			assert.equal(result.model, "Qwen/Qwen2.5-VL-7B");
 			assert.equal(result.save, true);
 		}
+	});
+});
+
+describe("applyDescribeFlags", () => {
+	it("parses positional images", () => {
+		const result = applyDescribeFlags(["a.png", "b.png"], false);
+		assert.ok(typeof result !== "string", result as string);
+		if (typeof result !== "string") {
+			assert.deepEqual(result.images, ["a.png", "b.png"]);
+		}
+	});
+
+	it("parses question and crop flags", () => {
+		const result = applyDescribeFlags(
+			["a.png", "--question", "what?", "--crop", "0:r=center"],
+			false,
+		);
+		assert.ok(typeof result !== "string", result as string);
+		if (typeof result !== "string") {
+			assert.equal(result.question, "what?");
+			assert.equal(result.crops.length, 1);
+		}
+	});
+
+	it("returns error for unknown flag", () => {
+		const result = applyDescribeFlags(["a.png", "--bogus"], false);
+		assert.equal(typeof result, "string");
+		assert.ok((result as string).includes("unknown flag"));
 	});
 });
 

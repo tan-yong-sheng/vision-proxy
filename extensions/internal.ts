@@ -214,77 +214,150 @@ export interface DescribeArgs {
  * describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]
  * redescribe <path|hash> [--model <provider/id>]
  */
-// fallow-ignore-next-line complexity
+interface DescribeParseContext {
+	isRedescribe: boolean;
+	images: string[];
+	question?: string;
+	crops: CropEntry[];
+	model?: string;
+	save: boolean;
+}
+
+type FlagHandler = (
+	ctx: DescribeParseContext,
+	tokens: string[],
+	i: number,
+) => number | string;
+
+function parseQuestionFlag(ctx: DescribeParseContext, tokens: string[], i: number): number | string {
+	if (ctx.isRedescribe) return "Error: --question is not valid for redescribe.";
+	const next = i + 1;
+	if (next >= tokens.length) return "Error: --question requires a value.";
+	ctx.question = tokens[next];
+	return next;
+}
+
+function parseCropFlag(ctx: DescribeParseContext, tokens: string[], i: number): number | string {
+	if (ctx.isRedescribe) return "Error: --crop is not valid for redescribe.";
+	const next = i + 1;
+	if (next >= tokens.length)
+		return "Error: --crop requires a value. Example: --crop 0:r=top-right";
+	const parsed = parseCropArg(tokens[next]!);
+	if (typeof parsed === "string") return parsed;
+	ctx.crops.push(parsed);
+	return next;
+}
+
+function parseModelFlag(ctx: DescribeParseContext, tokens: string[], i: number): number | string {
+	const next = i + 1;
+	if (next >= tokens.length)
+		return "Error: --model requires a value. Example: --model Qwen/Qwen2.5-VL-7B-Instruct";
+	ctx.model = tokens[next];
+	return next;
+}
+
+function parseSaveFlag(ctx: DescribeParseContext, _tokens: string[], i: number): number | string {
+	if (ctx.isRedescribe) return "Error: --save is implied for redescribe.";
+	ctx.save = true;
+	return i;
+}
+
+const DESCRIBE_FLAG_HANDLERS: Record<string, FlagHandler> = {
+	"--question": parseQuestionFlag,
+	"-q": parseQuestionFlag,
+	"--crop": parseCropFlag,
+	"-c": parseCropFlag,
+	"--model": parseModelFlag,
+	"-m": parseModelFlag,
+	"--save": parseSaveFlag,
+	"-s": parseSaveFlag,
+};
+
+function emptyArgsError(): string {
+	return 'Usage: /vision-proxy describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]';
+}
+
+function noImagesError(): string {
+	return "Error: at least one image reference (path or sha256:<hex>) is required.";
+}
+
+function buildDescribeArgs(
+	ctx: DescribeParseContext,
+	isRedescribe: boolean,
+): DescribeArgs | string {
+	if (ctx.images.length === 0) return noImagesError();
+	const crops = ctx.crops.length > 0 ? ctx.crops : undefined;
+	const save = isRedescribe || ctx.save;
+	return {
+		images: ctx.images,
+		question: ctx.question,
+		crops,
+		model: ctx.model,
+		save,
+	};
+}
+
+function findUnknownFlag(tokens: string[]): string | undefined {
+	for (const tok of tokens) {
+		if (tok.startsWith("-") && !(tok in DESCRIBE_FLAG_HANDLERS)) {
+			return `Error: unknown flag: ${tok}`;
+		}
+	}
+	return undefined;
+}
+
+function applyKnownFlags(
+	tokens: string[],
+	isRedescribe: boolean,
+): DescribeParseContext | string {
+	const ctx: DescribeParseContext = {
+		isRedescribe,
+		images: [],
+		crops: [],
+		save: false,
+	};
+
+	for (let i = 0; i < tokens.length; i++) {
+		const tok = tokens[i]!;
+		const handler = DESCRIBE_FLAG_HANDLERS[tok];
+		if (handler) {
+			const result = handler(ctx, tokens, i);
+			if (typeof result === "string") return result;
+			i = result;
+		} else {
+			ctx.images.push(tok);
+		}
+	}
+
+	return ctx;
+}
+
+export function applyDescribeFlags(
+	tokens: string[],
+	isRedescribe: boolean,
+): DescribeParseContext | string {
+	return findUnknownFlag(tokens) ?? applyKnownFlags(tokens, isRedescribe);
+}
+
+/**
+ * Parse the arguments for `/vision-proxy describe` and `/vision-proxy redescribe`.
+ *
+ * Syntax:
+ * describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]
+ * redescribe <path|hash> [--model <provider/id>]
+ */
 export function parseDescribeArgs(
 	raw: string,
 	isRedescribe = false,
 ): DescribeArgs | string {
 	const args = raw.trim();
-	if (!args)
-		return 'Usage: /vision-proxy describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]';
+	if (!args) return emptyArgsError();
 
-	const images: string[] = [];
-	let question: string | undefined;
-	const crops: CropEntry[] = [];
-	let model: string | undefined;
-	let save = false;
+	const result = applyDescribeFlags(tokenizeArgs(args), isRedescribe);
+	if (typeof result === "string") return result;
 
-	// Tokenize respecting quoted strings
-	const tokens = tokenizeArgs(args);
-
-	for (let i = 0; i < tokens.length; i++) {
-		const tok = tokens[i]!;
-
-		if (tok === "--question" || tok === "-q") {
-			if (isRedescribe) return "Error: --question is not valid for redescribe.";
-			i++;
-			if (i >= tokens.length) return "Error: --question requires a value.";
-			question = tokens[i];
-			continue;
-		}
-
-		if (tok === "--crop" || tok === "-c") {
-			if (isRedescribe) return "Error: --crop is not valid for redescribe.";
-			i++;
-			if (i >= tokens.length)
-				return "Error: --crop requires a value. Example: --crop 0:r=top-right";
-			const parsed = parseCropArg(tokens[i]!);
-			if (typeof parsed === "string") return parsed; // error message
-			crops.push(parsed);
-			continue;
-		}
-
-		if (tok === "--model" || tok === "-m") {
-			i++;
-			if (i >= tokens.length)
-				return "Error: --model requires a value. Example: --model Qwen/Qwen2.5-VL-7B-Instruct";
-			model = tokens[i];
-			continue;
-		}
-
-		if (tok === "--save" || tok === "-s") {
-			if (isRedescribe) return "Error: --save is implied for redescribe.";
-			save = true;
-			continue;
-		}
-
-		// Positional argument: image reference
-		if (tok.startsWith("-")) return `Error: unknown flag: ${tok}`;
-		images.push(tok);
-	}
-
-	if (images.length === 0)
-		return "Error: at least one image reference (path or sha256:<hex>) is required.";
-
-	return {
-		images,
-		question,
-		crops: crops.length > 0 ? crops : undefined,
-		model,
-		save: isRedescribe ? true : save,
-	};
+	return buildDescribeArgs(result, isRedescribe);
 }
-
 /**
  * Tokenize a command string, respecting double-quoted strings.
  */
@@ -590,79 +663,86 @@ export function parseModelString(
 	return { provider, modelId };
 }
 
-// fallow-ignore-next-line complexity
-export function sanitize(config: VisionConfig): VisionConfig {
-	const safe: VisionConfig = { ...config };
+const VALID_MODES: ProxyMode[] = ["fallback", "always", "off"];
+const VALID_TOOLS: ToolSetting[] = ["on", "off"];
 
-	if (!safe.provider || !PROVIDER_PATTERN.test(safe.provider))
-		safe.provider = DEFAULT_CONFIG.provider;
-	if (!safe.modelId || !MODEL_ID_PATTERN.test(safe.modelId))
-		safe.modelId = DEFAULT_CONFIG.modelId;
-
-	if (
-		safe.mode !== "fallback" &&
-		safe.mode !== "always" &&
-		safe.mode !== "off"
-	) {
-		safe.mode = DEFAULT_CONFIG.mode;
-	}
-
-	if (typeof safe.includeContext !== "boolean")
-		safe.includeContext = DEFAULT_CONFIG.includeContext;
-	if (typeof safe.systemPrompt !== "string" || !safe.systemPrompt)
-		safe.systemPrompt = DEFAULT_CONFIG.systemPrompt;
-
-	if (safe.tool !== "on" && safe.tool !== "off")
-		safe.tool = DEFAULT_CONFIG.tool;
-	if (
-		!Number.isFinite(safe.maxImagesPerCall) ||
-		safe.maxImagesPerCall < 1 ||
-		safe.maxImagesPerCall > 20
-	) {
-		safe.maxImagesPerCall = DEFAULT_CONFIG.maxImagesPerCall;
-	}
-	if (
-		!Number.isFinite(safe.maxBatch) ||
-		safe.maxBatch < 1 ||
-		safe.maxBatch > 10
-	) {
-		safe.maxBatch = DEFAULT_CONFIG.maxBatch;
-	}
-	if (
-		!Number.isFinite(safe.cacheSize) ||
-		safe.cacheSize < 0 ||
-		safe.cacheSize > 500
-	) {
-		safe.cacheSize = DEFAULT_CONFIG.cacheSize;
-	}
-	if (
-		!Number.isFinite(safe.pHashSimilarityThreshold) ||
-		safe.pHashSimilarityThreshold < 0 ||
-		safe.pHashSimilarityThreshold > 1
-	) {
-		safe.pHashSimilarityThreshold = DEFAULT_CONFIG.pHashSimilarityThreshold;
-	}
-	if (!safe.groundingModels || typeof safe.groundingModels !== "object") {
-		safe.groundingModels = { ...DEFAULT_CONFIG.groundingModels };
-	} else {
-		// Validate each grounding model entry has a valid format
-		const validated: Record<string, { format: GroundingFormat }> = {};
-		for (const [key, val] of Object.entries(safe.groundingModels)) {
-			if (val && typeof val === "object" && "format" in val) {
-				const parsed = parseGroundingFormat(
-					String((val as { format: unknown }).format),
-				);
-				if (parsed) {
-					validated[key] = { format: parsed };
-				}
-			}
-		}
-		safe.groundingModels = validated;
-	}
-
-	return safe;
+function fallbackProvider(provider: string): string {
+	return provider && PROVIDER_PATTERN.test(provider) ? provider : DEFAULT_CONFIG.provider;
 }
 
+function fallbackModelId(modelId: string): string {
+	return modelId && MODEL_ID_PATTERN.test(modelId) ? modelId : DEFAULT_CONFIG.modelId;
+}
+
+function fallbackMode(mode: ProxyMode): ProxyMode {
+	return VALID_MODES.includes(mode) ? mode : DEFAULT_CONFIG.mode;
+}
+
+function fallbackBoolean(value: unknown): boolean {
+	return typeof value === "boolean" ? value : DEFAULT_CONFIG.includeContext;
+}
+
+function fallbackString(value: unknown): string {
+	return typeof value === "string" && value ? value : DEFAULT_CONFIG.systemPrompt;
+}
+
+function fallbackTool(tool: ToolSetting): ToolSetting {
+	return VALID_TOOLS.includes(tool) ? tool : DEFAULT_CONFIG.tool;
+}
+
+function fallbackRange(value: number, min: number, max: number, fallback: number): number {
+	if (!Number.isFinite(value)) return fallback;
+	if (value < min) return fallback;
+	if (value > max) return fallback;
+	return value;
+}
+
+function extractGroundingFormat(val: unknown): GroundingFormat | null {
+	if (!val || typeof val !== "object" || !("format" in val)) return null;
+	return parseGroundingFormat(String((val as { format: unknown }).format));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object";
+}
+
+function fallbackGroundingModels(
+	value: Record<string, GroundingModelEntry> | unknown,
+): Record<string, GroundingModelEntry> {
+	if (!isRecord(value)) return { ...DEFAULT_CONFIG.groundingModels };
+	const validated: Record<string, GroundingModelEntry> = {};
+	for (const [key, val] of Object.entries(value)) {
+		const parsed = extractGroundingFormat(val);
+		if (parsed) validated[key] = { format: parsed };
+	}
+	return validated;
+}
+
+export function sanitize(config: VisionConfig): VisionConfig {
+	const safe: VisionConfig = { ...config };
+	safe.provider = fallbackProvider(safe.provider);
+	safe.modelId = fallbackModelId(safe.modelId);
+	safe.mode = fallbackMode(safe.mode);
+	safe.includeContext = fallbackBoolean(safe.includeContext);
+	safe.systemPrompt = fallbackString(safe.systemPrompt);
+	safe.tool = fallbackTool(safe.tool);
+	safe.maxImagesPerCall = fallbackRange(
+		safe.maxImagesPerCall,
+		1,
+		20,
+		DEFAULT_CONFIG.maxImagesPerCall,
+	);
+	safe.maxBatch = fallbackRange(safe.maxBatch, 1, 10, DEFAULT_CONFIG.maxBatch);
+	safe.cacheSize = fallbackRange(safe.cacheSize, 0, 500, DEFAULT_CONFIG.cacheSize);
+	safe.pHashSimilarityThreshold = fallbackRange(
+		safe.pHashSimilarityThreshold,
+		0,
+		1,
+		DEFAULT_CONFIG.pHashSimilarityThreshold,
+	);
+	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
+	return safe;
+}
 export function persistedBase(entries: readonly SessionEntry[]): VisionConfig {
 	return sanitize({ ...DEFAULT_CONFIG, ...readPersistedConfig(entries) });
 }

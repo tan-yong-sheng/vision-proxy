@@ -216,7 +216,6 @@ function sanitizeXml(text: string): string {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 /** Two-step vision model picker: choose provider first, then model. */
-// fallow-ignore-next-line complexity
 async function pickVisionModel(
 	ctx: ExtensionContext,
 	persisted: VisionConfig,

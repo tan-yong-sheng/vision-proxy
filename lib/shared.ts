@@ -27,11 +27,6 @@ export function sanitizeXml(text: string): string {
 
 export const CHANGE_PROVIDER_OPTION = "← Change provider";
 
-export type PickIterationResult =
-	| { kind: "continue" }
-	| { kind: "provider"; provider: string }
-	| { kind: "done" };
-
 export function providerSortComparator(
 	a: string,
 	b: string,
@@ -65,52 +60,22 @@ export function persistModelSelection(
 	});
 }
 
-export async function handleChangeProvider(
+export async function promptChangeProvider(
 	ctx: ExtensionContext,
-	providerSet: string[],
-): Promise<PickIterationResult> {
-	const selected = await ctx.ui.select("Pick provider", providerSet);
-	if (!selected) return { kind: "continue" };
-	return { kind: "provider", provider: selected };
-}
-
-export async function handlePickedItem(
-	ctx: ExtensionContext,
-	picked: string | undefined,
-	providerPicked: string,
+	currentProvider: string,
 	allModels: ExtensionContext["modelRegistry"]["getAll"],
-	persisted: VisionConfig,
-	writePersisted: (next: VisionConfig) => VisionConfig,
-): Promise<PickIterationResult> {
-	if (!picked) return { kind: "done" };
-	if (picked === CHANGE_PROVIDER_OPTION) {
-		const providerSet = [
-			...new Set(allModels.map((m) => m.provider)),
-		].sort((a, b) => providerSortComparator(a, b, providerPicked));
-		return handleChangeProvider(ctx, providerSet);
-	}
-	const providerModels = allModels.filter((m) => m.provider === providerPicked);
-	const baseItems = buildModelItems(
-		providerModels,
-		persisted.provider,
-		persisted.modelId,
-	);
-	const idx = baseItems.indexOf(picked);
-	if (idx < 0) return { kind: "continue" };
-	const next = persistModelSelection(
-		providerModels[idx]!,
-		persisted,
-		writePersisted,
-	);
-	ctx.ui.notify(
-		`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
-		"info",
-	);
-	return { kind: "done" };
+): Promise<string | undefined> {
+	const providerSet = [
+		...new Set(allModels.map((m) => m.provider)),
+	].sort((a, b) => providerSortComparator(a, b, currentProvider));
+	const selected = await ctx.ui.select("Pick provider", providerSet);
+	if (!selected) return undefined;
+	return selected;
 }
 
-export async function pickModelForProvider(
+export async function applyModelSelection(
 	ctx: ExtensionContext,
+	picked: string,
 	providerPicked: string,
 	allModels: ExtensionContext["modelRegistry"]["getAll"],
 	persisted: VisionConfig,
@@ -122,20 +87,120 @@ export async function pickModelForProvider(
 		persisted.provider,
 		persisted.modelId,
 	);
-	const items = [CHANGE_PROVIDER_OPTION, ...baseItems];
-	const picked = await ctx.ui.select(
-		`Pick vision model for ${providerPicked}`,
-		items,
+	const idx = baseItems.indexOf(picked);
+	if (idx < 0) return false;
+	const next = persistModelSelection(
+		providerModels[idx]!,
+		persisted,
+		writePersisted,
 	);
-	const result = await handlePickedItem(
+	ctx.ui.notify(
+		`Vision proxy model: ${friendlyModelLabel(next, ctx.modelRegistry)}`,
+		"info",
+	);
+	return true;
+}
+
+export type ModelPickAction =
+	| { kind: "cancel" }
+	| { kind: "change-provider" }
+	| { kind: "select"; picked: string };
+
+export function classifyModelPick(
+	picked: string | undefined,
+): ModelPickAction {
+	if (!picked) return { kind: "cancel" };
+	if (picked === CHANGE_PROVIDER_OPTION) return { kind: "change-provider" };
+	return { kind: "select", picked };
+}
+
+export async function promptModelList(
+	ctx: ExtensionContext,
+	providerPicked: string,
+	providerModels: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+): Promise<string | undefined> {
+	const baseItems = buildModelItems(
+		providerModels,
+		persisted.provider,
+		persisted.modelId,
+	);
+	const items = [CHANGE_PROVIDER_OPTION, ...baseItems];
+	return ctx.ui.select(`Pick vision model for ${providerPicked}`, items);
+}
+
+export async function pickModelForProvider(
+	ctx: ExtensionContext,
+	providerPicked: string,
+	allModels: ExtensionContext["modelRegistry"]["getAll"],
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<string | undefined> {
+	const providerModels = allModels.filter((m) => m.provider === providerPicked);
+	const picked = await promptModelList(
+		ctx,
+		providerPicked,
+		providerModels,
+		persisted,
+	);
+	return dispatchModelPick({
 		ctx,
 		picked,
 		providerPicked,
 		allModels,
 		persisted,
 		writePersisted,
+	});
+}
+
+async function dispatchModelPick(args: {
+	ctx: ExtensionContext;
+	picked: string | undefined;
+	providerPicked: string;
+	allModels: ExtensionContext["modelRegistry"]["getAll"];
+	persisted: VisionConfig;
+	writePersisted: (next: VisionConfig) => VisionConfig;
+}): Promise<string | undefined> {
+	const action = classifyModelPick(args.picked);
+	if (action.kind === "cancel") return undefined;
+	if (action.kind === "change-provider") {
+		return handleChangeProviderAction(args);
+	}
+	return handleSelectAction(action.picked, args);
+}
+
+async function handleChangeProviderAction(args: {
+	ctx: ExtensionContext;
+	providerPicked: string;
+	allModels: ExtensionContext["modelRegistry"]["getAll"];
+}): Promise<string> {
+	const newProvider = await promptChangeProvider(
+		args.ctx,
+		args.providerPicked,
+		args.allModels,
 	);
-	return result.kind === "done";
+	return newProvider ?? args.providerPicked;
+}
+
+async function handleSelectAction(
+	picked: string,
+	args: {
+		ctx: ExtensionContext;
+		providerPicked: string;
+		allModels: ExtensionContext["modelRegistry"]["getAll"];
+		persisted: VisionConfig;
+		writePersisted: (next: VisionConfig) => VisionConfig;
+	},
+): Promise<string> {
+	const saved = await applyModelSelection(
+		args.ctx,
+		picked,
+		args.providerPicked,
+		args.allModels,
+		args.persisted,
+		args.writePersisted,
+	);
+	return saved ? undefined as unknown as string : args.providerPicked;
 }
 
 export function initialProvider(
@@ -188,18 +253,15 @@ export async function pickVisionModel(
 
 	// eslint-disable-next-line no-constant-condition
 	while (true) {
-		const done = await pickModelForProvider(
+		const nextProvider = await pickModelForProvider(
 			ctx,
 			providerPicked,
 			allModels,
 			persisted,
 			writePersisted,
 		);
-		if (done) return;
-		providerPicked = initialProvider(
-			providerSet,
-			persisted.provider,
-		);
+		if (nextProvider === undefined) return;
+		providerPicked = nextProvider;
 	}
 }
 

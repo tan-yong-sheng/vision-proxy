@@ -47,6 +47,13 @@ export interface ImageMeta {
 	filename?: string; // basename only
 }
 
+/** Result of a single-image vision analysis. */
+export interface AnalysisResult {
+	hash: string;
+	description: string | null;
+	error?: string;
+}
+
 /** In-memory map: image hash → dimensions + filename. Populated on first ingestion. */
 export const _imageMeta = new Map<string, ImageMeta>();
 
@@ -1030,6 +1037,28 @@ export async function readImageFileWithReason(
 	};
 }
 
+const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
+	denied: "path outside allowed directories (tmp / cwd / local Windows drives; set PI_VISION_PROXY_ALLOW_HOME=1 to include home on other volumes)",
+	unreadable: "could not read file",
+	empty: "file is empty",
+	"not-an-image": "unsupported extension",
+	"not-found": "file not found",
+	"too-large": "",
+};
+
+/**
+ * Convert a ReadImageReason into a human-readable explanation.
+ */
+export function describeReadReason(
+	reason: ReadImageReason,
+	bytes?: number,
+): string {
+	if (reason === "too-large") {
+		return `${bytes ?? "?"} bytes exceeds limit (override with PI_VISION_PROXY_MAX_IMAGE_BYTES)`;
+	}
+	return READ_REASON_MESSAGES[reason];
+}
+
 /**
  * Read an image file. Returns null on any failure. Prefer readImageFileWithReason for diagnostics.
  */
@@ -1615,6 +1644,17 @@ export function getGroundingFormat(
 ): GroundingFormat {
 	const key = `${provider}/${modelId}`;
 	return config.groundingModels[key]?.format ?? "none";
+}
+
+/**
+ * Convert a grounding format to an optional fence attribute value.
+ * Returns undefined when the effective format is "none".
+ */
+export function effectiveGroundingFormat(
+	config: VisionConfig,
+): GroundingFormat | undefined {
+	const fmt = getGroundingFormat(config, config.provider, config.modelId);
+	return fmt !== "none" ? fmt : undefined;
 }
 
 /**

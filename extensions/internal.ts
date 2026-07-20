@@ -54,6 +54,26 @@ export interface AnalysisResult {
 	error?: string;
 }
 
+export function buildAnalyzeResult(
+	imagePayloads: ImagePayload[],
+	description: string,
+	groundingFormat: GroundingFormat,
+): string {
+	const header = imagePayloads
+		.map((p, i) => {
+			const meta = _imageMeta.get(p.hash);
+			const dims = meta ? ` width="${meta.width}" height="${meta.height}"` : "";
+			const filename = meta?.filename ? ` filename="${escapeAttr(meta.filename)}"` : "";
+			return `<vision_proxy_description image_index="${i}"${dims}${filename}>${p.hash}</vision_proxy_description>`;
+		})
+		.join("\n");
+
+	const grounding =
+		groundingFormat !== "none" ? `\n<vision_proxy_grounding_format>${groundingFormat}</vision_proxy_grounding_format>` : "";
+
+	return `${header}${grounding}\n\n${description}`;
+}
+
 /** In-memory map: image hash → dimensions + filename. Populated on first ingestion. */
 export const _imageMeta = new Map<string, ImageMeta>();
 

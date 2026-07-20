@@ -5,6 +5,7 @@ import {
 	type VisionModel,
 } from "@earendil-works/pi-ai";
 import {
+	buildAnalyzeResult,
 	buildAnalysisFence,
 	buildGroundingInstruction,
 	buildToolCacheKey,
@@ -127,17 +128,6 @@ function parseVisionResponse(
 	const text = extractTextFromResponse(response);
 	if (!text) return { hash, description: null, error: "empty response" };
 	return { hash, description: text, error: undefined };
-}
-
-/** Build the analysis fence string for each image payload and join them. */
-function buildAnalyzeResult(
-	imagePayloads: ImagePayload[],
-	text: string,
-	groundingFormat: GroundingFormat,
-): string {
-	return imagePayloads
-		.map((p) => buildAnalysisFence(p.hash, text, p.meta, p.crop, groundingFormat))
-		.join("\n");
 }
 
 /** Convert, hash, and describe a single image. */

@@ -1288,6 +1288,215 @@ async function handleNumericCommand(
 	ctx.ui.notify(`[vision-proxy] ${label}: ${n}`, "info");
 }
 
+function formatEnvOverrides(env: EnvFlags): string {
+	const keys: (keyof EnvFlags)[] = [
+		"mode",
+		"model",
+		"context",
+		"tool",
+		"maxImagesPerCall",
+		"maxBatch",
+		"cacheSize",
+	];
+	const flags = keys.filter((key) => env[key]);
+	return flags.length ? flags.join(", ") : "none";
+}
+
+function toggleLabel(on: boolean): string {
+	return on ? "ON" : "OFF";
+}
+
+async function handleInteractiveMode(
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	env: EnvFlags,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<boolean> {
+	if (env.mode) {
+		ctx.ui.notify("[vision-proxy] Env override active for mode.", "warning");
+		return false;
+	}
+	const modeChoice = await ctx.ui.select("Select mode", [
+		"fallback",
+		"always",
+		"off",
+	]);
+	const validModes: ProxyMode[] = ["fallback", "always", "off"];
+	if (!validModes.includes(modeChoice as ProxyMode)) return false;
+	writePersisted({ ...persisted, mode: modeChoice as ProxyMode });
+	ctx.ui.notify(`Mode set to: ${modeChoice}`, "info");
+	return true;
+}
+
+async function handleInteractiveModel(
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	envModel: boolean,
+): Promise<void> {
+	await pickVisionModel(ctx, persisted, writePersisted, envModel);
+}
+
+async function handleInteractiveContext(
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	env: EnvFlags,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	effective: VisionConfig,
+): Promise<void> {
+	if (env.context) {
+		ctx.ui.notify("[vision-proxy] Env override active for context.", "warning");
+		return;
+	}
+	const next = writePersisted({
+		...persisted,
+		includeContext: !effective.includeContext,
+	});
+	ctx.ui.notify(
+		`Include context: ${next.includeContext ? "ON" : "OFF"}`,
+		next.includeContext ? "info" : "warning",
+	);
+}
+
+async function handleInteractiveTool(
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	env: EnvFlags,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	effective: VisionConfig,
+): Promise<boolean> {
+	if (env.tool) {
+		ctx.ui.notify("[vision-proxy] Env override active for tool.", "warning");
+		return false;
+	}
+	const nextTool = effective.tool === "on" ? "off" : "on";
+	writePersisted({ ...persisted, tool: nextTool });
+	ctx.ui.notify(
+		`Tool: ${nextTool}`,
+		nextTool === "on" ? "info" : "warning",
+	);
+	return true;
+}
+
+function isInvalidInt(n: number, min: number, max: number): boolean {
+	return !Number.isFinite(n) || n < min || n > max;
+}
+
+async function handleInteractiveNumeric(
+	ctx: ExtensionContext,
+	persisted: VisionConfig,
+	envKey: keyof EnvFlags,
+	env: EnvFlags,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+	effective: VisionConfig,
+	configKey: NumericConfigKey,
+	label: string,
+	min: number,
+	max: number,
+): Promise<void> {
+	if (env[envKey]) {
+		ctx.ui.notify(`[vision-proxy] Env override active for ${label}.`, "warning");
+		return;
+	}
+	const current = effective[configKey];
+	const val = await ctx.ui.input(`${label} (${min}-${max})`, String(current));
+	if (!val) return;
+	const n = Number.parseInt(val, 10);
+	if (isInvalidInt(n, min, max)) {
+		ctx.ui.notify(`Value must be ${min}-${max}.`, "warning");
+		return;
+	}
+	writePersisted({ ...persisted, [configKey]: n });
+	ctx.ui.notify(`${label}: ${n}`, "info");
+}
+
+type InteractiveChoiceResult = { modeChanged: boolean; toolChanged: boolean };
+type InteractiveHandler = () => Promise<InteractiveChoiceResult>;
+
+async function runInteractiveChoice(
+	choice: string,
+	ctx: ExtensionContext,
+	effective: VisionConfig,
+	persisted: VisionConfig,
+	env: EnvFlags,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<InteractiveChoiceResult> {
+	const handlers = new Map<string, InteractiveHandler>([
+		["Mode:", async () => ({
+			modeChanged: await handleInteractiveMode(ctx, persisted, env, writePersisted),
+			toolChanged: false,
+		})],
+		["Model:", async () => {
+			await handleInteractiveModel(ctx, persisted, writePersisted, !!env.model);
+			return { modeChanged: false, toolChanged: false };
+		}],
+		["Include context", async () => {
+			await handleInteractiveContext(ctx, persisted, env, writePersisted, effective);
+			return { modeChanged: false, toolChanged: false };
+		}],
+		["Tool:", async () => ({
+			modeChanged: false,
+			toolChanged: await handleInteractiveTool(ctx, persisted, env, writePersisted, effective),
+		})],
+		["Max images", async () => {
+			await handleInteractiveNumeric(ctx, persisted, "maxImagesPerCall", env, writePersisted, effective, "maxImagesPerCall", "Max images per call", 1, 20);
+			return { modeChanged: false, toolChanged: false };
+		}],
+		["Max batch", async () => {
+			await handleInteractiveNumeric(ctx, persisted, "maxBatch", env, writePersisted, effective, "maxBatch", "Max batch", 1, 10);
+			return { modeChanged: false, toolChanged: false };
+		}],
+		["Cache size", async () => {
+			await handleInteractiveNumeric(ctx, persisted, "cacheSize", env, writePersisted, effective, "cacheSize", "Cache size", 0, 500);
+			return { modeChanged: false, toolChanged: false };
+		}],
+	]);
+	for (const [prefix, handler] of handlers) {
+		if (choice.startsWith(prefix)) return await handler();
+	}
+	return { modeChanged: false, toolChanged: false };
+}
+
+async function handleInteractiveConfig(
+	ctx: ExtensionContext,
+	effective: VisionConfig,
+	persisted: VisionConfig,
+	env: EnvFlags,
+	writePersisted: (next: VisionConfig) => VisionConfig,
+): Promise<InteractiveChoiceResult> {
+	const friendlyEffective = friendlyModelLabel(effective, ctx.modelRegistry);
+	const summary =
+		`Vision proxy: ${modeLabel(effective.mode)}\n` +
+		`Model: ${friendlyEffective}\n` +
+		`Include context: ${toggleLabel(effective.includeContext)}\n` +
+		`Tool: ${effective.tool}\n` +
+		`Max images/call: ${effective.maxImagesPerCall}\n` +
+		`Max batch: ${effective.maxBatch}\n` +
+		`Cache size: ${effective.cacheSize}\n` +
+		`Env overrides: ${formatEnvOverrides(env)}\n`;
+
+	if (!ctx.hasUI) {
+		ctx.ui.notify(
+			summary +
+				`\nCommands: /vision-proxy fallback|always|off | pick | model provider/model-id | context on|off | tool on|off | max-images-per-call <n> | max-batch <n> | cache-size <n>`,
+			"info",
+		);
+		return { modeChanged: false, toolChanged: false };
+	}
+
+	const choice = (await ctx.ui.select("Vision Proxy Configuration", [
+		`Mode: ${effective.mode}`,
+		`Model: ${friendlyEffective}`,
+		`Include context: ${toggleLabel(effective.includeContext)}`,
+		`Tool: ${effective.tool}`,
+		`Max images/call: ${effective.maxImagesPerCall}`,
+		`Max batch: ${effective.maxBatch}`,
+		`Cache size: ${effective.cacheSize}`,
+	])) as string;
+
+	return await runInteractiveChoice(choice, ctx, effective, persisted, env, writePersisted);
+}
+
 // ── Extension ──────────────────────────────────────────────────────────────
 export default function (pi: ExtensionAPI) {
 
@@ -2083,61 +2292,14 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// ── Interactive config ──────────────────────────────
-		const friendlyEffective = friendlyModelLabel(effective, ctx.modelRegistry);
-		const summary =
-			`Vision proxy: ${modeLabel(effective.mode)}\n` +
-			`Model: ${friendlyEffective}\n` +
-			`Include context: ${effective.includeContext ? "ON" : "OFF"}\n` +
-			`Tool: ${effective.tool}\n` +
-			`Max images/call: ${effective.maxImagesPerCall}\n` +
-			`Max batch: ${effective.maxBatch}\n` +
-			`Cache size: ${effective.cacheSize}\n` +
-			(env.mode || env.model || env.context
-				? `Env overrides: ${[env.mode && "mode", env.model && "model", env.context && "context", env.tool && "tool", env.maxImagesPerCall && "maxImagesPerCall", env.maxBatch && "maxBatch", env.cacheSize && "cacheSize"].filter(Boolean).join(", ")}\n`
-				: "");
-
-		if (!ctx.hasUI) {
-			ctx.ui.notify(
-				summary +
-					`\nCommands: /vision-proxy fallback|always|off | pick | model provider/model-id | context on|off | tool on|off | max-images-per-call <n> | max-batch <n> | cache-size <n>`,
-				"info",
-			);
-			return;
-		}
-
-		const choice = await ctx.ui.select("Vision Proxy Configuration", [
-			`Mode: ${effective.mode}`,
-			`Model: ${friendlyEffective}`,
-			`Include context: ${effective.includeContext ? "ON" : "OFF"}`,
-			`Tool: ${effective.tool}`,
-			`Max images/call: ${effective.maxImagesPerCall}`,
-			`Max batch: ${effective.maxBatch}`,
-			`Cache size: ${effective.cacheSize}`,
-		]);
-
-		if (!choice) return;
-
-		if (choice.startsWith("Mode:")) {
-			if (env.mode) {
-				ctx.ui.notify(
-					"[vision-proxy] Env override active for mode.",
-					"warning",
-				);
-				return;
-			}
-			const modeChoice = await ctx.ui.select("Select mode", [
-				"fallback",
-				"always",
-				"off",
-			]);
-			if (
-				modeChoice !== "fallback" &&
-				modeChoice !== "always" &&
-				modeChoice !== "off"
-			)
-				return;
-			const next = writePersisted({ ...persisted, mode: modeChoice });
-			ctx.ui.notify(`Mode set to: ${next.mode}`, "info");
+		const { modeChanged, toolChanged } = await handleInteractiveConfig(
+			ctx,
+			effective,
+			persisted,
+			env,
+			writePersisted,
+		);
+		if (modeChanged || toolChanged) {
 			syncToolRegistration(
 				resolveConfig(
 					ctx.sessionManager.getEntries(),
@@ -2145,127 +2307,8 @@ export default function (pi: ExtensionAPI) {
 					_fileConfig,
 				),
 			);
-			return;
-		}
-
-		if (choice.startsWith("Model:")) {
-			await pickVisionModel(ctx, persisted, writePersisted, !!env.model);
-			return;
-		}
-
-		if (choice.startsWith("Include context")) {
-			if (env.context) {
-				ctx.ui.notify(
-					"[vision-proxy] Env override active for context.",
-					"warning",
-				);
-				return;
-			}
-			const next = writePersisted({
-				...persisted,
-				includeContext: !effective.includeContext,
-			});
-			ctx.ui.notify(
-				`Include context: ${next.includeContext ? "ON" : "OFF"}`,
-				next.includeContext ? "info" : "warning",
-			);
-			return;
-		}
-
-		if (choice.startsWith("Tool:")) {
-			if (env.tool) {
-				ctx.ui.notify(
-					"[vision-proxy] Env override active for tool.",
-					"warning",
-				);
-				return;
-			}
-			const nextTool = effective.tool === "on" ? "off" : "on";
-			writePersisted({ ...persisted, tool: nextTool });
-			syncToolRegistration(
-				resolveConfig(
-					ctx.sessionManager.getEntries(),
-					process.env,
-					_fileConfig,
-				),
-			);
-			ctx.ui.notify(
-				`Tool: ${nextTool}`,
-				nextTool === "on" ? "info" : "warning",
-			);
-			return;
-		}
-
-		if (choice.startsWith("Max images")) {
-			if (env.maxImagesPerCall) {
-				ctx.ui.notify(
-					"[vision-proxy] Env override active for max-images-per-call.",
-					"warning",
-				);
-				return;
-			}
-			const val = await ctx.ui.input(
-				"Max images per call (1-20)",
-				String(effective.maxImagesPerCall),
-			);
-			if (!val) return;
-			const n = Number.parseInt(val, 10);
-			if (!Number.isFinite(n) || n < 1 || n > 20) {
-				ctx.ui.notify("Value must be 1-20.", "warning");
-				return;
-			}
-			writePersisted({ ...persisted, maxImagesPerCall: n });
-			ctx.ui.notify(`Max images/call: ${n}`, "info");
-			return;
-		}
-
-		if (choice.startsWith("Max batch")) {
-			if (env.maxBatch) {
-				ctx.ui.notify(
-					"[vision-proxy] Env override active for max-batch.",
-					"warning",
-				);
-				return;
-			}
-			const val = await ctx.ui.input(
-				"Max batch (1-10)",
-				String(effective.maxBatch),
-			);
-			if (!val) return;
-			const n = Number.parseInt(val, 10);
-			if (!Number.isFinite(n) || n < 1 || n > 10) {
-				ctx.ui.notify("Value must be 1-10.", "warning");
-				return;
-			}
-			writePersisted({ ...persisted, maxBatch: n });
-			ctx.ui.notify(`Max batch: ${n}`, "info");
-			return;
-		}
-
-		if (choice.startsWith("Cache size")) {
-			if (env.cacheSize) {
-				ctx.ui.notify(
-					"[vision-proxy] Env override active for cache-size.",
-					"warning",
-				);
-				return;
-			}
-			const val = await ctx.ui.input(
-				"Cache size (0-500)",
-				String(effective.cacheSize),
-			);
-			if (!val) return;
-			const n = Number.parseInt(val, 10);
-			if (!Number.isFinite(n) || n < 0 || n > 500) {
-				ctx.ui.notify("Value must be 0-500.", "warning");
-				return;
-			}
-			writePersisted({ ...persisted, cacheSize: n });
-			ctx.ui.notify(`Cache size: ${n}`, "info");
-			return;
 		}
 	};
-
 	// Register only /vision-proxy command
 	pi.registerCommand("vision-proxy", {
 		description: "Configure vision proxy (images — mode, model, context, tool)",

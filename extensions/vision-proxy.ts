@@ -737,7 +737,223 @@ async function analyzeImages(
 
 // ── analyze_image tool handler ─────────────────────────────────────────────
 
-// fallow-ignore-next-line complexity
+type ResolvedModel = NonNullable<ReturnType<ExtensionAPI["modelRegistry"]["find"]>>;
+
+function validateAnalyzeQuestion(question: string): string | undefined {
+	if (question && question.trim().length > 0) {
+		if (question.length > 4000) {
+			return "Error: question must be at most 4000 characters.";
+		}
+		return undefined;
+	}
+	return "Error: question is required and must be non-empty.";
+}
+
+function visionModelDisplayName(
+	model: ResolvedModel,
+	provider: string,
+	modelId: string,
+): string {
+	return model.name ? model.name : modelLabel({ provider, modelId });
+}
+
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+function buildAnalyzeCacheKey(
+	imagePayloads: ImagePayload[],
+	crops: CropEntry[] | undefined,
+	question: string,
+	modelRef: string,
+): string {
+	const orderedHashes = imagePayloads.map((p) => p.hash);
+	const cropSig = crops?.length
+		? imagePayloads.map((p) => (p.crop ? cropSignature(p.crop) : "full")).join("+")
+		: undefined;
+	return buildToolCacheKey(orderedHashes, cropSig, hashImageData(question), modelRef);
+}
+
+function parseModelOverride(
+	config: VisionConfig,
+	modelOverride: string | undefined,
+): { provider: string; modelId: string; error?: undefined } | { error: string } {
+	if (!modelOverride) {
+		return { provider: config.provider, modelId: config.modelId };
+	}
+	const parsed = parseModelString(modelOverride);
+	if (!parsed) {
+		return {
+			error: `Error: invalid model string "${modelOverride}". Expected format: provider/model-id`,
+		};
+	}
+	return { provider: parsed.provider, modelId: parsed.modelId };
+}
+
+async function resolveVisionModel(
+	config: VisionConfig,
+	modelOverride: string | undefined,
+	ctx: ExtensionContext,
+): Promise<
+	| { ok: true; provider: string; modelId: string; model: ResolvedModel }
+	| { ok: false; error: string }
+> {
+	const parsed = parseModelOverride(config, modelOverride);
+	if ("error" in parsed) {
+		return { ok: false, error: parsed.error };
+	}
+	const { provider, modelId } = parsed;
+	const model = ctx.modelRegistry.find(provider, modelId);
+	if (!model) {
+		return {
+			ok: false,
+			error: `Error: model "${provider}/${modelId}" not found in registry. Use /vision-proxy pick to choose a vision model.`,
+		};
+	}
+	if (!model.input.includes("image")) {
+		return {
+			ok: false,
+			error: `Error: model "${visionModelDisplayName(model, provider, modelId)}" does not support image input.`,
+		};
+	}
+	return { ok: true, provider, modelId, model };
+}
+
+async function fetchVisionAuth(
+	model: ResolvedModel,
+	provider: string,
+	modelId: string,
+	ctx: ExtensionContext,
+): Promise<
+	| { ok: true; apiKey: string; headers: Record<string, string> }
+	| { ok: false; error: string }
+> {
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	if (!auth.ok || !auth.apiKey) {
+		return {
+			ok: false,
+			error: `Error: no API key for ${visionModelDisplayName(model, provider, modelId)}. Run: pi --login ${provider}`,
+		};
+	}
+	return { ok: true, apiKey: auth.apiKey, headers: auth.headers };
+}
+
+function processVisionResponse(
+	response: Awaited<ReturnType<typeof callVisionModel>>,
+	imagePayloads: ImagePayload[],
+	groundingFormat: GroundingFormat,
+	cacheKey: string,
+): { ok: true; result: string } | { ok: false; error: string } {
+	if (response.stopReason === "aborted") {
+		return { ok: false, error: "Error: analysis was cancelled." };
+	}
+	const text = extractTextFromResponse(response);
+	if (!text) {
+		return { ok: false, error: "Error: vision model returned an empty response." };
+	}
+	const result = buildAnalyzeResult(imagePayloads, text, groundingFormat);
+	_toolCache.set(cacheKey, result);
+	return { ok: true, result };
+}
+
+async function completeVisionAnalysis(
+	model: ResolvedModel,
+	provider: string,
+	modelId: string,
+	imagePayloads: ImagePayload[],
+	question: string,
+	groundingFormat: GroundingFormat,
+	cacheKey: string,
+	config: VisionConfig,
+	ctx: ExtensionContext,
+): Promise<{ ok: true; result: string; latencyMs: number } | { ok: false; error: string }> {
+	ctx.ui.notify(
+		`[vision-proxy] Analyzing ${pluralImages(imagePayloads.length)} via ${visionModelDisplayName(model, provider, modelId)}…`,
+		"info",
+	);
+	const authResult = await fetchVisionAuth(model, provider, modelId, ctx);
+	if (!authResult.ok) return authResult;
+	const systemPrompt = config.systemPrompt + buildGroundingInstruction(groundingFormat);
+	const contentParts = buildVisionPrompt(imagePayloads, question);
+
+	try {
+		const startTime = Date.now();
+		const response = await callVisionModel(
+			model,
+			systemPrompt,
+			contentParts,
+			{ apiKey: authResult.apiKey, headers: authResult.headers, signal: ctx.signal },
+		);
+		const latencyMs = Date.now() - startTime;
+		const processed = processVisionResponse(response, imagePayloads, groundingFormat, cacheKey);
+		if (!processed.ok) return processed;
+		return { ok: true, result: processed.result, latencyMs };
+	} catch (err) {
+		return {
+			ok: false,
+			error: `Error: vision model call failed: ${errorMessage(err)}`,
+		};
+	}
+}
+
+async function resolveAnalyzeSetup(
+	params: {
+		images: string[];
+		question: string;
+		model?: string;
+		crop?: CropEntry[];
+	},
+	config: VisionConfig,
+	ctx: ExtensionContext,
+): Promise<
+	| {
+			ok: true;
+			visionModel: ResolvedModel;
+			visionProvider: string;
+			visionModelId: string;
+			modelRef: string;
+			imagePayloads: ImagePayload[];
+			anyCropApplied: boolean;
+			groundingFormat: GroundingFormat;
+			cacheKey: string;
+		}
+	| { ok: false; error: string }
+> {
+	const { images: imageRefs, question, model: modelOverride, crop: crops } = params;
+
+	const validationError = validateAnalyzeQuestion(question);
+	if (validationError) return { ok: false, error: validationError };
+
+	const modelResult = await resolveVisionModel(config, modelOverride, ctx);
+	if (!modelResult.ok) return { ok: false, error: modelResult.error };
+	const { provider: visionProvider, modelId: visionModelId, model: visionModel } = modelResult;
+	const modelRef = `${visionProvider}/${visionModelId}`;
+
+	const payloadsResult = await resolveImagePayloads(
+		imageRefs,
+		crops,
+		config.maxImagesPerCall,
+		ctx,
+	);
+	if (!payloadsResult.ok) return { ok: false, error: `Error: ${payloadsResult.error}` };
+	const { payloads: imagePayloads, anyCropApplied } = payloadsResult;
+
+	const groundingFormat = getGroundingFormat(config, visionProvider, visionModelId);
+	const cacheKey = buildAnalyzeCacheKey(imagePayloads, crops, question, modelRef);
+
+	return {
+		ok: true,
+		visionModel,
+		visionProvider,
+		visionModelId,
+		modelRef,
+		imagePayloads,
+		anyCropApplied,
+		groundingFormat,
+		cacheKey,
+	};
+}
+
 async function handleAnalyzeImage(
 	params: {
 		images: string[];
@@ -750,94 +966,31 @@ async function handleAnalyzeImage(
 	pi: ExtensionAPI,
 	config: VisionConfig,
 ): Promise<string> {
+	const { question, reason, crop: crops } = params;
+	const setup = await resolveAnalyzeSetup(params, config, ctx);
+	if (!setup.ok) return setup.error;
+
 	const {
-		images: imageRefs,
-		question,
-		model: modelOverride,
-		crop: crops,
-		reason,
-	} = params;
-
-	if (!question || question.trim().length === 0) {
-		return "Error: question is required and must be non-empty.";
-	}
-	if (question.length > 4000) {
-		return "Error: question must be at most 4000 characters.";
-	}
-	// Resolve model (override or default)
-	let visionProvider = config.provider;
-	let visionModelId = config.modelId;
-	if (modelOverride) {
-		const parsed = parseModelString(modelOverride);
-		if (!parsed) {
-			return `Error: invalid model string "${modelOverride}". Expected format: provider/model-id`;
-		}
-		visionProvider = parsed.provider;
-		visionModelId = parsed.modelId;
-	}
-
-	// Verify model exists and supports images
-	const visionModel = ctx.modelRegistry.find(visionProvider, visionModelId);
-	if (!visionModel) {
-		return `Error: model "${visionProvider}/${visionModelId}" not found in registry. Use /vision-proxy pick to choose a vision model.`;
-	}
-	if (!visionModel.input.includes("image")) {
-		return `Error: model "${visionModel.name ?? visionModelId}" does not support image input.`;
-	}
-
-	const entries = ctx.sessionManager.getEntries();
-
-	const payloadsResult = await resolveImagePayloads(
-		imageRefs,
-		crops,
-		config.maxImagesPerCall,
-		ctx,
-	);
-	if (!payloadsResult.ok) return `Error: ${payloadsResult.error}`;
-	const { payloads: imagePayloads, anyCropApplied } = payloadsResult;
-
-	// Build grounding instruction (needed for cache hit telemetry too)
-	const groundingFormat = getGroundingFormat(
-		config,
+		visionModel,
 		visionProvider,
 		visionModelId,
-	);
+		modelRef,
+		imagePayloads,
+		anyCropApplied,
+		groundingFormat,
+		cacheKey,
+	} = setup;
 
-	// Build cache key AFTER crop resolution (so failed crops don't create stale crop keys)
-	// Uses original order — different order = different cache entry,
-	// since the prompt refers to images by index
-	const orderedHashes = imagePayloads.map((p) => p.hash);
-	const cropSig = crops?.length
-		? imagePayloads
-				.map((p) => (p.crop ? cropSignature(p.crop) : "full"))
-				.join("+")
-		: undefined;
-	const questionHash = hashImageData(question);
-	const cacheKey = buildToolCacheKey(
-		orderedHashes,
-		cropSig,
-		questionHash,
-		`${visionProvider}/${visionModelId}`,
-	);
-
-	// Check cache
 	const cached = _toolCache.get(cacheKey);
 	if (cached) {
-		// Log telemetry for cache hit
-		pi.appendEntry(CUSTOM_TYPE_COMMAND, {
+		logAnalyzeTelemetry(pi, {
 			command: "analyze_image",
-			images: orderedHashes,
-			cropForm: crops?.length
-				? crops[0].region
-					? "region"
-					: crops[0].normalized
-						? "normalized"
-						: "pixels"
-				: "none",
-			cropApplied: false,
-			question: sanitizeForLog(question),
-			reason: reason ? sanitizeForLog(reason) : undefined,
-			model: `${visionProvider}/${visionModelId}`,
+			images: imagePayloads.map((p) => p.hash),
+			crops,
+			anyCropApplied: false,
+			question,
+			reason,
+			model: modelRef,
 			latencyMs: 0,
 			cacheHit: true,
 			groundingFormat,
@@ -845,90 +998,32 @@ async function handleAnalyzeImage(
 		return cached;
 	}
 
-	// Call vision model
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(visionModel);
-	if (!auth.ok || !auth.apiKey) {
-		return `Error: no API key for ${visionModel.name ?? modelLabel({ provider: visionProvider, modelId: visionModelId })}. Run: pi --login ${visionProvider}`;
-	}
-
-	ctx.ui.notify(
-		`[vision-proxy] Analyzing ${pluralImages(imagePayloads.length)} via ${visionModel.name ?? modelLabel({ provider: visionProvider, modelId: visionModelId })}…`,
-		"info",
+	const requestResult = await completeVisionAnalysis(
+		visionModel,
+		visionProvider,
+		visionModelId,
+		imagePayloads,
+		question,
+		groundingFormat,
+		cacheKey,
+		config,
+		ctx,
 	);
+	if (!requestResult.ok) return requestResult.error;
 
-	// Build grounding instruction
-	const groundingInstruction = buildGroundingInstruction(groundingFormat);
-	const systemPrompt = config.systemPrompt + groundingInstruction;
-
-	// Build the user message content
-	const contentParts = buildVisionPrompt(imagePayloads, question);
-
-	try {
-		const startTime = Date.now();
-		const response = await callVisionModel(
-			visionModel,
-			systemPrompt,
-			contentParts,
-			{ apiKey: auth.apiKey, headers: auth.headers, signal: ctx.signal },
-		);
-		const latencyMs = Date.now() - startTime;
-
-		if (response.stopReason === "aborted") {
-			return "Error: analysis was cancelled.";
-		}
-
-		const text = extractTextFromResponse(response);
-
-		if (!text) {
-			return "Error: vision model returned an empty response.";
-		}
-
-		// Build result fence(s)
-		let result: string;
-		if (imagePayloads.length === 1) {
-			const p = imagePayloads[0];
-			result = buildAnalysisFence(
-				p.hash,
-				text,
-				p.meta,
-				p.crop,
-				groundingFormat !== "none" ? groundingFormat : undefined,
-			);
-		} else {
-			result = buildJointDescriptionFence(
-				imagePayloads.map((p) => ({ hash: p.hash, meta: p.meta })),
-				text,
-				groundingFormat !== "none" ? groundingFormat : undefined,
-			);
-		}
-
-		// Cache the result
-		_toolCache.set(cacheKey, result);
-
-		// Log telemetry
-		pi.appendEntry(CUSTOM_TYPE_COMMAND, {
-			command: "analyze_image",
-			images: orderedHashes,
-			cropForm: crops?.length
-				? crops[0].region
-					? "region"
-					: crops[0].normalized
-						? "normalized"
-						: "pixels"
-				: "none",
-			cropApplied: anyCropApplied,
-			question: sanitizeForLog(question),
-			reason: reason ? sanitizeForLog(reason) : undefined,
-			model: `${visionProvider}/${visionModelId}`,
-			latencyMs,
-			cacheHit: false,
-			groundingFormat,
-		});
-
-		return result;
-	} catch (err) {
-		return `Error: vision model call failed: ${err instanceof Error ? err.message : String(err)}`;
-	}
+	logAnalyzeTelemetry(pi, {
+		command: "analyze_image",
+		images: imagePayloads.map((p) => p.hash),
+		crops,
+		anyCropApplied,
+		question,
+		reason,
+		model: modelRef,
+		latencyMs: requestResult.latencyMs,
+		cacheHit: false,
+		groundingFormat,
+	});
+	return requestResult.result;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

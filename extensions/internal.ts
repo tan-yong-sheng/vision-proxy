@@ -368,28 +368,13 @@ export function parseDescribeArgs(
 /**
  * Tokenize a command string, respecting double-quoted strings.
  */
-// fallow-ignore-next-line complexity
 function tokenizeArgs(input: string): string[] {
-	const tokens: string[] = [];
-	let current = "";
-	let inQuote = false;
-	for (let i = 0; i < input.length; i++) {
-		const ch = input[i];
-		if (ch === '"') {
-			inQuote = !inQuote;
-			continue;
-		}
-		if (ch === " " && !inQuote) {
-			if (current) {
-				tokens.push(current);
-				current = "";
-			}
-			continue;
-		}
-		current += ch;
-	}
-	if (current) tokens.push(current);
-	return tokens;
+	const matches = input.match(/"(?:[^"])*"|\S+/g) ?? [];
+	return matches.map((m) =>
+		m.length >= 2 && m[0] === '"' && m[m.length - 1] === '"'
+			? m.slice(1, -1)
+			: m,
+	);
 }
 
 /** Parse 4 comma-separated numbers from a string after a prefix. */
@@ -403,60 +388,65 @@ function parse4Numbers(
 	return parts as unknown as number[];
 }
 
+/** Parse the `<image_index>:<form>` prefix of a crop argument. */
+function parseCropIndex(arg: string): { idx: number; form: string } | string {
+	const colonIdx = arg.indexOf(":");
+	if (colonIdx < 0) {
+		return "Error: --crop format is <image_index>:<form>. Example: --crop 0:r=top-right";
+	}
+	const idxStr = arg.slice(0, colonIdx);
+	const idx = Number.parseInt(idxStr, 10);
+	if (!Number.isFinite(idx) || idx < 0) {
+		return `Error: invalid image_index "${idxStr}". Must be a non-negative integer.`;
+	}
+	return { idx, form: arg.slice(colonIdx + 1) };
+}
+
+/** Parse a named-region crop form. */
+function parseRegionCrop(form: string, idx: number): CropEntry | string {
+	const region = form.slice(2);
+	if (!isValidNamedRegion(region)) {
+		return `Error: unknown region "${region}". Valid: top-left, top-right, bottom-left, bottom-right, top, bottom, left, right, center, top-half, bottom-half, left-half, right-half.`;
+	}
+	return { image_index: idx, region: region as NamedRegion };
+}
+
+/** Parse a numeric crop form (normalized or pixel). */
+function parseNumbersCrop(
+	form: string,
+	prefix: "n=" | "p=",
+	kind: "normalized" | "pixels",
+	idx: number,
+): CropEntry | string {
+	const parts = parse4Numbers(form, prefix);
+	if (typeof parts === "string") return parts;
+	return {
+		image_index: idx,
+		[kind]: {
+			x: parts[0]!,
+			y: parts[1]!,
+			width: parts[2]!,
+			height: parts[3]!,
+		},
+	} as unknown as CropEntry;
+}
+
+/** Parse the form portion of a crop argument. */
+function parseCropForm(form: string, idx: number): CropEntry | string {
+	if (form.startsWith("r=")) return parseRegionCrop(form, idx);
+	if (form.startsWith("n=")) return parseNumbersCrop(form, "n=", "normalized", idx);
+	if (form.startsWith("p=")) return parseNumbersCrop(form, "p=", "pixels", idx);
+	return `Error: unknown crop form "${form}". Use r=<region>, n=<x>,<y>,<w>,<h>, or p=<x>,<y>,<w>,<h>.`;
+}
+
 /**
  * Parse a --crop argument: `<image_index>:<form>`
  * Forms: `r=<region>`, `n=<x>,<y>,<w>,<h>`, `p=<x>,<y>,<w>,<h>`
  */
-// fallow-ignore-next-line complexity
 function parseCropArg(arg: string): CropEntry | string {
-	const colonIdx = arg.indexOf(":");
-	if (colonIdx < 0)
-		return "Error: --crop format is <image_index>:<form>. Example: --crop 0:r=top-right";
-	const idxStr = arg.slice(0, colonIdx);
-	const idx = Number.parseInt(idxStr, 10);
-	if (!Number.isFinite(idx) || idx < 0)
-		return `Error: invalid image_index "${idxStr}". Must be a non-negative integer.`;
-	const form = arg.slice(colonIdx + 1);
-
-	// Named region: r=<name>
-	if (form.startsWith("r=")) {
-		const region = form.slice(2);
-		if (!isValidNamedRegion(region))
-			return `Error: unknown region "${region}". Valid: top-left, top-right, bottom-left, bottom-right, top, bottom, left, right, center, top-half, bottom-half, left-half, right-half.`;
-		return { image_index: idx, region: region as NamedRegion };
-	}
-
-	// Normalized: n=<x>,<y>,<w>,<h>
-	if (form.startsWith("n=")) {
-		const parts = parse4Numbers(form, "n=");
-		if (typeof parts === "string") return parts;
-		return {
-			image_index: idx,
-			normalized: {
-				x: parts[0]!,
-				y: parts[1]!,
-				width: parts[2]!,
-				height: parts[3]!,
-			},
-		};
-	}
-
-	// Pixels: p=<x>,<y>,<w>,<h>
-	if (form.startsWith("p=")) {
-		const parts = parse4Numbers(form, "p=");
-		if (typeof parts === "string") return parts;
-		return {
-			image_index: idx,
-			pixels: {
-				x: parts[0]!,
-				y: parts[1]!,
-				width: parts[2]!,
-				height: parts[3]!,
-			},
-		};
-	}
-
-	return `Error: unknown crop form "${form}". Use r=<region>, n=<x>,<y>,<w>,<h>, or p=<x>,<y>,<w>,<h>.`;
+	const parsed = parseCropIndex(arg);
+	if (typeof parsed === "string") return parsed;
+	return parseCropForm(parsed.form, parsed.idx);
 }
 
 const RECENT_MESSAGE_COUNT = 8;
@@ -522,8 +512,16 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"groundingModels",
 ]);
 
+/** Filter a parsed config object to known persisted keys only. */
+function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
+	const filtered: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(parsed)) {
+		if (PERSISTED_CONFIG_KEYS.has(k)) filtered[k] = v;
+	}
+	return filtered as Partial<VisionConfig>;
+}
+
 /** Read config from the persistent file. Returns empty object on any failure. */
-// fallow-ignore-next-line complexity
 export async function readPersistentFile(
 	agentDir?: string,
 ): Promise<Partial<VisionConfig>> {
@@ -533,11 +531,7 @@ export async function readPersistentFile(
 		const parsed = JSON.parse(raw);
 		if (parsed && typeof parsed === "object") {
 			// Filter to known keys only — prevents prototype pollution or unexpected properties
-			const filtered: Record<string, unknown> = {};
-			for (const [k, v] of Object.entries(parsed)) {
-				if (PERSISTED_CONFIG_KEYS.has(k)) filtered[k] = v;
-			}
-			return filtered as Partial<VisionConfig>;
+			return filterKnownConfigKeys(parsed);
 		}
 	} catch {
 		// file doesn't exist or is invalid
@@ -560,79 +554,138 @@ export async function writePersistentFile(
 }
 
 // ── Config resolution ──────────────────────────────────────────────────────
-// fallow-ignore-next-line complexity
+/** Determine whether a session entry is a persisted vision config entry. */
+function isConfigEntry(entry: SessionEntry | undefined): entry is SessionEntry & {
+	type: "custom";
+	customType: typeof CUSTOM_TYPE_CONFIG;
+	data: unknown;
+} {
+	if (!entry) return false;
+	if (entry.type !== "custom") return false;
+	if (entry.customType !== CUSTOM_TYPE_CONFIG) return false;
+	return !!entry.data;
+}
+
 function readPersistedConfig(
 	entries: readonly SessionEntry[],
 ): Partial<VisionConfig> {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		if (
-			entry?.type === "custom" &&
-			entry.customType === CUSTOM_TYPE_CONFIG &&
-			entry.data
-		) {
+		if (isConfigEntry(entry)) {
 			return entry.data as Partial<VisionConfig>;
 		}
 	}
 	return {};
 }
 
-// fallow-ignore-next-line complexity
+const FALSE_STRINGS = new Set(["0", "false", "no", "off"]);
+const TRUE_STRINGS = new Set(["1", "true", "yes", "on"]);
+
+/** Assign a value to an object only when it is not undefined. */
+function assignIfDefined<T extends object, K extends keyof T>(
+	target: T,
+	key: K,
+	value: T[K] | undefined,
+): void {
+	if (value !== undefined) {
+		target[key] = value;
+	}
+}
+
+function parseModeOverride(value: string | undefined): ProxyMode | undefined {
+	if (value === "fallback" || value === "always" || value === "off") return value;
+	return undefined;
+}
+
+function parseModelOverride(
+	value: string | undefined,
+): { provider: string; modelId: string } | undefined {
+	if (!value) return undefined;
+	const parsed = parseModelString(value);
+	if (!parsed) return undefined;
+	return parsed;
+}
+
+function parseBooleanOverride(value: string | undefined): boolean | undefined {
+	if (value === undefined) return undefined;
+	const v = value.toLowerCase();
+	if (FALSE_STRINGS.has(v)) return false;
+	if (TRUE_STRINGS.has(v)) return true;
+	return undefined;
+}
+
+function parseToolOverride(value: string | undefined): ToolSetting | undefined {
+	if (value === "on" || value === "off") return value;
+	return undefined;
+}
+
+/** Determine whether a parsed number is outside the allowed range. */
+function isOutOfRange(n: number, min: number, max: number): boolean {
+	if (!Number.isFinite(n)) return true;
+	if (n < min) return true;
+	if (n > max) return true;
+	return false;
+}
+
+function parseIntOverride(
+	value: string | undefined,
+	min: number,
+	max: number,
+): number | undefined {
+	if (value === undefined) return undefined;
+	const n = Number.parseInt(value, 10);
+	if (isOutOfRange(n, min, max)) return undefined;
+	return n;
+}
+
+function parseFloatOverride(
+	value: string | undefined,
+	min: number,
+	max: number,
+): number | undefined {
+	if (value === undefined) return undefined;
+	const n = parseFloat(value);
+	if (isOutOfRange(n, min, max)) return undefined;
+	return n;
+}
+
 export function readEnvOverrides(
 	env: NodeJS.ProcessEnv = process.env,
 ): Partial<VisionConfig> {
 	const overrides: Partial<VisionConfig> = {};
 
-	const modeEnv = env.PI_VISION_PROXY_MODE;
-	if (modeEnv === "fallback" || modeEnv === "always" || modeEnv === "off") {
-		overrides.mode = modeEnv;
+	assignIfDefined(overrides, "mode", parseModeOverride(env.PI_VISION_PROXY_MODE));
+	const modelOverride = parseModelOverride(env.PI_VISION_PROXY_MODEL);
+	if (modelOverride) {
+		assignIfDefined(overrides, "provider", modelOverride.provider);
+		assignIfDefined(overrides, "modelId", modelOverride.modelId);
 	}
-
-	const modelEnv = env.PI_VISION_PROXY_MODEL;
-	if (modelEnv) {
-		const parsed = parseModelString(modelEnv);
-		if (parsed) {
-			overrides.provider = parsed.provider;
-			overrides.modelId = parsed.modelId;
-		}
-	}
-
-	const includeCtx = env.PI_VISION_PROXY_INCLUDE_CONTEXT;
-	if (includeCtx !== undefined) {
-		const v = includeCtx.toLowerCase();
-		if (v === "0" || v === "false" || v === "no" || v === "off")
-			overrides.includeContext = false;
-		else if (v === "1" || v === "true" || v === "yes" || v === "on")
-			overrides.includeContext = true;
-	}
-
-	const toolEnv = env.PI_VISION_PROXY_TOOL;
-	if (toolEnv === "on" || toolEnv === "off") overrides.tool = toolEnv;
-
-	const maxImgEnv = env.PI_VISION_PROXY_MAX_IMAGES_PER_CALL;
-	if (maxImgEnv) {
-		const n = Number.parseInt(maxImgEnv, 10);
-		if (Number.isFinite(n) && n >= 1 && n <= 20) overrides.maxImagesPerCall = n;
-	}
-
-	const maxBatchEnv = env.PI_VISION_PROXY_MAX_BATCH;
-	if (maxBatchEnv) {
-		const n = Number.parseInt(maxBatchEnv, 10);
-		if (Number.isFinite(n) && n >= 1 && n <= 10) overrides.maxBatch = n;
-	}
-
-	const cacheSizeEnv = env.PI_VISION_PROXY_CACHE_SIZE;
-	if (cacheSizeEnv) {
-		const n = Number.parseInt(cacheSizeEnv, 10);
-		if (Number.isFinite(n) && n >= 0 && n <= 500) overrides.cacheSize = n;
-	}
-
-	const phashEnv = env.PI_VISION_PROXY_PHASH_THRESHOLD;
-	if (phashEnv) {
-		const n = parseFloat(phashEnv);
-		if (Number.isFinite(n) && n >= 0 && n <= 1)
-			overrides.pHashSimilarityThreshold = n;
-	}
+	assignIfDefined(
+		overrides,
+		"includeContext",
+		parseBooleanOverride(env.PI_VISION_PROXY_INCLUDE_CONTEXT),
+	);
+	assignIfDefined(overrides, "tool", parseToolOverride(env.PI_VISION_PROXY_TOOL));
+	assignIfDefined(
+		overrides,
+		"maxImagesPerCall",
+		parseIntOverride(env.PI_VISION_PROXY_MAX_IMAGES_PER_CALL, 1, 20),
+	);
+	assignIfDefined(
+		overrides,
+		"maxBatch",
+		parseIntOverride(env.PI_VISION_PROXY_MAX_BATCH, 1, 10),
+	);
+	assignIfDefined(
+		overrides,
+		"cacheSize",
+		parseIntOverride(env.PI_VISION_PROXY_CACHE_SIZE, 0, 500),
+	);
+	assignIfDefined(
+		overrides,
+		"pHashSimilarityThreshold",
+		parseFloatOverride(env.PI_VISION_PROXY_PHASH_THRESHOLD, 0, 1),
+	);
 
 	return overrides;
 }
@@ -657,7 +710,13 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	};
 }
 
-// fallow-ignore-next-line complexity
+/** Validate that provider and modelId strings match their respective patterns. */
+function isValidModelParts(provider: string, modelId: string): boolean {
+	if (!PROVIDER_PATTERN.test(provider)) return false;
+	if (!MODEL_ID_PATTERN.test(modelId)) return false;
+	return true;
+}
+
 export function parseModelString(
 	s: string,
 ): { provider: string; modelId: string } | null {
@@ -665,8 +724,7 @@ export function parseModelString(
 	if (slash <= 0 || slash >= s.length - 1) return null;
 	const provider = s.slice(0, slash);
 	const modelId = s.slice(slash + 1);
-	if (!PROVIDER_PATTERN.test(provider) || !MODEL_ID_PATTERN.test(modelId))
-		return null;
+	if (!isValidModelParts(provider, modelId)) return null;
 	return { provider, modelId };
 }
 
@@ -768,40 +826,74 @@ export function resolveConfig(
 }
 
 // ── Session-entry helpers ──────────────────────────────────────────────────
-// fallow-ignore-next-line complexity
+/** Determine whether a session entry is a description entry with data. */
+function isDescriptionEntry(
+	entry: SessionEntry,
+): entry is SessionEntry & {
+	type: "custom";
+	customType: typeof CUSTOM_TYPE_DESCRIPTION;
+	data: DescriptionEntry;
+} {
+	if (entry.type !== "custom") return false;
+	if (entry.customType !== CUSTOM_TYPE_DESCRIPTION) return false;
+	if (!entry.data) return false;
+	return true;
+}
+
+function hasDescription(d: DescriptionEntry): boolean {
+	if (!d.hash) return false;
+	if (!d.description) return false;
+	return true;
+}
+
 export function findDescriptions(
 	entries: readonly SessionEntry[],
 ): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const entry of entries) {
-		if (
-			entry.type === "custom" &&
-			entry.customType === CUSTOM_TYPE_DESCRIPTION &&
-			entry.data
-		) {
-			const d = entry.data as DescriptionEntry;
-			if (d.hash && d.description) map.set(d.hash, d.description);
+		if (!isDescriptionEntry(entry)) continue;
+		if (hasDescription(entry.data)) {
+			map.set(entry.data.hash, entry.data.description);
 		}
 	}
 	return map;
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────
-// fallow-ignore-next-line complexity
+function isModernPiAiImage(
+	img: PiAiImage | LegacyImage,
+): img is PiAiImage {
+	if (!("data" in img)) return false;
+	if (typeof img.data !== "string") return false;
+	if (typeof (img as PiAiImage).mimeType !== "string") return false;
+	return true;
+}
+
+function legacyImageSource(
+	img: PiAiImage | LegacyImage,
+): LegacyImage["source"] | undefined {
+	return (img as LegacyImage).source;
+}
+
+function isLegacySource(
+	source: LegacyImage["source"] | undefined,
+): boolean {
+	if (!source) return false;
+	if (!source.data) return false;
+	if (!source.mediaType) return false;
+	return true;
+}
+
 export function toPiAiImage(img: PiAiImage | LegacyImage): PiAiImage {
-	if (
-		"data" in img &&
-		typeof img.data === "string" &&
-		typeof (img as PiAiImage).mimeType === "string"
-	) {
+	if (isModernPiAiImage(img)) {
 		return {
 			type: "image",
 			data: img.data,
-			mimeType: (img as PiAiImage).mimeType,
+			mimeType: img.mimeType,
 		};
 	}
-	const legacy = (img as LegacyImage).source;
-	if (legacy?.data && legacy.mediaType) {
+	const legacy = legacyImageSource(img);
+	if (isLegacySource(legacy)) {
 		return { type: "image", data: legacy.data, mimeType: legacy.mediaType };
 	}
 	throw new Error("Unsupported image content shape");
@@ -951,58 +1043,120 @@ function driveAccessDisabled(): boolean {
 	return raw === "0" || raw === "false" || raw === "no" || raw === "off";
 }
 
+/** Resolve a file path to a lowercase canonical string, returning null on failure. */
+async function resolvedPath(filePath: string): Promise<string | null> {
+	try {
+		return (await realpath(filePath)).toLowerCase();
+	} catch {
+		return null;
+	}
+}
+
+/** Check whether a resolved path sits inside a single canonical root. */
+async function insideRoot(
+	resolved: string,
+	root: Promise<string | null>,
+): Promise<boolean> {
+	const r = await root;
+	if (!r) return false;
+	return isInsideOrSame(resolved, r);
+}
+
+function tmpRoot(): Promise<string | null> {
+	return canonical(os.tmpdir?.() ?? "/tmp");
+}
+
+function cwdRoot(): Promise<string | null> {
+	return canonical(process.cwd());
+}
+
+function piRoot(): Promise<string | null> {
+	return canonical(join(os.homedir?.() ?? "/", ".pi")).catch(() => null);
+}
+
+/** Check whether a resolved path sits inside any standard safe root. */
+async function isInsideStandardRoots(resolved: string): Promise<boolean> {
+	if (await insideRoot(resolved, tmpRoot())) return true;
+	if (await insideRoot(resolved, cwdRoot())) return true;
+	if (await insideRoot(resolved, piRoot())) return true;
+	return false;
+}
+
+/** Check whether a resolved path sits inside the home directory when allowed. */
+async function isInsideHomeIfAllowed(resolved: string): Promise<boolean> {
+	if (process.env.PI_VISION_PROXY_ALLOW_HOME !== "1") return false;
+	return insideRoot(resolved, canonical(os.homedir?.()));
+}
+
+/** Check whether local drive access allows the resolved path. */
+function isDriveAllowedPath(resolved: string): boolean {
+	if (driveAccessDisabled()) return false;
+	return isLocalAbsolutePath(resolved);
+}
+
 /**
  * Check that a resolved file path is within a safe directory.
  * By default allows tmpdir, cwd, and local Windows drive paths; opt into homedir
  * on non-drive platforms via PI_VISION_PROXY_ALLOW_HOME=1.
  * Both sides are canonicalized via realpath to handle symlinks and Windows 8.3 short names.
  */
-// fallow-ignore-next-line complexity
 export async function isPathAllowed(filePath: string): Promise<boolean> {
-	let resolved: string;
+	const resolved = await resolvedPath(filePath);
+	if (!resolved) return false;
+	if (await isInsideStandardRoots(resolved)) return true;
+	if (await isInsideHomeIfAllowed(resolved)) return true;
+	return isDriveAllowedPath(resolved);
+}
+
+/** Strip common wrapping characters from an LLM-provided file path. */
+function cleanFilePath(rawPath: string): string {
+	return rawPath
+		.replace(/^[\s"'`[\]\\]+/, "")
+		.replace(/[\s"'`[\]\\]+$/, "")
+		.trim();
+}
+
+type ReadBytesResult =
+	| { ok: true; content: Buffer }
+	| { ok: false; reason: ReadImageResult["reason"]; bytes?: number };
+
+/** Return a size-related failure reason, or undefined if the size is acceptable. */
+function imageSizeReason(content: Buffer): ReadImageResult["reason"] | undefined {
+	if (content.length === 0) return "empty";
+	if (content.length > maxImageFileBytes()) return "too-large";
+	return undefined;
+}
+
+/** Read file bytes and return a structured failure reason if anything is wrong. */
+async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 	try {
-		resolved = (await realpath(filePath)).toLowerCase();
+		await access(filePath);
 	} catch {
-		return false;
+		return { ok: false, reason: "not-found" };
 	}
 
-	const tmp = await canonical(os.tmpdir?.() ?? "/tmp");
-	const cwd = await canonical(process.cwd());
-
-	if (tmp && isInsideOrSame(resolved, tmp)) return true;
-	if (cwd && isInsideOrSame(resolved, cwd)) return true;
-
-	// Always allow ~/.pi (the Pi agent config directory) without requiring PI_VISION_PROXY_ALLOW_HOME.
-	// This is where Pi stores persistent data that agents need to access.
-	const piDir = await canonical(join(os.homedir?.() ?? "/", ".pi")).catch(
-		() => null,
-	);
-	if (piDir && isInsideOrSame(resolved, piDir)) return true;
-
-	if (process.env.PI_VISION_PROXY_ALLOW_HOME === "1") {
-		const home = await canonical(os.homedir?.());
-		if (home && isInsideOrSame(resolved, home)) return true;
+	let content: Buffer;
+	try {
+		content = await readFile(filePath);
+	} catch {
+		return { ok: false, reason: "unreadable" };
 	}
 
-	if (!driveAccessDisabled() && isLocalAbsolutePath(resolved)) return true;
+	const reason = imageSizeReason(content);
+	if (reason) {
+		return { ok: false, reason, bytes: content.length };
+	}
 
-	return false;
+	return { ok: true, content };
 }
 
 /**
  * Read an image file and return as base64 ImageContent with a structured reason on failure.
  */
-// fallow-ignore-next-line complexity
 export async function readImageFileWithReason(
 	rawPath: string,
 ): Promise<ReadImageResult> {
-	// Strip common wrapping: backticks, quotes, brackets, and whitespace.
-	// LLMs frequently wrap paths (e.g. ` /tmp/image.png ` or ["/tmp/image.png"]) which breaks extname().
-	// Extract the actual filesystem path by stripping non-path characters from both ends.
-	const filePath = rawPath
-		.replace(/^[\s"'`[\]\\]+/, "")
-		.replace(/[\s"'`[\]\\]+$/, "")
-		.trim();
+	const filePath = cleanFilePath(rawPath);
 
 	const mimeType = mimeTypeForExt(filePath);
 	if (!mimeType) return { image: null, reason: "not-an-image" };
@@ -1010,26 +1164,16 @@ export async function readImageFileWithReason(
 	if (!(await isPathAllowed(filePath)))
 		return { image: null, reason: "denied" };
 
-	// Check the file exists on disk before attempting to read.
-	try {
-		await access(filePath);
-	} catch {
-		return { image: null, reason: "not-found" };
+	const bytesResult = await readImageBytes(filePath);
+	if (!bytesResult.ok) {
+		return {
+			image: null,
+			reason: bytesResult.reason,
+			bytes: bytesResult.bytes,
+		};
 	}
 
-	let content: Buffer;
-	try {
-		content = await readFile(filePath);
-	} catch {
-		return { image: null, reason: "unreadable" };
-	}
-
-	if (content.length === 0) return { image: null, reason: "empty", bytes: 0 };
-
-	const limit = maxImageFileBytes();
-	if (content.length > limit)
-		return { image: null, reason: "too-large", bytes: content.length };
-
+	const content = bytesResult.content;
 	return {
 		image: { type: "image", data: content.toString("base64"), mimeType },
 		bytes: content.length,
@@ -1135,58 +1279,61 @@ export function escapeAttr(s: string): string {
 }
 
 // ── Conversation context ──────────────────────────────────────────────────
-// fallow-ignore-next-line complexity
+function isTextPart(c: unknown): c is { type: "text"; text: string } {
+	if (!c || typeof c !== "object") return false;
+	if ((c as { type?: string }).type !== "text") return false;
+	return typeof (c as { text?: unknown }).text === "string";
+}
+
+function collectTextParts(content: unknown[]): string[] {
+	const parts: string[] = [];
+	for (const c of content) {
+		if (isTextPart(c)) parts.push(c.text);
+	}
+	return parts;
+}
+
 function extractText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
-	const parts: string[] = [];
-	for (const c of content) {
-		if (
-			c &&
-			typeof c === "object" &&
-			(c as { type?: string }).type === "text"
-		) {
-			const t = (c as { text?: unknown }).text;
-			if (typeof t === "string") parts.push(t);
-		}
-	}
-	return parts.join(" ");
+	return collectTextParts(content).join(" ");
 }
 
-// fallow-ignore-next-line complexity
+function collectRecentMessages(entries: readonly SessionEntry[]): SessionEntry[] {
+	const messages = entries.filter((e) => e.type === "message");
+	return messages.slice(-RECENT_MESSAGE_COUNT);
+}
+
+function messageRole(
+	entry: SessionEntry,
+): { role: string; content: unknown } | null {
+	if (entry.type !== "message") return null;
+	if (!entry.message?.role) return null;
+	return { role: entry.message.role, content: entry.message.content };
+}
+
+function formatMessageLine(entry: SessionEntry): string | null {
+	const msg = messageRole(entry);
+	if (!msg) return null;
+	const text = extractText(msg.content);
+	if (!text) return null;
+	if (msg.role === "user") return `User: ${text}`;
+	return `Assistant: ${text.slice(0, ASSISTANT_TRUNCATE_CHARS)}`;
+}
+
+function truncateContext(result: string): string {
+	if (result.length <= CONTEXT_MAX_CHARS) return result;
+	return "…" + result.slice(-CONTEXT_MAX_CHARS);
+}
+
 export function buildConversationContext(
 	entries: readonly SessionEntry[],
 ): string {
-	const recent: SessionEntry[] = [];
-	for (
-		let i = entries.length - 1;
-		i >= 0 && recent.length < RECENT_MESSAGE_COUNT;
-		i--
-	) {
-		const e = entries[i];
-		if (e && e.type === "message") recent.unshift(e);
-	}
-
-	const lines: string[] = [];
-	for (const entry of recent) {
-		if (entry.type !== "message") continue;
-		const msg = entry.message;
-		if (!msg?.role) continue;
-		if (msg.role === "user") {
-			const text = extractText(msg.content);
-			if (text) lines.push(`User: ${text}`);
-		} else if (msg.role === "assistant") {
-			const text = extractText(msg.content);
-			if (text)
-				lines.push(`Assistant: ${text.slice(0, ASSISTANT_TRUNCATE_CHARS)}`);
-		}
-	}
-
-	let result = lines.join("\n");
-	if (result.length > CONTEXT_MAX_CHARS) {
-		result = "…" + result.slice(-CONTEXT_MAX_CHARS);
-	}
-	return result;
+	const recent = collectRecentMessages(entries);
+	const lines = recent
+		.map(formatMessageLine)
+		.filter((line): line is string => line !== null);
+	return truncateContext(lines.join("\n"));
 }
 
 // ── Display helpers ────────────────────────────────────────────────────────
@@ -1269,7 +1416,40 @@ function safeDimensions(
 	return dims;
 }
 
-// fallow-ignore-next-line complexity
+function backfillFilename(
+	existing: StoredImageMeta,
+	filename: string | undefined,
+): void {
+	if (filename && !existing.filename) {
+		existing.filename = filename;
+	}
+}
+
+/** Decode a base64 header or reuse an already-buffered image. */
+function decodeImageBuffer(imageBufferOrData: Buffer | string): Buffer | undefined {
+	if (Buffer.isBuffer(imageBufferOrData)) {
+		return imageBufferOrData;
+	}
+
+	// Only decode enough for dimension extraction (image-size reads headers only).
+	// Round down to a multiple of 4 (base64 quantum boundary) to avoid corruption.
+	const headerB64 = imageBufferOrData.slice(0, 1400);
+	const aligned = Math.floor(headerB64.length / 4) * 4;
+	if (aligned < 4) return; // too short to decode
+	return Buffer.from(headerB64.slice(0, aligned), "base64");
+}
+
+function storeNewImageMeta(
+	hash: string,
+	buf: Buffer,
+	filename: string | undefined,
+): void {
+	const dims = safeDimensions(buf);
+	if (!dims) return;
+	_imageMeta.set(hash, { width: dims.width, height: dims.height, filename });
+	evictImageMeta();
+}
+
 export function storeImageMeta(
 	hash: string,
 	imageBufferOrData: Buffer | string,
@@ -1277,31 +1457,13 @@ export function storeImageMeta(
 ): void {
 	const existing = _imageMeta.get(hash);
 	if (existing) {
-		// Backfill filename if previously stored without one
-		if (filename && !existing.filename) {
-			existing.filename = filename;
-		}
+		backfillFilename(existing, filename);
 		return;
 	}
 
-	// Avoid full base64 re-decode when a Buffer was already produced by readFile
-	let buf: Buffer;
-	if (Buffer.isBuffer(imageBufferOrData)) {
-		buf = imageBufferOrData;
-	} else {
-		// Only decode enough for dimension extraction (image-size reads headers only).
-		// Round down to a multiple of 4 (base64 quantum boundary) to avoid corruption.
-		const headerB64 = imageBufferOrData.slice(0, 1400);
-		const aligned = Math.floor(headerB64.length / 4) * 4;
-		if (aligned < 4) return; // too short to decode
-		buf = Buffer.from(headerB64.slice(0, aligned), "base64");
-	}
-
-	const dims = safeDimensions(buf);
-	if (dims) {
-		_imageMeta.set(hash, { width: dims.width, height: dims.height, filename });
-		evictImageMeta();
-	}
+	const buf = decodeImageBuffer(imageBufferOrData);
+	if (!buf) return;
+	storeNewImageMeta(hash, buf, filename);
 }
 
 // ── Crop resolution ───────────────────────────────────────────────────────
@@ -1383,11 +1545,78 @@ export function clampPixels(
 	return { x, y, width: w, height: h };
 }
 
+type ResolvedCropResult =
+	| { ok: true; crop: ResolvedCrop }
+	| { ok: false; label: string };
+
+function cropFromRegion(
+	crop: CropEntry,
+	imgWidth: number,
+	imgHeight: number,
+): ResolvedCropResult {
+	const norm = resolveRegion(crop.region);
+	const result = normalizedToPixels(norm, imgWidth, imgHeight);
+	if (!result) {
+		return {
+			ok: false,
+			label: `Region "${crop.region}" produced zero-area crop (image: ${imgWidth}x${imgHeight})`,
+		};
+	}
+	return { ok: true, crop: result };
+}
+
+function cropFromNormalized(
+	crop: CropEntry,
+	imgWidth: number,
+	imgHeight: number,
+): ResolvedCropResult {
+	const result = normalizedToPixels(crop.normalized, imgWidth, imgHeight);
+	if (!result) {
+		return {
+			ok: false,
+			label: `Normalized crop has zero area after clamping (image: ${imgWidth}x${imgHeight})`,
+		};
+	}
+	return { ok: true, crop: result };
+}
+
+function cropFromPixels(
+	crop: CropEntry,
+	imgWidth: number,
+	imgHeight: number,
+): ResolvedCropResult {
+	const result = clampPixels(crop.pixels, imgWidth, imgHeight);
+	if (!result) {
+		return {
+			ok: false,
+			label: `Pixel crop has zero area after clamping (image: ${imgWidth}x${imgHeight})`,
+		};
+	}
+	return { ok: true, crop: result };
+}
+
+function invalidCropResult(): ResolvedCropResult {
+	return {
+		ok: false,
+		label: "Invalid CropEntry: must have exactly one of region, normalized, or pixels",
+	};
+}
+
+function resolveCropResult(
+	crop: CropEntry,
+	imgWidth: number,
+	imgHeight: number,
+): ResolvedCropResult {
+	if ("region" in crop) return cropFromRegion(crop, imgWidth, imgHeight);
+	if ("normalized" in crop) return cropFromNormalized(crop, imgWidth, imgHeight);
+	if ("pixels" in crop) return cropFromPixels(crop, imgWidth, imgHeight);
+	return invalidCropResult();
+}
+
 /**
  * Resolve a CropEntry to pixel rectangle given image dimensions.
  * Returns null on zero-area crop (error condition for normalized/pixels).
  */
-// fallow-ignore-next-line complexity
 export function resolveCropEntry(
 	crop: CropEntry,
 	imgWidth: number,
@@ -1396,34 +1625,9 @@ export function resolveCropEntry(
 	if (imgWidth <= 0 || imgHeight <= 0)
 		throw new Error(`Invalid image dimensions: ${imgWidth}x${imgHeight}`);
 
-	if ("region" in crop) {
-		const norm = resolveRegion(crop.region);
-		const result = normalizedToPixels(norm, imgWidth, imgHeight);
-		if (!result)
-			throw new Error(
-				`Region "${crop.region}" produced zero-area crop (image: ${imgWidth}x${imgHeight})`,
-			);
-		return result;
-	}
-	if ("normalized" in crop) {
-		const result = normalizedToPixels(crop.normalized, imgWidth, imgHeight);
-		if (!result)
-			throw new Error(
-				`Normalized crop has zero area after clamping (image: ${imgWidth}x${imgHeight})`,
-			);
-		return result;
-	}
-	if ("pixels" in crop) {
-		const result = clampPixels(crop.pixels, imgWidth, imgHeight);
-		if (!result)
-			throw new Error(
-				`Pixel crop has zero area after clamping (image: ${imgWidth}x${imgHeight})`,
-			);
-		return result;
-	}
-	throw new Error(
-		"Invalid CropEntry: must have exactly one of region, normalized, or pixels",
-	);
+	const result = resolveCropResult(crop, imgWidth, imgHeight);
+	if (!result.ok) throw new Error(result.label);
+	return result.crop;
 }
 
 /** Maximum length for telemetry fields stored in session entries. */
@@ -1456,40 +1660,44 @@ const hasCropper = true;
  * Accepts raw image bytes (JPEG/PNG) and returns cropped bytes in the same format.
  * Returns null if cropping fails.
  */
-// fallow-ignore-next-line complexity
+function isOversized(width: number, height: number): boolean {
+	return width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION;
+}
+
+async function safeCropImage(
+	imageBytes: Buffer,
+	crop: ResolvedCrop,
+): Promise<Image | null> {
+	const dims = extractDimensions(imageBytes);
+	if (dims && isOversized(dims.width, dims.height)) return null;
+
+	const img = await Image.decode(new Uint8Array(imageBytes));
+	if (isOversized(img.width, img.height)) return null;
+
+	return img.crop(crop.x, crop.y, crop.width, crop.height);
+}
+
+async function encodeCroppedImage(
+	cropped: Image,
+	mimeType?: string,
+): Promise<Buffer> {
+	const encoded =
+		mimeType === "image/png"
+			? await cropped.encode(1) // PNG with compression level 1 (fast)
+			: await cropped.encodeJPEG(90); // JPEG quality 90
+	return Buffer.from(encoded);
+}
+
 export async function cropImage(
 	imageBytes: Buffer,
 	crop: ResolvedCrop,
 	mimeType?: string,
 ): Promise<Buffer | null> {
 	try {
-		// Decode-bomb protection: check dimensions before full decode
-		const dims = extractDimensions(imageBytes);
-		if (
-			dims &&
-			(dims.width > MAX_IMAGE_DIMENSION || dims.height > MAX_IMAGE_DIMENSION)
-		) {
-			return null;
-		}
-
-		const img = await Image.decode(new Uint8Array(imageBytes));
-
-		// Double-check decoded dimensions (image-size is header-only, actual may differ)
-		if (img.width > MAX_IMAGE_DIMENSION || img.height > MAX_IMAGE_DIMENSION) {
-			return null;
-		}
-
-		const cropped = img.crop(crop.x, crop.y, crop.width, crop.height);
-
-		// Encode back to the same format
-		let encoded: Uint8Array;
-		if (mimeType === "image/png") {
-			encoded = await cropped.encode(1); // PNG with compression level 1 (fast)
-		} else {
-			encoded = await cropped.encodeJPEG(90); // JPEG quality 90
-		}
-
-		return Buffer.from(encoded);
+		const cropped = await safeCropImage(imageBytes, crop);
+		if (!cropped) return null;
+		const encoded = await encodeCroppedImage(cropped, mimeType);
+		return encoded;
 	} catch {
 		return null;
 	}
@@ -1657,25 +1865,25 @@ export function effectiveGroundingFormat(
 	return fmt !== "none" ? fmt : undefined;
 }
 
+const GROUNDING_INSTRUCTIONS: Record<GroundingFormat, string> = {
+	qwen_pixels:
+		"\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels relative to the image. Use `Image-N:` prefix for multi-image inputs.",
+	molmo_points:
+		'\nWhen you describe a spatial element, follow the description with point coordinates as <point x="..." y="..." alt="..."/> using your standard percentage-based convention.',
+	deepseek_bbox:
+		"\nWhen you describe a spatial element, use DeepSeek's native <|ref|>desc<|/ref|><|det|>[[x1,y1,x2,y2]]<|/det|> bounding box format.",
+	internvl_pixels:
+		"\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels.",
+	gemini_normalized_1000:
+		"\nWhen you describe a spatial element, follow the description with bounding-box coordinates in normalized 0–1000 format per Gemini API convention.",
+	none: "",
+};
+
 /**
  * Build grounding instruction to append to the system prompt for a model.
  */
-// fallow-ignore-next-line complexity
 export function buildGroundingInstruction(format: GroundingFormat): string {
-	switch (format) {
-		case "qwen_pixels":
-			return "\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels relative to the image. Use `Image-N:` prefix for multi-image inputs.";
-		case "molmo_points":
-			return '\nWhen you describe a spatial element, follow the description with point coordinates as <point x="..." y="..." alt="..."/> using your standard percentage-based convention.';
-		case "deepseek_bbox":
-			return "\nWhen you describe a spatial element, use DeepSeek's native <|ref|>desc<|/ref|><|det|>[[x1,y1,x2,y2]]<|/det|> bounding box format.";
-		case "internvl_pixels":
-			return "\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels.";
-		case "gemini_normalized_1000":
-			return "\nWhen you describe a spatial element, follow the description with bounding-box coordinates in normalized 0–1000 format per Gemini API convention.";
-		case "none":
-			return "";
-	}
+	return GROUNDING_INSTRUCTIONS[format] ?? "";
 }
 
 // ── Joint description helpers (Feature 2) ──────────────────────────────────
@@ -1769,63 +1977,91 @@ export function extractVersion(
 	return { prefix, version: parseFloat(match[2]!) };
 }
 
+function hasPrefixName(basenames: string[], prefix: string): boolean {
+	const re = new RegExp(`^${prefix}[^a-z]`);
+	return basenames.some((b) => re.test(b) || b === prefix);
+}
+
+function buildVersionGroups(filenames: string[]): Map<string, number[]> {
+	const groups = new Map<string, number[]>();
+	for (const f of filenames) {
+		const v = extractVersion(basename(f).toLowerCase());
+		if (!v) continue;
+		const arr = groups.get(v.prefix) ?? [];
+		arr.push(v.version);
+		groups.set(v.prefix, arr);
+	}
+	return groups;
+}
+
+function hasVersionedSequence(groups: Map<string, number[]>): boolean {
+	for (const [, vers] of groups) {
+		if (vers.length >= 2 && new Set(vers).size >= 2) return true;
+	}
+	return false;
+}
+
+function hasNumberedSequence(
+	basenames: string[],
+	pattern: RegExp,
+): boolean {
+	return basenames.every((b) => pattern.test(b)) && basenames.length >= 2;
+}
+
+function hasDateSequence(basenames: string[], pattern: RegExp): boolean {
+	return basenames.filter((b) => pattern.test(b)).length >= 2;
+}
+
+const FILENAME_PAIRS: [string, string, string][] = [
+	["before", "after", "before/after pair"],
+	["old", "new", "old/new pair"],
+];
+
+function pushPairHints(hints: string[], basenames: string[]): void {
+	for (const [a, b, label] of FILENAME_PAIRS) {
+		if (hasPrefixName(basenames, a) && hasPrefixName(basenames, b)) {
+			hints.push(label);
+		}
+	}
+}
+
+function hasAnyNumberedSequence(
+	basenames: string[],
+	patterns: RegExp[],
+): boolean {
+	for (const pattern of patterns) {
+		if (hasNumberedSequence(basenames, pattern)) return true;
+	}
+	return false;
+}
+
+function pushSequenceHints(
+	hints: string[],
+	basenames: string[],
+	filenames: string[],
+): void {
+	if (hasVersionedSequence(buildVersionGroups(filenames)))
+		hints.push("versioned sequence");
+	const numberedPatterns = [
+		/^.*_(\d+)(\.[a-z]+)?$/,
+		/^.*-(\d+)(\.[a-z]+)?$/,
+	];
+	if (hasAnyNumberedSequence(basenames, numberedPatterns))
+		hints.push("numbered sequence");
+	if (hasDateSequence(basenames, /^\d{4}-\d{2}-\d{2}[_ ].*\.[a-z]+$/))
+		hints.push("time-ordered sequence");
+}
+
 /**
  * Generate filename hint strings for a set of images (Appendix D).
  * Returns an array of hint strings, or empty array if no patterns match.
  */
-// fallow-ignore-next-line complexity
 export function generateFilenameHints(filenames: string[]): string[] {
 	if (filenames.length < 2) return [];
 
 	const basenames = filenames.map((f) => basename(f).toLowerCase());
 	const hints: string[] = [];
-
-	// before/after pair
-	const hasBefore = basenames.some(
-		(b) => /^before[^a-z]/.test(b) || b === "before",
-	);
-	const hasAfter = basenames.some(
-		(b) => /^after[^a-z]/.test(b) || b === "after",
-	);
-	if (hasBefore && hasAfter) hints.push("before/after pair");
-
-	// old/new pair
-	const hasOld = basenames.some((b) => /^old[^a-z]/.test(b) || b === "old");
-	const hasNew = basenames.some((b) => /^new[^a-z]/.test(b) || b === "new");
-	if (hasOld && hasNew) hints.push("old/new pair");
-
-	// Versioned sequence
-	const versions = filenames.map((f) =>
-		extractVersion(basename(f).toLowerCase()),
-	);
-	const versionGroups = new Map<string, number[]>();
-	for (const v of versions) {
-		if (!v) continue;
-		const arr = versionGroups.get(v.prefix) ?? [];
-		arr.push(v.version);
-		versionGroups.set(v.prefix, arr);
-	}
-	for (const [, vers] of versionGroups) {
-		if (vers.length >= 2 && new Set(vers).size >= 2) {
-			hints.push(`versioned sequence`);
-			break; // one hint for versioning is enough
-		}
-	}
-
-	// Numbered sequence: *_1.* ∧ *_2.* or *-1.* ∧ *-2.*
-	const numberedUnderscore = basenames.every((b) =>
-		/^.*_(\d+)(\.[a-z]+)?$/.test(b),
-	);
-	const numberedDash = basenames.every((b) => /^.*-(\d+)(\.[a-z]+)?$/.test(b));
-	if (numberedUnderscore && basenames.length >= 2)
-		hints.push("numbered sequence");
-	if (numberedDash && basenames.length >= 2) hints.push("numbered sequence");
-
-	// Time-ordered: YYYY-MM-DD_*.*
-	const datePattern = /^\d{4}-\d{2}-\d{2}[_ ].*\.[a-z]+$/;
-	if (basenames.filter((b) => datePattern.test(b)).length >= 2) {
-		hints.push("time-ordered sequence");
-	}
-
+	pushPairHints(hints, basenames);
+	pushSequenceHints(hints, basenames, filenames);
 	return hints;
 }

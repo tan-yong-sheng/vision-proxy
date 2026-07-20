@@ -600,7 +600,7 @@ describe("isPathAllowed", () => {
 });
 
 describe("readImageFileWithReason", () => {
-	// fallow-ignore-next-line complexity
+	
 	it("reads valid PNG inside tmpdir", async () => {
 		const dir = await mkdtemp(join(os.tmpdir(), "vp-test-"));
 		const file = join(dir, "ok.png");
@@ -608,9 +608,10 @@ describe("readImageFileWithReason", () => {
 		try {
 			const r = await readImageFileWithReason(file);
 			assert.ok(r.image, "image should be returned");
-			assert.equal(r.image?.mimeType, "image/png");
-			assert.equal(r.image?.type, "image");
-			assert.ok((r.image?.data ?? "").length > 0);
+			const img = r.image;
+			assert.equal(img.mimeType, "image/png");
+			assert.equal(img.type, "image");
+			assert.ok(img.data.length > 0);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

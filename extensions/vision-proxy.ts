@@ -132,39 +132,23 @@ const CropEntrySchema = Type.Union([
 
 const AnalyzeImageParams = Type.Object({
 	images: Type.Array(Type.String(), {
-		description:
-			"1..maxImagesPerCall image file paths (sha256 references are not supported)",
+		description: "Image file paths",
 		minItems: 1,
 		maxItems: 20,
 	}),
-	question: Type.String({ description: "Required, non-empty, max 4000 chars" }),
-	model: Type.Optional(
-		Type.String({ description: "Optional; provider/model-id" }),
-	),
-	crop: Type.Optional(
-		Type.Array(CropEntrySchema, { description: "Optional per-image crop" }),
-	),
-	reason: Type.Optional(
-		Type.String({ description: "Optional; logged for analytics only" }),
-	),
+	question: Type.String({ description: "Question about the images" }),
+	model: Type.Optional(Type.String({ description: "provider/model-id" })),
+	crop: Type.Optional(Type.Array(CropEntrySchema, { description: "Crop entries" })),
+	reason: Type.Optional(Type.String({ description: "Analytics reason" })),
 });
 
 const TOOL_DESCRIPTION = [
-	"Use `analyze_image` when (a) the cached description of an image lacks a detail you need,",
-	"(b) you need to compare or cross-reference multiple images, or (c) you need to focus on a specific region.",
-	"",
-	"**Cropping.** Three forms, in order of preference:",
-	"",
-	'- **`region`** - coarse cut by name. Use when you don\'t have exact dimensions: `{ image_index: 0, region: "bottom-right" }`.',
-	"- **`normalized`** - fractional coordinates 0.0-1.0. Default choice for precise crops without knowing image dimensions: `{ image_index: 0, normalized: { x: 0.5, y: 0.5, width: 0.4, height: 0.4 } }`.",
-	"- **`pixels`** - absolute pixels. Use only when you have authoritative coordinates from a prior `<vision_proxy_description>` or `<vision_proxy_analysis>` (which carry `width` and `height` attributes) or from a previous grounded response. Example: `{ image_index: 0, pixels: { x: 1840, y: 120, width: 840, height: 360 } }`.",
-	"",
-	"Image dimensions and filenames are available in the `width`, `height`, and `filename` attributes of `<vision_proxy_description>`, `<vision_proxy_analysis>`, and `<vision_proxy_joint_description>` blocks in your context.",
-	"",
-	"When a crop is applied, the response fence carries a `crop_origin` attribute (e.g. `crop_origin=\"1840,120\"`). Add the origin's x to any returned x-coordinate and the origin's y to any returned y-coordinate to map coordinates back to the original full image.",
-	"",
-	"The tool result is authoritative for the specific question asked; the cached generic description remains the default for everything else.",
-].join("\n");
+	"Use analyze_image when cached descriptions lack detail, for cross-image comparison, or to focus a region.",
+	"Crop forms (preferred order): region (named), normalized (0-1 fractions), pixels (absolute).",
+	"Pixel crops need prior width/height from vision_proxy_description / vision_proxy_analysis tags.",
+	"When cropped, add crop_origin to returned coordinates to map back to the full image.",
+	"Tool results are authoritative for the asked question; cached descriptions remain the default otherwise.",
+].join(" ");
 
 // ── Extension ──────────────────────────────────────────────────────────────
 export default function (pi: ExtensionAPI) {
@@ -176,13 +160,7 @@ export default function (pi: ExtensionAPI) {
 				name: "analyze_image",
 				label: "Analyze Image",
 				description: TOOL_DESCRIPTION,
-				promptSnippet:
-					"Targeted image analysis with crop and grounding support",
-				promptGuidelines: [
-					"Use analyze_image when you need specific details about an image that the cached description doesn't cover.",
-					"The tool supports cropping - use region, normalized, or pixel coordinates to focus on a specific area.",
-					"Results include image dimensions, filename, and grounding format metadata in the response fence.",
-				],
+				promptSnippet: "Targeted image analysis with crop support",
 				parameters: AnalyzeImageParams,
 				execute: async (_toolCallId, params, _signal, _onUpdate, extCtx) => {
 					const entries = extCtx.sessionManager.getEntries();

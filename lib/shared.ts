@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	LRUCache,
+	maxToolCallsPerTurn,
 	modelLabel,
 	shouldStripImages as shouldStripImagesPure,
 	type VisionConfig,
@@ -8,9 +9,6 @@ import {
 
 // ── Tool result cache (shared across calls in the session) ─────────────────
 export const _toolCache = new LRUCache<string, string>(50);
-
-/** Maximum analyze_image tool calls per agent turn. Prevents cost runaway. */
-export const MAX_TOOL_CALLS_PER_TURN = 10;
 
 /** Current turn's tool call count (reset on each before_agent_start). */
 export const _toolCallCount = { value: 0 };

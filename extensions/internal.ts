@@ -1030,6 +1030,17 @@ function maxImageFileBytes(): number {
 	return 10 * 1024 * 1024;
 }
 
+/**
+ * Maximum analyze_image tool calls per agent turn.
+ * Defaults to Infinity (no limit). Override with
+ * PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN. Values <= 0 or non-numeric strings mean unlimited.
+ */
+export function maxToolCallsPerTurn(): number {
+	const n = Number(process.env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN);
+	if (!Number.isFinite(n) || n <= 0) return Infinity;
+	return Math.floor(n);
+}
+
 export type ReadImageReason =
 	| "not-an-image"
 	| "denied"

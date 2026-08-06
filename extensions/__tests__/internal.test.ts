@@ -8,7 +8,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { join, parse } from "node:path";
@@ -34,6 +34,7 @@ import {
 	isPathAllowed,
 	isValidNamedRegion,
 	LRUCache,
+	maxToolCallsPerTurn,
 	normalizedToPixels,
 	parseModelString,
 	pluralImages,
@@ -1300,6 +1301,58 @@ describe("readEnvOverrides (1.4.0 fields)", () => {
 				.pHashSimilarityThreshold,
 			undefined,
 		);
+	});
+});
+
+const TOOL_CALLS_ENV_KEY = "PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN";
+
+describe("maxToolCallsPerTurn", () => {
+	beforeEach(() => {
+		delete process.env[TOOL_CALLS_ENV_KEY];
+	});
+
+	it("defaults to Infinity (unlimited)", () => {
+		assert.equal(maxToolCallsPerTurn(), Infinity);
+	});
+
+	it("treats 0 as unlimited", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "0";
+		assert.equal(maxToolCallsPerTurn(), Infinity);
+	});
+
+	it("treats -1 as unlimited", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "-1";
+		assert.equal(maxToolCallsPerTurn(), Infinity);
+	});
+
+	it("treats 'infinity' as unlimited", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "infinity";
+		assert.equal(maxToolCallsPerTurn(), Infinity);
+	});
+
+	it("treats 'Infinity' as unlimited", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "Infinity";
+		assert.equal(maxToolCallsPerTurn(), Infinity);
+	});
+
+	it("treats 'unlimited' as unlimited", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "unlimited";
+		assert.equal(maxToolCallsPerTurn(), Infinity);
+	});
+
+	it("treats invalid strings as unlimited", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "abc";
+		assert.equal(maxToolCallsPerTurn(), Infinity);
+	});
+
+	it("accepts a positive integer", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "5";
+		assert.equal(maxToolCallsPerTurn(), 5);
+	});
+
+	it("floors decimal values", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "5.9";
+		assert.equal(maxToolCallsPerTurn(), 5);
 	});
 });
 

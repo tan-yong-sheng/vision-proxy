@@ -25,6 +25,7 @@
  * PI_VISION_PROXY_MAX_IMAGES_PER_CALL - 1..20
  * PI_VISION_PROXY_MAX_BATCH - 1..10
  * PI_VISION_PROXY_CACHE_SIZE - 0..500
+ * PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN - positive number to cap calls per turn; 0, -1, or "infinity" for unlimited (default)
  *
  * Install:
  * pi install ./packages/pi-vision-proxy

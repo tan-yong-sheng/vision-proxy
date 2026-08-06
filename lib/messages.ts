@@ -1,14 +1,15 @@
 import type { ContextEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type VisionConfig } from "../extensions/internal.js";
 import {
 	extractCandidateImagePaths,
 	findDescriptions,
 	hashImageData,
+	maxToolCallsPerTurn,
 	stripImagePaths,
 	type ImageMeta,
+	type VisionConfig,
 	_imageMeta,
 } from "../extensions/internal.js";
-import { MAX_TOOL_CALLS_PER_TURN, _toolCache, _toolCallCount } from "./shared.js";
+import { _toolCache, _toolCallCount } from "./shared.js";
 
 /** Build the error response when the analyze_image tool is disabled. */
 export function toolDisabledError(
@@ -39,13 +40,15 @@ export function toolDisabledError(
 
 /** Build the error response when the per-turn tool call limit is exceeded. */
 export function toolRateLimitError(): { content: Array<{ type: "text"; text: string }> } | null {
+	const limit = maxToolCallsPerTurn();
+	if (limit === Infinity) return null;
 	_toolCallCount.value++;
-	if (_toolCallCount.value > MAX_TOOL_CALLS_PER_TURN) {
+	if (_toolCallCount.value > limit) {
 		return {
 			content: [
 				{
 					type: "text" as const,
-					text: `Error: analyze_image call limit reached (${MAX_TOOL_CALLS_PER_TURN} per turn). Rephrase your question or try in the next turn.`,
+					text: `Error: analyze_image call limit reached (${limit} per turn). Rephrase your question or try in the next turn.`,
 				},
 			],
 		};

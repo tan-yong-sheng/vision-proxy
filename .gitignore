@@ -2,4 +2,7 @@ dist/
 node_modules/
 .pnpm-store/
 .npm-cache/
+.pi/
+.lavish/
+.worktrees/
 *.log

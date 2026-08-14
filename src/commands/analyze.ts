@@ -13,6 +13,7 @@
  */
 import {
 	buildAnalyzeResult,
+	buildGroundingInstruction,
 	buildJointDescriptionFence,
 	buildToolCacheKey,
 	cropImage,
@@ -142,7 +143,7 @@ export async function runAnalyze(
 	const grounding = getGroundingFormat(config, provider, modelId);
 	const effectiveFormat: GroundingFormat =
 		flags.format && flags.format !== "none" ? flags.format : grounding;
-	const systemPrompt = config.systemPrompt + groundingInstructionSuffix(effectiveFormat);
+	const systemPrompt = config.systemPrompt + buildGroundingInstruction(effectiveFormat);
 
 	// Read + hash + crop payloads.
 	const payloads: ImagePayload[] = [];
@@ -253,23 +254,6 @@ export async function runAnalyze(
 	};
 }
 
-function groundingInstructionSuffix(format: GroundingFormat): string {
-	if (!format || format === "none") return "";
-	const map: Record<GroundingFormat, string> = {
-		qwen_pixels:
-			"\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels relative to the image.",
-		molmo_points:
-			'\nWhen you describe a spatial element, follow the description with point coordinates as <point x="..." y="..." alt="..."/>.',
-		deepseek_bbox:
-			"\nWhen you describe a spatial element, use DeepSeek's native <|ref|>desc<|/ref|><|det|>[[x1,y1,x2,y2]]<|/det|> bounding box format.",
-		internvl_pixels:
-			"\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels.",
-		gemini_normalized_1000:
-			"\nWhen you describe a spatial element, follow the description with bounding-box coordinates in normalized 0-1000 format.",
-		none: "",
-	};
-	return map[format] ?? "";
-}
 
 /** Parse `--crop` flags (now in the parsed flags map) in the form `<index>:<form>`. */
 export function parseCropFlags(

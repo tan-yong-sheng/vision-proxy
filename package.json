@@ -23,7 +23,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --no-warnings --test src/**/*.test.ts && node --test src/shims/*.e2e.mjs",
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-shims.mjs"
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-shims.mjs",
+    "prepare": "npm run build"
   },
   "engines": {
     "node": ">=22"

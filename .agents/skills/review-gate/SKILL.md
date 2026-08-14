@@ -120,6 +120,33 @@ Use `--yes` for agent-driven reviews so approval gates auto-accept and actionabl
 no-mistakes axi run --intent "..." --yes
 ```
 
+However, the global no-mistakes config sets `auto_fix.review: 0` by default, so review findings that require a fix are parked for manual approval rather than silently self-fixed. `no-mistakes axi status` shows this as `awaiting_agent: parked` under a `gate:` block.
+
+**Fully unattended runs:** enable repo-level review auto-fix by committing `.no-mistakes/config.yaml`:
+
+```bash
+mkdir -p .no-mistakes
+cat > .no-mistakes/config.yaml <<'EOF'
+auto_fix:
+  review: 3
+EOF
+```
+
+This lets the pipeline fix up to 3 rounds of review findings without manual approval. Commit and push the file so CI and delegated agents use the same behavior.
+
+**Manual gate loop (when auto-fix is disabled):** poll `no-mistakes axi status` for a `gate:` block and respond:
+
+```bash
+# Detect a parked gate
+no-mistakes axi status | grep -q "awaiting_agent: parked"
+
+# Approve the current step and continue
+no-mistakes axi respond --action approve
+
+# Or ask the pipeline to fix specific findings by id
+no-mistakes axi respond --action fix --findings id-a,id-b
+```
+
 The pipeline may commit auto-fixes, so the branch head changes. Inspect progress with `no-mistakes axi status`. If `branch_sync.state` is `pipeline_owned`, do not make local commits until the run reaches an outcome.
 
 Read step logs with `no-mistakes axi logs --step <step>` (`intent`, `rebase`, `review`, `test`, `document`, `lint`, `push`, `pr`, `ci`).

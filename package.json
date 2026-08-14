@@ -11,11 +11,6 @@
     "hook",
     "pi-package"
   ],
-  "pi": {
-    "extensions": [
-      "./extensions/vision-proxy.ts"
-    ]
-  },
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -23,13 +18,11 @@
     "vp": "dist/cli.js"
   },
   "files": [
-    "dist",
-    "extensions",
-    "lib"
+    "dist"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --no-warnings --test src/**/*.test.ts extensions/__tests__/*.test.ts && node --test src/shims/*.e2e.mjs",
+    "test": "node --experimental-strip-types --no-warnings --test src/**/*.test.ts && node --test src/shims/*.e2e.mjs",
     "build": "tsc -p tsconfig.build.json && node scripts/copy-shims.mjs"
   },
   "engines": {
@@ -46,12 +39,6 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "typebox": "*",
     "typescript": "^5.9.0"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.74.0",
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
-    "typebox": "*"
   }
 }

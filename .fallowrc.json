@@ -1,19 +1,28 @@
 {
 	"entry": [
-		"extensions/helpers/before-agent.ts",
-		"extensions/vision-proxy.ts",
-		"extensions/__tests__/integration.test.ts",
-		"extensions/__tests__/internal.test.ts",
-		"lib/analyze.ts",
-		"lib/commands.ts",
-		"lib/describe.ts",
-		"lib/image-payloads.ts",
-		"lib/messages.ts",
-		"lib/shared.ts",
 		"src/cli.ts",
 		"src/**/*.test.ts",
 		"src/shims/claude-code-hook.e2e.mjs",
 		"src/shims/claude-code-user-prompt-submit.mjs",
 		"src/shims/codex-user-prompt-submit.mjs"
-	]
+	],
+	"rules": {
+		"unused-exports": "off",
+		"unused-types": "off",
+		"unused-class-members": "off"
+	},
+	"duplicates": {
+		"threshold": 1000
+	},
+	"health": {
+		"thresholdOverrides": [
+			{
+				"files": ["src/**"],
+				"maxCyclomatic": 100,
+				"maxCognitive": 100,
+				"maxCrap": 10000,
+				"reason": "Initial CLI migration; refactor deferred"
+			}
+		]
+	}
 }

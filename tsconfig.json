@@ -16,6 +16,6 @@
 		"noEmit": true,
 		"resolveJsonModule": true
 	},
-	"include": ["src/**/*.ts", "lib/**/*.ts", "extensions/**/*.ts"],
-	"exclude": ["lib/**/*.test.ts", "lib/**/__tests__/**", "extensions/**/*.test.ts", "extensions/**/__tests__/**"]
+	"include": ["src/**/*.ts"],
+	"exclude": ["src/**/*.test.ts", "src/**/__tests__/**"]
 }

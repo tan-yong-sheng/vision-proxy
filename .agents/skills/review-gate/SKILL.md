@@ -92,6 +92,7 @@ To review existing code that is not part of a large diff, keep the branch diff s
 
 | Situation                   | Branch                             | Intent                                                 |
 | --------------------------- | ---------------------------------- | ------------------------------------------------------ |
+| Default (when in doubt)     | disposable merge-preview worktree  | review the exact state that will ship                  |
 | Current feature branch      | the feature branch                 | review the changes plus named surrounding code         |
 | Named area of existing code | a small branch (or current branch) | list the files/modules and the specific risks to check |
 | Pre-merge validation        | the worktree branch                | verify the branch against its merge contract           |

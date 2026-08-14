@@ -115,13 +115,16 @@ If a branch was already merged without review, make it review-clear retroactivel
 
 ### 8. Validation gate
 
-Before releasing, classify the worktree risk and choose the validation path:
+Before releasing, classify the worktree risk and choose the validation path.
+**Default to a disposable merge-preview worktree; use per-worktree review only when the branch is provably independent and low-risk.**
 
-| Risk   | Signals                                                                     | Path                                             |
-| ------ | --------------------------------------------------------------------------- | ------------------------------------------------ |
-| High   | Shared contracts, stacked PRs, auth/security, new dependencies, large diffs | Dispatch `/review-gate`                          |
-| Medium | Feature work with UI/API surface changes                                    | Dispatch `/review-gate` with `--skip push,pr,ci` |
-| Low    | Docs, tests, config tweaks, trivial fixes                                   | Local checks only                                |
+| Risk   | Signals                                                                     | Path                                                                        |
+| ------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| High   | Shared contracts, stacked PRs, auth/security, new dependencies, large diffs | Disposable merge-preview worktree + `/review-gate`                          |
+| Medium | Feature work with UI/API surface changes, provider/registry changes         | Disposable merge-preview worktree + `/review-gate` with `--skip push,pr,ci` |
+| Low    | Docs, tests, config tweaks, trivial fixes, provably independent branches    | Per-worktree `/review-gate` or local checks only                            |
+
+A branch is **provably independent** when its worktree doc has no `depends on` field and its changed files do not overlap with any other active worktree.
 
 **Local checks only:**
 
@@ -148,12 +151,12 @@ Task spec: "Run `/review-gate` on branch `<branch>` with intent ... and write fi
 
 ### Multi-worktree validation routing
 
-When orchestrating several worktrees, route validation based on dependency and file overlap:
+When orchestrating several worktrees, default to a single disposable merge-preview worktree. Route to per-worktree review only when every branch is provably independent and low-risk.
 
 | Worktree relationship | Signals | Validation path |
 | --- | --- | --- |
-| Independent branches, no shared files | Each worktree doc has no `depends on` and file lists do not overlap | Per-worktree `/review-gate` or local checks |
-| Dependent/stacked branches or shared contract files | `depends on` lists another active worktree, or branches touch `package.json`, `tsconfig.json`, shared types/config | Disposable merge-preview worktree (example below) |
+| Default (when in doubt) | Any medium/high risk, new dependencies, shared contracts, or overlapping files | Disposable merge-preview worktree + `/review-gate` |
+| Independent and low-risk branches only | Each worktree doc has no `depends on` and file lists do not overlap | Per-worktree `/review-gate` or local checks |
 
 To detect dependencies, read the worktree docs' `depends on` field. If a worktree depends on another active branch, do not dispatch per-worktree `/review-gate` until its dependency is merged; instead create a single merge-preview task that merges both branches in order and runs `/review-gate`.
 

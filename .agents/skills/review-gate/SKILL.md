@@ -76,6 +76,24 @@ auto_fix:
   review: 3
 ```
 
+### Deterministic polling via daemon IPC
+
+The CLI's text output is formatted as TOON and can change between versions.
+For a robust, parseable check, talk to the no-mistakes daemon directly over its Unix socket:
+
+```bash
+bash .agents/skills/review-gate/scripts/poll-no-mistakes-structured.sh 30
+```
+
+The script:
+
+1. Resolves the main repo path from `git rev-parse --git-common-dir` (linked worktrees share one no-mistakes repo record).
+2. Looks up the `repo_id` in `~/.no-mistakes/state.sqlite`.
+3. Calls `get_active_run` over `~/.no-mistakes/socket` using JSON-RPC.
+4. Checks `run.awaiting_agent` boolean and the gate step's `findings_json` to decide between `fix` and `approve`.
+
+Use this when you want machine-readable status instead of grepping the TUI text.
+
 ## Core workflow
 
 ### Resolve scope

@@ -22,6 +22,8 @@ export interface ProviderSpec {
 	make: (opts: { apiKey: string; modelId: string; baseURL?: string }) => LanguageModel;
 	/** Whether the provider supports image input by default. */
 	supportsImage: boolean;
+	/** Default model id used for probes and fallbacks. */
+	defaultModelId: string;
 }
 
 const openaiProvider: ProviderSpec = {
@@ -30,6 +32,7 @@ const openaiProvider: ProviderSpec = {
 	apiKeyEnv: "OPENAI_API_KEY",
 	baseUrlEnv: "OPENAI_BASE_URL",
 	supportsImage: true,
+	defaultModelId: "gpt-4o",
 	make: ({ apiKey, modelId, baseURL }) =>
 		createOpenAI({ apiKey, baseURL })(modelId),
 };
@@ -40,6 +43,7 @@ const anthropicProvider: ProviderSpec = {
 	apiKeyEnv: "ANTHROPIC_API_KEY",
 	baseUrlEnv: "ANTHROPIC_BASE_URL",
 	supportsImage: true,
+	defaultModelId: "claude-sonnet-4-5",
 	make: ({ apiKey, modelId, baseURL }) =>
 		createAnthropic({ apiKey, baseURL })(modelId),
 };
@@ -50,6 +54,7 @@ const googleProvider: ProviderSpec = {
 	apiKeyEnv: "GOOGLE_API_KEY",
 	baseUrlEnv: "GOOGLE_BASE_URL",
 	supportsImage: true,
+	defaultModelId: "gemini-2.5-pro",
 	make: ({ apiKey, modelId, baseURL }) =>
 		createGoogleGenerativeAI({ apiKey, baseURL })(modelId),
 };

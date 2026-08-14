@@ -89,8 +89,7 @@ export function providerCheck(
 	let allOk = true;
 	for (const spec of specs) {
 		// Check auth using the configured default model for that provider.
-		const defaultModel = spec.id === "openai" ? "gpt-4o" : "claude-sonnet-4-5";
-		const probe = resolveModel(spec.id, defaultModel, env);
+		const probe = resolveModel(spec.id, spec.defaultModelId, env);
 		if (probe.ok) {
 			lines.push(`${spec.id}: OK (key present)`);
 		} else {

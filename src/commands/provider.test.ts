@@ -68,6 +68,12 @@ describe("providerCheck", () => {
 		assert.match(r.message, /openai: OK/);
 	});
 
+	it("reports OK for the google provider when its key is present", () => {
+		const r = providerCheck("google", { GOOGLE_API_KEY: "gapi-x" } as NodeJS.ProcessEnv);
+		assert.equal(r.ok, true);
+		assert.match(r.message, /google: OK/);
+	});
+
 	it("reports unknown provider for a bad name", () => {
 		const r = providerCheck("bogus", { OPENAI_API_KEY: "x", ANTHROPIC_API_KEY: "y" } as NodeJS.ProcessEnv);
 		assert.equal(r.ok, false);

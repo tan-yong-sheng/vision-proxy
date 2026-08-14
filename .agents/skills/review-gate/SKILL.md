@@ -26,6 +26,21 @@ Drive `no-mistakes axi run` for code-level review and pre-merge QA. Findings are
 4. **Capture the result.**
    Create or update a QA dossier in `.agents/docs/qa/` through `/agents-docs`.
 
+### Long-running reviews
+
+`no-mistakes axi run` can take 20-60 minutes for a deep review.
+Run it in the background so the agent is not blocked by a shell timeout:
+
+```bash
+bg_run \
+  --command "cd <worktree> && no-mistakes axi run --intent '...' --yes --skip push,pr,ci" \
+  --name "review-gate <branch>" \
+  --isAgent false
+```
+
+Then continue with other work. The terminal notification resumes the agent when the run reaches an outcome.
+A short `bash` timeout can kill the CLI while the daemon is still in `review: fixing`, leaving the run hard to monitor and resume.
+
 ## Core workflow
 
 ### Resolve scope
@@ -65,10 +80,11 @@ cd "$QA_PATH"
 npm test
 npx tsc --noEmit
 
-# Run the gate (review-only; do not publish)
-no-mistakes axi run \
-  --intent "Review combined vision-proxy CLI migration: verify CLI core and hook shims integrate cleanly" \
-  --yes --skip push,pr,ci
+# Run the gate (review-only; do not publish) in the background
+bg_run \
+  --command "no-mistakes axi run --intent 'Review combined vision-proxy CLI migration: verify CLI core and hook shims integrate cleanly' --yes --skip push,pr,ci" \
+  --name "review-gate vp-merge" \
+  --isAgent false
 ```
 
 Then follow Step 10 to write the QA dossier and remove the disposable worktree.

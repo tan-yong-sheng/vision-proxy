@@ -96,7 +96,7 @@ export function buildAnalyzeResult(
 			? `\n<vision_proxy_grounding_format>${groundingFormat}</vision_proxy_grounding_format>`
 			: "";
 
-	return `${header}${grounding}\n\n${description}`;
+	return `${header}${grounding}\n\n${fenceUntrusted(description)}`;
 }
 
 /** In-memory map: image hash → dimensions + filename. Populated on first ingestion. */
@@ -899,10 +899,14 @@ export async function isPathAllowed(filePath: string): Promise<boolean> {
 }
 
 function cleanFilePath(rawPath: string): string {
-	return rawPath
+	const trimmed = rawPath
 		.replace(/^[\s"'`[\]\\]+/, "")
 		.replace(/[\s"'`[\]\\]+$/, "")
 		.trim();
+	if (trimmed.startsWith("~/")) {
+		return join(os.homedir(), trimmed.slice(2));
+	}
+	return trimmed;
 }
 
 type ReadBytesResult =
@@ -1491,7 +1495,7 @@ export function buildDescriptionFence(
 	crop?: ResolvedCrop,
 ): string {
 	const parts = buildFenceParts(hash, meta, crop);
-	return `<vision_proxy_description ${parts.join(" ")}\n>\n${fenceUntrusted(description)}\n</vision_proxy_description>`;
+	return `<vision_proxy_description ${parts.join(" ")}>\n${fenceUntrusted(description)}\n</vision_proxy_description>`;
 }
 
 export function buildAnalysisFence(
@@ -1505,7 +1509,7 @@ export function buildAnalysisFence(
 	if (groundingFormat && groundingFormat !== "none") {
 		parts.push(`grounding_format="${groundingFormat}"`);
 	}
-	return `<vision_proxy_analysis ${parts.join(" ")}\n>\n${fenceUntrusted(analysis)}\n</vision_proxy_analysis>`;
+	return `<vision_proxy_analysis ${parts.join(" ")}>\n${fenceUntrusted(analysis)}\n</vision_proxy_analysis>`;
 }
 
 export function getGroundingFormat(
@@ -1565,7 +1569,7 @@ export function buildJointDescriptionFence(
 		parts.push(`grounding_format="${groundingFormat}"`);
 	}
 
-	return `<vision_proxy_joint_description ${parts.join(" ")}\n>\n${fenceUntrusted(description)}\n</vision_proxy_joint_description>`;
+	return `<vision_proxy_joint_description ${parts.join(" ")}>\n${fenceUntrusted(description)}\n</vision_proxy_joint_description>`;
 }
 
 export function extractVersion(

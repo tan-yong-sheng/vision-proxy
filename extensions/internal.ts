@@ -8,7 +8,7 @@ import os from "node:os";
 import { basename, dirname, extname, join, parse, relative } from "node:path";
 import type { ImageContent as PiAiImage } from "@earendil-works/pi-ai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import imageSize from "image-size";
+import { imageSize } from "image-size";
 import type { Image as ImageScriptImage } from "imagescript";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ export interface AnalysisResult {
 }
 
 export function buildAnalyzeResult(
-	imagePayloads: ImagePayload[],
+	imagePayloads: Array<{ hash: string }>,
 	description: string,
 	groundingFormat: GroundingFormat,
 ): string {
@@ -196,10 +196,8 @@ export interface LegacyImage {
 // ── Constants ──────────────────────────────────────────────────────────────
 export const CUSTOM_TYPE_CONFIG = "vision-proxy-config";
 export const CUSTOM_TYPE_DESCRIPTION = "vision-proxy-description";
-const CUSTOM_TYPE_TOOL_CALL = "vision-proxy-tool-call";
 export const CUSTOM_TYPE_JOINT = "vision-proxy-joint-description";
 export const CUSTOM_TYPE_COMMAND = "vision-proxy-command";
-const CUSTOM_TYPE_SKIP = "vision-proxy-skip";
 
 /** Models explicitly excluded from grounding (PRD FR-4.1.1). */
 const GROUNDING_EXCLUDED_MODELS = [
@@ -739,7 +737,7 @@ export function readEnvOverrides(
 	return overrides;
 }
 
-export function envFlags(env: NodeJS.ProcessEnv = process.env): {
+export interface EnvFlags {
 	mode: boolean;
 	model: boolean;
 	context: boolean;
@@ -748,7 +746,9 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxBatch: boolean;
 	cacheSize: boolean;
 	maxToolCallsPerTurn: boolean;
-} {
+}
+
+export function envFlags(env: NodeJS.ProcessEnv = process.env): EnvFlags {
 	return {
 		mode: Boolean(env.PI_VISION_PROXY_MODE),
 		model: Boolean(env.PI_VISION_PROXY_MODEL),
@@ -939,7 +939,7 @@ function legacyImageSource(
 
 function isLegacySource(
 	source: LegacyImage["source"] | undefined,
-): boolean {
+): source is { data: string; mediaType: string } {
 	if (!source) return false;
 	if (!source.data) return false;
 	if (!source.mediaType) return false;
@@ -986,17 +986,6 @@ const EXT_TO_MIME: Record<string, string> = {
 };
 
 const IMAGE_EXT_ALT = "jpg|jpeg|png|gif|webp|bmp|tiff|tif|ico|avif";
-
-const IMAGE_PATH_PLACEHOLDER =
-	"[image file — see vision proxy description]";
-
-/**
- * Path-aware placeholder that preserves the original file path so the model
- * can use it in tool calls like analyze_image.
- */
-function imageFilePlaceholder(filePath: string): string {
-	return `[Image: ${filePath}]`;
-}
 
 function mimeTypeForExt(filePath: string): string | undefined {
 	return EXT_TO_MIME[extname(filePath).toLowerCase()];
@@ -1280,12 +1269,6 @@ export function describeReadReason(
 /**
  * Read an image file. Returns null on any failure. Prefer readImageFileWithReason for diagnostics.
  */
-async function readImageFile(
-	filePath: string,
-): Promise<PiAiImage | null> {
-	return (await readImageFileWithReason(filePath)).image;
-}
-
 /**
  * Replace detected image file paths in text with a path-aware placeholder
  * so the model can still reference the file for tools like analyze_image.
@@ -1383,6 +1366,7 @@ function messageRole(
 ): { role: string; content: unknown } | null {
 	if (entry.type !== "message") return null;
 	if (!entry.message?.role) return null;
+	if (!("content" in entry.message)) return null;
 	return { role: entry.message.role, content: entry.message.content };
 }
 
@@ -1491,7 +1475,7 @@ function safeDimensions(
 }
 
 function backfillFilename(
-	existing: StoredImageMeta,
+	existing: ImageMeta,
 	filename: string | undefined,
 ): void {
 	if (filename && !existing.filename) {
@@ -1624,7 +1608,7 @@ type ResolvedCropResult =
 	| { ok: false; label: string };
 
 function cropFromRegion(
-	crop: CropEntry,
+	crop: CropEntry & { region: NamedRegion },
 	imgWidth: number,
 	imgHeight: number,
 ): ResolvedCropResult {
@@ -1640,7 +1624,7 @@ function cropFromRegion(
 }
 
 function cropFromNormalized(
-	crop: CropEntry,
+	crop: CropEntry & { normalized: { x: number; y: number; width: number; height: number } },
 	imgWidth: number,
 	imgHeight: number,
 ): ResolvedCropResult {
@@ -1655,7 +1639,7 @@ function cropFromNormalized(
 }
 
 function cropFromPixels(
-	crop: CropEntry,
+	crop: CropEntry & { pixels: { x: number; y: number; width: number; height: number } },
 	imgWidth: number,
 	imgHeight: number,
 ): ResolvedCropResult {
@@ -1681,9 +1665,9 @@ function resolveCropResult(
 	imgWidth: number,
 	imgHeight: number,
 ): ResolvedCropResult {
-	if ("region" in crop) return cropFromRegion(crop, imgWidth, imgHeight);
-	if ("normalized" in crop) return cropFromNormalized(crop, imgWidth, imgHeight);
-	if ("pixels" in crop) return cropFromPixels(crop, imgWidth, imgHeight);
+	if ("region" in crop) return cropFromRegion(crop as CropEntry & { region: NamedRegion }, imgWidth, imgHeight);
+	if ("normalized" in crop) return cropFromNormalized(crop as CropEntry & { normalized: { x: number; y: number; width: number; height: number } }, imgWidth, imgHeight);
+	if ("pixels" in crop) return cropFromPixels(crop as CropEntry & { pixels: { x: number; y: number; width: number; height: number } }, imgWidth, imgHeight);
 	return invalidCropResult();
 }
 
@@ -1726,9 +1710,6 @@ export function cropSignature(crop: ResolvedCrop): string {
 }
 
 // ── Image cropping (ImageScript) ────────────────────────────────────────────
-/** Whether ImageScript is available for cropping. */
-const hasCropper = true;
-
 /**
  * Crop an image buffer to the given pixel rectangle using ImageScript.
  * Accepts raw image bytes (JPEG/PNG) and returns cropped bytes in the same format.
@@ -1797,18 +1778,22 @@ export function bufferToPiAiImage(
 }
 
 // ── Perceptual hashing (imghash) ────────────────────────────────────────────
-let _imghash: typeof import("imghash") | null = null;
+interface ImghashAPI {
+	hash(filepath: string | Buffer, bits?: number | null, format?: string): Promise<string>;
+}
+
+let _imghash: ImghashAPI | null = null;
 let _imghashLoadAttempted = false;
 
 /**
  * Attempt to load the imghash module. Returns null if unavailable.
  */
-async function loadImghash(): Promise<typeof import("imghash") | null> {
+async function loadImghash(): Promise<ImghashAPI | null> {
 	if (_imghash) return _imghash;
 	if (_imghashLoadAttempted) return null;
 	_imghashLoadAttempted = true;
 	try {
-		_imghash = await import("imghash");
+		_imghash = (await import("imghash")) as unknown as ImghashAPI;
 		return _imghash;
 	} catch {
 		return null;
@@ -1957,8 +1942,8 @@ const GROUNDING_INSTRUCTIONS: Record<GroundingFormat, string> = {
 /**
  * Build grounding instruction to append to the system prompt for a model.
  */
-export function buildGroundingInstruction(format: GroundingFormat): string {
-	return GROUNDING_INSTRUCTIONS[format] ?? "";
+export function buildGroundingInstruction(format: GroundingFormat | undefined): string {
+	return format ? GROUNDING_INSTRUCTIONS[format] ?? "" : "";
 }
 
 // ── Joint description helpers (Feature 2) ──────────────────────────────────

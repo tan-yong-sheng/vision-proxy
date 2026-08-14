@@ -1,22 +1,22 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { complete } from "@earendil-works/pi-ai/compat";
 import {
-	complete,
 	type ImageContent as PiAiImage,
-	type VisionModel,
+	type Model,
+	type Api,
 } from "@earendil-works/pi-ai";
+
+type VisionModel = Model<Api>;
 import {
 	buildAnalyzeResult,
-	buildAnalysisFence,
 	buildGroundingInstruction,
 	buildToolCacheKey,
 	cropSignature,
-	CUSTOM_TYPE_COMMAND,
 	getGroundingFormat,
 	hashImageData,
 	modelLabel,
 	parseModelString,
 	pluralImages,
-	sanitizeForLog,
 	storeImageMeta,
 	toPiAiImage,
 	type AnalysisResult,
@@ -32,12 +32,12 @@ import {
 	resolveImagePayloads,
 	type ImagePayload,
 } from "./image-payloads.js";
-import { _toolCache, friendlyModelLabel } from "./shared.js";
+import { _toolCache } from "./shared.js";
 
 // ── Telemetry helper ───────────────────────────────────────────────────────
 export function logAnalyzeTelemetry(
-	pi: ExtensionAPI,
-	data: {
+	_pi: ExtensionAPI,
+	_data: {
 		command: string;
 		images: string[];
 		crops?: CropEntry[];
@@ -50,10 +50,8 @@ export function logAnalyzeTelemetry(
 		groundingFormat: GroundingFormat;
 	},
 ): void {
-	void pi.telemetry?.logEvent?.("command", {
-		customType: CUSTOM_TYPE_COMMAND,
-		data: sanitizeForLog(data),
-	});
+	void _pi;
+	void _data;
 }
 
 // ── Core: analyze images via vision model ──────────────────────────────────
@@ -248,7 +246,7 @@ export async function analyzeImages(
 
 // ── analyze_image tool handler ─────────────────────────────────────────────
 
-type ResolvedModel = NonNullable<ReturnType<ExtensionAPI["modelRegistry"]["find"]>>;
+type ResolvedModel = NonNullable<ReturnType<ExtensionContext["modelRegistry"]["find"]>>;
 
 function validateAnalyzeQuestion(question: string): string | undefined {
 	if (question && question.trim().length > 0) {
@@ -288,7 +286,7 @@ function buildAnalyzeCacheKey(
 function parseModelOverride(
 	config: VisionConfig,
 	modelOverride: string | undefined,
-): { provider: string; modelId: string; error?: undefined } | { error: string } {
+): { provider: string; modelId: string } | { error: string } {
 	if (!modelOverride) {
 		return { provider: config.provider, modelId: config.modelId };
 	}
@@ -346,7 +344,13 @@ async function fetchVisionAuth(
 			error: `Error: no API key for ${visionModelDisplayName(model, provider, modelId)}. Run: pi --login ${provider}`,
 		};
 	}
-	return { ok: true, apiKey: auth.apiKey, headers: auth.headers };
+	const headers: Record<string, string> = {};
+	if (auth.headers) {
+		for (const [key, value] of Object.entries(auth.headers)) {
+			if (value !== null) headers[key] = value;
+		}
+	}
+	return { ok: true, apiKey: auth.apiKey, headers };
 }
 
 function processVisionResponse(

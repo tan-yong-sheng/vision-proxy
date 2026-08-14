@@ -1,7 +1,7 @@
-import type { ContextEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ContextEvent } from "@earendil-works/pi-coding-agent";
 import {
+	buildDescriptionFence,
 	extractCandidateImagePaths,
-	findDescriptions,
 	hashImageData,
 	maxToolCallsPerTurn,
 	stripImagePaths,
@@ -14,7 +14,7 @@ import { _toolCache, _toolCallCount } from "./shared.js";
 /** Build the error response when the analyze_image tool is disabled. */
 export function toolDisabledError(
 	config: VisionConfig,
-): { content: Array<{ type: "text"; text: string }> } | null {
+): { content: Array<{ type: "text"; text: string }>; details: undefined } | null {
 	if (config.tool !== "on") {
 		return {
 			content: [
@@ -23,6 +23,7 @@ export function toolDisabledError(
 					text: "Error: analyze_image tool is currently disabled. Use /vision-proxy tool on to enable.",
 				},
 			],
+			details: undefined,
 		};
 	}
 	if (config.mode === "off") {
@@ -33,6 +34,7 @@ export function toolDisabledError(
 					text: "Error: analyze_image tool is currently disabled. Use /vision-proxy tool on to enable.",
 				},
 			],
+			details: undefined,
 		};
 	}
 	return null;
@@ -41,7 +43,7 @@ export function toolDisabledError(
 /** Build the error response when the per-turn tool call limit is exceeded. */
 export function toolRateLimitError(
 	config: VisionConfig,
-): { content: Array<{ type: "text"; text: string }> } | null {
+): { content: Array<{ type: "text"; text: string }>; details: undefined } | null {
 	const limit = maxToolCallsPerTurn(config.maxToolCallsPerTurn);
 	if (limit === Infinity) return null;
 	_toolCallCount.value++;
@@ -53,6 +55,7 @@ export function toolRateLimitError(
 					text: `Error: analyze_image call limit reached (${limit} per turn). Rephrase your question or try in the next turn.`,
 				},
 			],
+			details: undefined,
 		};
 	}
 	return null;
@@ -106,7 +109,7 @@ function messageHasFilePaths(
 
 /** Determine whether a context message should be processed for image stripping. */
 function shouldProcessMessage(
-	msg: { role: string; content: unknown },
+	msg: { role: string; content?: unknown },
 ): boolean {
 	if (msg.role !== "user") return false;
 	const content = msg.content;
@@ -120,7 +123,7 @@ function transformImagePart(
 	descriptions: Map<string, string>,
 ): Array<{ type: "text"; text: string } | typeof part> {
 	if (!part.data) return [part];
-	const hash = hashImageData(part.data);
+	const hash = hashImageData(Buffer.from(part.data).toString("base64"));
 	const desc = descriptions.get(hash);
 	const meta = _imageMeta.get(hash);
 	return [{ type: "text" as const, text: imageDescriptionText(hash, desc, meta) }];
@@ -163,6 +166,11 @@ function transformMessageContent(
 	return result;
 }
 
+interface ContentMessage {
+	role: string;
+	content: Array<{ type: string; data?: Uint8Array; text?: string }>;
+}
+
 /** Transform messages, replacing images with cached descriptions. */
 export function transformMessages(
 	messages: ContextEvent["messages"],
@@ -172,11 +180,12 @@ export function transformMessages(
 	const transformed = messages.map((msg) => {
 		if (!shouldProcessMessage(msg)) return msg;
 		modified = true;
+		const contentMsg = msg as ContentMessage;
 		return {
 			...msg,
-			content: transformMessageContent(msg.content as typeof msg.content, descriptions),
+			content: transformMessageContent(contentMsg.content, descriptions),
 		};
 	});
-	return { messages: transformed, modified };
+	return { messages: transformed as ContextEvent["messages"], modified };
 }
 

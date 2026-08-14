@@ -4,7 +4,7 @@ function errorMessage(err: unknown): string {
 }
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type VisionModel } from "@earendil-works/pi-ai";
+import { type Model, type Api } from "@earendil-works/pi-ai";
 import {
 	buildAnalysisFence,
 	buildGroundingInstruction,
@@ -27,6 +27,8 @@ import {
 	resolveImagePayloads,
 	type ImagePayload,
 } from "./image-payloads.js";
+
+type VisionModel = Model<Api>;
 
 type DescribeModelResult =
 	| { ok: true; parsed: DescribeArgs; descConfig: VisionConfig; descVisionModel: VisionModel }
@@ -106,7 +108,13 @@ async function fetchDescribeAuth(
 	if (!auth.ok || !auth.apiKey) {
 		return `No API key for ${descVisionModel.name ?? modelLabel(descConfig)}. Run: pi --login ${descConfig.provider}`;
 	}
-	return { apiKey: auth.apiKey, headers: auth.headers };
+	const headers: Record<string, string> = {};
+	if (auth.headers) {
+		for (const [key, value] of Object.entries(auth.headers)) {
+			if (value !== null) headers[key] = value;
+		}
+	}
+	return { apiKey: auth.apiKey, headers };
 }
 
 type DescribeCallResult =
@@ -309,8 +317,8 @@ export async function handleDescribeCommand(
 	value: string,
 	ctx: ExtensionContext,
 	effective: VisionConfig,
-	persisted: VisionConfig,
-	writePersisted: (next: VisionConfig) => VisionConfig,
+	_persisted: VisionConfig,
+	_writePersisted: (next: VisionConfig) => VisionConfig,
 	pi: ExtensionAPI,
 ): Promise<void> {
 	if (guardProxyOff(ctx, effective)) return;

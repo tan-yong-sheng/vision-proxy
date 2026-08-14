@@ -42,17 +42,13 @@ import type {
 import { handleBeforeAgentStart } from "./helpers/before-agent.js";
 import { Type } from "typebox";
 import {
-	CUSTOM_TYPE_CONFIG,
 	findDescriptions,
 	_imageMeta,
 	readPersistentFile,
 	resolveConfig,
-	sanitize,
-	writePersistentFile,
 	type VisionConfig,
 } from "./internal.js";
 import { commandHandler } from "../lib/commands.js";
-import { handleDescribeCommand } from "../lib/describe.js";
 import {
 	toolDisabledError,
 	toolRateLimitError,
@@ -180,7 +176,7 @@ export default function (pi: ExtensionAPI) {
 					}
 
 					const result = await handleAnalyzeImage(params, extCtx, pi, config);
-					return { content: [{ type: "text" as const, text: result }] };
+					return { content: [{ type: "text" as const, text: result }], details: undefined };
 				},
 			});
 			_toolRegistered.value = true;

@@ -1,10 +1,11 @@
 /**
  * before_agent_start handler and helpers for pi-vision-proxy.
  */
-import {
-	type ImageContent as PiAiImage,
-	complete,
-	type VisionModel,
+import { complete } from "@earendil-works/pi-ai/compat";
+import type {
+	ImageContent as PiAiImage,
+	Model,
+	Api,
 } from "@earendil-works/pi-ai";
 import type {
 	BeforeAgentStartEvent,
@@ -25,22 +26,23 @@ import {
 	extractCandidateImagePaths,
 	generateFilenameHints,
 	hashImageData,
-	type AnalysisResult,
-	type DescriptionEntry,
-	type GroundingFormat,
-	type ImageMeta,
-	type LegacyImage,
 	modelLabel,
 	readImageFileWithReason,
-	type ReadImageResult,
 	resolveConfig,
 	shouldStripImages as shouldStripImagesPure,
 	storeImageMeta,
 	stripImagePaths,
 	toPiAiImage,
-	type VisionConfig,
 	_imageMeta,
+	type AnalysisResult,
+	type DescriptionEntry,
+	type ImageMeta,
+	type LegacyImage,
+	type ReadImageResult,
+	type VisionConfig,
 } from "../internal.js";
+
+type VisionModel = Model<Api>;
 
 /** Notify the user when a candidate file path was skipped for a real reason. */
 function notifyCandidateSkip(
@@ -110,7 +112,7 @@ function buildConversationContextOrEmpty(
 
 /** Append per-image description entries. */
 function appendDescriptionEntries(
-	successful: AnalysisResult[],
+	successful: Array<AnalysisResult & { description: string }>,
 	pi: ExtensionAPI,
 ): void {
 	for (const r of successful) {
@@ -159,7 +161,7 @@ async function analyzeAttachedImages(
 	);
 	if (!results) return null;
 	const successful = results.filter(
-		(r): r is AnalysisResult & { description: string } => Boolean(r.description),
+		(r): r is AnalysisResult & { description: string } => r.description !== null,
 	);
 	if (successful.length === 0) return null;
 	appendDescriptionEntries(successful, pi);
@@ -298,7 +300,7 @@ function buildVisionText(successful: AnalysisResult[]): string {
 	return successful
 		.map((r) => {
 			const meta = _imageMeta.get(r.hash);
-			return buildDescriptionFence(r.hash, r.description, meta);
+			return buildDescriptionFence(r.hash, r.description ?? "", meta);
 		})
 		.join("\n\n");
 }

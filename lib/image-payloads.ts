@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { complete } from "@earendil-works/pi-ai/compat";
 import {
-	complete,
 	type ImageContent as PiAiImage,
 } from "@earendil-works/pi-ai";
 import {
@@ -310,7 +310,7 @@ export async function callVisionModel(
 	model: Parameters<typeof complete>[0],
 	systemPrompt: string,
 	contentParts: Array<{ type: "text"; text: string } | PiAiImage>,
-	api: { apiKey: string; headers?: Record<string, string>; signal: AbortSignal },
+	api: { apiKey: string; headers?: Record<string, string>; signal?: AbortSignal },
 ): Promise<Awaited<ReturnType<typeof complete>>> {
 	return complete(
 		model,

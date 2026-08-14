@@ -161,6 +161,30 @@ describe("runAnalyze joint / multi-image", () => {
 	});
 });
 
+describe("runAnalyze image limits", () => {
+	it("enforces maxImagesPerCall", async () => {
+		await writeFile(
+			path.join(dir, ".vision-proxy.json"),
+			JSON.stringify({ maxImagesPerCall: 2 }),
+		);
+		await assert.rejects(
+			() => runAnalyze([imgPath, imgPath, imgPath], baseFlags(), stubAnalyze("x")),
+			(e) => e instanceof AnalyzeError && /too many images \(3\)/.test(e.message),
+		);
+	});
+
+	it("enforces maxBatch", async () => {
+		await writeFile(
+			path.join(dir, ".vision-proxy.json"),
+			JSON.stringify({ maxBatch: 2, maxImagesPerCall: 10 }),
+		);
+		await assert.rejects(
+			() => runAnalyze([imgPath, imgPath, imgPath], baseFlags({ joint: true }), stubAnalyze("x")),
+			(e) => e instanceof AnalyzeError && /too many images for batch \(3\)/.test(e.message),
+		);
+	});
+});
+
 describe("parseCropFlags", () => {
 	it("parses repeatable --crop flags from the flags map", async () => {
 		const { parseCropFlags } = await import("./analyze.ts");

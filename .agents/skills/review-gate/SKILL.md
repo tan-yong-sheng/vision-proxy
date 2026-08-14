@@ -41,6 +41,30 @@ bg_run \
 Then continue with other work. The terminal notification resumes the agent when the run reaches an outcome.
 A short `bash` timeout can kill the CLI while the daemon is still in `review: fixing`, leaving the run hard to monitor and resume.
 
+### Polling wrapper for approval gates
+
+Use the bundled polling script to watch a run and auto-approve any parked gates:
+
+```bash
+bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh [poll-interval-seconds]
+```
+
+Run it from inside the target worktree, or set `WORKTREE`:
+
+```bash
+WORKTREE=/path/to/qa-worktree bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh 30
+```
+
+The script prints `RUNNING` while the daemon works, `BLOCKED` when it sees `awaiting_agent: parked`, and `FINISHED` once `outcome:` appears. When blocked it calls `no-mistakes axi respond --action approve` and keeps polling.
+
+For fully unattended behavior, also enable repo-level auto-fix:
+
+```yaml
+# .no-mistakes/config.yaml
+auto_fix:
+  review: 3
+```
+
 ## Core workflow
 
 ### Resolve scope

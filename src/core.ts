@@ -1,14 +1,21 @@
 /**
- * Pure helpers for vision-proxy. Extracted for unit testing.
- * Type-only imports keep this file free of peer-dep runtime requirements.
+ * Core helpers for the vision-proxy CLI.
+ *
+ * Ported from the Pi extension's `extensions/internal.ts`, with all Pi runtime
+ * coupling removed. Anything that depended on a Pi `SessionEntry` (session-entry
+ * config resolution, `findDescriptions`) is dropped; the CLI owns its own
+ * config resolution (file + env). Image hashing, crops, grounding formats,
+ * config schema, decode/validate, pHash cache, and the safety fence all port
+ * verbatim in behaviour.
+ *
+ * All functions here are pure except where they touch the filesystem or decode
+ * an image. No Pi imports. No AI SDK imports.
  */
 import { createHash } from "node:crypto";
 import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { basename, dirname, extname, join, parse, relative } from "node:path";
-import type { ImageContent as PiAiImage } from "@earendil-works/pi-ai";
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import imageSize from "image-size";
+import { imageSize } from "image-size";
 import type { Image as ImageScriptImage } from "imagescript";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -32,21 +39,27 @@ export interface VisionConfig {
 	modelId: string;
 	systemPrompt: string;
 	includeContext: boolean;
-	// 1.4.0 additions
 	tool: ToolSetting;
 	maxImagesPerCall: number;
 	maxBatch: number;
 	cacheSize: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
-	// 1.6.0 addition
 	maxToolCallsPerTurn: number;
 }
 
 export interface ImageMeta {
 	width: number;
 	height: number;
-	filename?: string; // basename only
+	filename?: string;
+}
+
+/** A decoded image plus its resolved metadata and optional crop region. */
+export interface ImagePayload {
+	image: ImageContent;
+	hash: string;
+	meta: ImageMeta | undefined;
+	crop?: ResolvedCrop;
 }
 
 /** Result of a single-image vision analysis. */
@@ -55,6 +68,12 @@ export interface AnalysisResult {
 	description: string | null;
 	error?: string;
 }
+
+export type ImageContent = {
+	type: "image";
+	data: string;
+	mimeType: string;
+};
 
 export function buildAnalyzeResult(
 	imagePayloads: ImagePayload[],
@@ -65,13 +84,17 @@ export function buildAnalyzeResult(
 		.map((p, i) => {
 			const meta = _imageMeta.get(p.hash);
 			const dims = meta ? ` width="${meta.width}" height="${meta.height}"` : "";
-			const filename = meta?.filename ? ` filename="${escapeAttr(meta.filename)}"` : "";
+			const filename = meta?.filename
+				? ` filename="${escapeAttr(meta.filename)}"`
+				: "";
 			return `<vision_proxy_description image_index="${i}"${dims}${filename}>${p.hash}</vision_proxy_description>`;
 		})
 		.join("\n");
 
 	const grounding =
-		groundingFormat !== "none" ? `\n<vision_proxy_grounding_format>${groundingFormat}</vision_proxy_grounding_format>` : "";
+		groundingFormat !== "none"
+			? `\n<vision_proxy_grounding_format>${groundingFormat}</vision_proxy_grounding_format>`
+			: "";
 
 	return `${header}${grounding}\n\n${description}`;
 }
@@ -79,8 +102,8 @@ export function buildAnalyzeResult(
 /** In-memory map: image hash → dimensions + filename. Populated on first ingestion. */
 export const _imageMeta = new Map<string, ImageMeta>();
 
-/** Maximum pixel dimension for decoded images. Prevents decode bombs (e.g., 10 MB PNG → 500 MB bitmap). */
-const MAX_IMAGE_DIMENSION = 16384; // 16K × 16K ≈ 1 billion pixels max
+/** Maximum pixel dimension for decoded images. Prevents decode bombs. */
+const MAX_IMAGE_DIMENSION = 16384;
 
 /** Maximum entries in _imageMeta to prevent unbounded memory growth. */
 const IMAGE_META_MAX = 500;
@@ -115,13 +138,9 @@ export type CropEntry = { image_index: number } & (
 );
 
 export interface ResolvedCrop {
-	/** Pixel x of crop top-left within the original image. */
 	x: number;
-	/** Pixel y of crop top-left within the original image. */
 	y: number;
-	/** Pixel width of the crop. */
 	width: number;
-	/** Pixel height of the crop. */
 	height: number;
 }
 
@@ -138,7 +157,6 @@ export class LRUCache<K, V> {
 		return this._maxSize;
 	}
 
-	/** Resize the cache, evicting excess entries if shrinking. */
 	resize(newMaxSize: number): void {
 		this._maxSize = newMaxSize;
 		while (this.map.size > this._maxSize) {
@@ -147,7 +165,6 @@ export class LRUCache<K, V> {
 		}
 	}
 
-	/** Evict entries down to current maxSize. Call when maxSize is lowered to release memory. */
 	trim(): void {
 		while (this.map.size > this._maxSize) {
 			const first = this.map.keys().next().value;
@@ -159,7 +176,6 @@ export class LRUCache<K, V> {
 	get(key: K): V | undefined {
 		const v = this.map.get(key);
 		if (v !== undefined) {
-			// Move to end (most recently used)
 			this.map.delete(key);
 			this.map.set(key, v);
 		}
@@ -179,6 +195,14 @@ export class LRUCache<K, V> {
 		this.map.clear();
 	}
 
+	delete(key: K): boolean {
+		return this.map.delete(key);
+	}
+
+	entries(): Array<[K, V]> {
+		return [...this.map.entries()];
+	}
+
 	get size(): number {
 		return this.map.size;
 	}
@@ -196,12 +220,10 @@ export interface LegacyImage {
 // ── Constants ──────────────────────────────────────────────────────────────
 export const CUSTOM_TYPE_CONFIG = "vision-proxy-config";
 export const CUSTOM_TYPE_DESCRIPTION = "vision-proxy-description";
-const CUSTOM_TYPE_TOOL_CALL = "vision-proxy-tool-call";
 export const CUSTOM_TYPE_JOINT = "vision-proxy-joint-description";
 export const CUSTOM_TYPE_COMMAND = "vision-proxy-command";
-const CUSTOM_TYPE_SKIP = "vision-proxy-skip";
 
-/** Models explicitly excluded from grounding (PRD FR-4.1.1). */
+/** Models explicitly excluded from grounding. */
 const GROUNDING_EXCLUDED_MODELS = [
 	"anthropic/claude",
 	"openai/gpt-4o",
@@ -218,13 +240,11 @@ export const VALID_GROUNDING_FORMATS: GroundingFormat[] = [
 	"gemini_normalized_1000",
 ];
 
-/** Check if a model key matches any excluded prefix. */
 export function isGroundingExcluded(providerModel: string): boolean {
 	const lower = providerModel.toLowerCase();
 	return GROUNDING_EXCLUDED_MODELS.some((ex) => lower.startsWith(ex));
 }
 
-/** Parse and validate a grounding format string. */
 export function parseGroundingFormat(raw: string): GroundingFormat | null {
 	if ((VALID_GROUNDING_FORMATS as readonly string[]).includes(raw))
 		return raw as GroundingFormat;
@@ -233,25 +253,13 @@ export function parseGroundingFormat(raw: string): GroundingFormat | null {
 
 // ── Slash command: describe argument parsing ────────────────────────────
 export interface DescribeArgs {
-	/** Image references (file paths or sha256: hex strings). */
 	images: string[];
-	/** Optional question. If absent, generic system prompt is used. */
 	question?: string;
-	/** Optional per-image crop entries. */
 	crops?: CropEntry[];
-	/** Optional model override (provider/model-id). */
 	model?: string;
-	/** Whether to save the result as the canonical description. */
 	save: boolean;
 }
 
-/**
- * Parse the arguments for `/vision-proxy describe` and `/vision-proxy redescribe`.
- *
- * Syntax:
- * describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]
- * redescribe <path|hash> [--model <provider/id>]
- */
 interface DescribeParseContext {
 	isRedescribe: boolean;
 	images: string[];
@@ -312,7 +320,7 @@ const DESCRIBE_FLAG_HANDLERS: Record<string, FlagHandler> = {
 };
 
 function emptyArgsError(): string {
-	return 'Usage: /vision-proxy describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]';
+	return 'Usage: describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]';
 }
 
 function noImagesError(): string {
@@ -377,13 +385,6 @@ export function applyDescribeFlags(
 	return findUnknownFlag(tokens) ?? applyKnownFlags(tokens, isRedescribe);
 }
 
-/**
- * Parse the arguments for `/vision-proxy describe` and `/vision-proxy redescribe`.
- *
- * Syntax:
- * describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]
- * redescribe <path|hash> [--model <provider/id>]
- */
 export function parseDescribeArgs(
 	raw: string,
 	isRedescribe = false,
@@ -396,9 +397,7 @@ export function parseDescribeArgs(
 
 	return buildDescribeArgs(result, isRedescribe);
 }
-/**
- * Tokenize a command string, respecting double-quoted strings.
- */
+
 function tokenizeArgs(input: string): string[] {
 	const matches = input.match(/"(?:[^"])*"|\S+/g) ?? [];
 	return matches.map((m) =>
@@ -408,7 +407,6 @@ function tokenizeArgs(input: string): string[] {
 	);
 }
 
-/** Parse 4 comma-separated numbers from a string after a prefix. */
 function parse4Numbers(
 	form: string,
 	prefix: string,
@@ -419,7 +417,6 @@ function parse4Numbers(
 	return parts as unknown as number[];
 }
 
-/** Parse the `<image_index>:<form>` prefix of a crop argument. */
 function parseCropIndex(arg: string): { idx: number; form: string } | string {
 	const colonIdx = arg.indexOf(":");
 	if (colonIdx < 0) {
@@ -433,7 +430,6 @@ function parseCropIndex(arg: string): { idx: number; form: string } | string {
 	return { idx, form: arg.slice(colonIdx + 1) };
 }
 
-/** Parse a named-region crop form. */
 function parseRegionCrop(form: string, idx: number): CropEntry | string {
 	const region = form.slice(2);
 	if (!isValidNamedRegion(region)) {
@@ -442,7 +438,6 @@ function parseRegionCrop(form: string, idx: number): CropEntry | string {
 	return { image_index: idx, region: region as NamedRegion };
 }
 
-/** Parse a numeric crop form (normalized or pixel). */
 function parseNumbersCrop(
 	form: string,
 	prefix: "n=" | "p=",
@@ -462,7 +457,6 @@ function parseNumbersCrop(
 	} as unknown as CropEntry;
 }
 
-/** Parse the form portion of a crop argument. */
 function parseCropForm(form: string, idx: number): CropEntry | string {
 	if (form.startsWith("r=")) return parseRegionCrop(form, idx);
 	if (form.startsWith("n=")) return parseNumbersCrop(form, "n=", "normalized", idx);
@@ -470,11 +464,7 @@ function parseCropForm(form: string, idx: number): CropEntry | string {
 	return `Error: unknown crop form "${form}". Use r=<region>, n=<x>,<y>,<w>,<h>, or p=<x>,<y>,<w>,<h>.`;
 }
 
-/**
- * Parse a --crop argument: `<image_index>:<form>`
- * Forms: `r=<region>`, `n=<x>,<y>,<w>,<h>`, `p=<x>,<y>,<w>,<h>`
- */
-function parseCropArg(arg: string): CropEntry | string {
+export function parseCropArg(arg: string): CropEntry | string {
 	const parsed = parseCropIndex(arg);
 	if (typeof parsed === "string") return parsed;
 	return parseCropForm(parsed.form, parsed.idx);
@@ -520,15 +510,14 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-2.5-pro": { format: "gemini_normalized_1000" },
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
-	// 1.6.0 addition
 	maxToolCallsPerTurn: -1,
 };
 
 // ── Persistent file storage ────────────────────────────────────────────────
-/** Path to the persistent config file stored alongside settings.json */
+/** Path to the persistent config file. CLI-owned, falls back to ~/.vision-proxy/config.json. */
 function getPersistentConfigPath(agentDir?: string): string {
-	const base = agentDir ?? join(os.homedir(), ".pi", "agent");
-	return join(base, "vision-proxy.json");
+	const base = agentDir ?? join(os.homedir(), ".vision-proxy");
+	return join(base, "config.json");
 }
 
 const PERSISTED_CONFIG_KEYS = new Set([
@@ -546,7 +535,6 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"maxToolCallsPerTurn",
 ]);
 
-/** Filter a parsed config object to known persisted keys only. */
 function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
 	const filtered: Record<string, unknown> = {};
 	for (const [k, v] of Object.entries(parsed)) {
@@ -555,7 +543,6 @@ function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
 	return filtered as Partial<VisionConfig>;
 }
 
-/** Read config from the persistent file. Returns empty object on any failure. */
 export async function readPersistentFile(
 	agentDir?: string,
 ): Promise<Partial<VisionConfig>> {
@@ -564,16 +551,27 @@ export async function readPersistentFile(
 		const raw = await readFile(path, "utf8");
 		const parsed = JSON.parse(raw);
 		if (parsed && typeof parsed === "object") {
-			// Filter to known keys only — prevents prototype pollution or unexpected properties
 			return filterKnownConfigKeys(parsed);
 		}
 	} catch {
 		// file doesn't exist or is invalid
 	}
+	// Fall back to the legacy Pi extension config path for continuity.
+	if (!agentDir) {
+		try {
+			const legacy = join(os.homedir(), ".pi", "agent", "vision-proxy.json");
+			const raw = await readFile(legacy, "utf8");
+			const parsed = JSON.parse(raw);
+			if (parsed && typeof parsed === "object") {
+				return filterKnownConfigKeys(parsed);
+			}
+		} catch {
+			// legacy file doesn't exist or is invalid
+		}
+	}
 	return {};
 }
 
-/** Write config to the persistent file. Best-effort; errors are logged, not thrown. */
 export async function writePersistentFile(
 	config: Partial<VisionConfig>,
 	agentDir?: string,
@@ -582,40 +580,15 @@ export async function writePersistentFile(
 		const path = getPersistentConfigPath(agentDir);
 		await mkdir(dirname(path), { recursive: true });
 		await writeFile(path, JSON.stringify(config, null, 2) + "\n", "utf8");
-	} catch (err) {
-		// Best effort — don't break the extension if disk write fails
+	} catch {
+		// Best effort — don't break the CLI if disk write fails
 	}
 }
 
 // ── Config resolution ──────────────────────────────────────────────────────
-/** Determine whether a session entry is a persisted vision config entry. */
-function isConfigEntry(entry: SessionEntry | undefined): entry is SessionEntry & {
-	type: "custom";
-	customType: typeof CUSTOM_TYPE_CONFIG;
-	data: unknown;
-} {
-	if (!entry) return false;
-	if (entry.type !== "custom") return false;
-	if (entry.customType !== CUSTOM_TYPE_CONFIG) return false;
-	return !!entry.data;
-}
-
-function readPersistedConfig(
-	entries: readonly SessionEntry[],
-): Partial<VisionConfig> {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i];
-		if (isConfigEntry(entry)) {
-			return entry.data as Partial<VisionConfig>;
-		}
-	}
-	return {};
-}
-
 const FALSE_STRINGS = new Set(["0", "false", "no", "off"]);
 const TRUE_STRINGS = new Set(["1", "true", "yes", "on"]);
 
-/** Assign a value to an object only when it is not undefined. */
 function assignIfDefined<T extends object, K extends keyof T>(
 	target: T,
 	key: K,
@@ -653,7 +626,6 @@ function parseToolOverride(value: string | undefined): ToolSetting | undefined {
 	return undefined;
 }
 
-/** Determine whether a parsed number is outside the allowed range. */
 function isOutOfRange(n: number, min: number, max: number): boolean {
 	if (!Number.isFinite(n)) return true;
 	if (n < min) return true;
@@ -683,7 +655,6 @@ function parseFloatOverride(
 	return n;
 }
 
-/** Parse the per-turn tool-call cap env override. -1 means unlimited. */
 function parseToolCallsOverride(
 	value: string | undefined,
 ): number | undefined {
@@ -693,13 +664,17 @@ function parseToolCallsOverride(
 	return -1;
 }
 
+/**
+ * Read config overrides from environment variables.
+ * Precedence prefix is VP_ (e.g. VP_PROVIDER, VP_MODEL, VP_CACHE_SIZE).
+ */
 export function readEnvOverrides(
 	env: NodeJS.ProcessEnv = process.env,
 ): Partial<VisionConfig> {
 	const overrides: Partial<VisionConfig> = {};
 
-	assignIfDefined(overrides, "mode", parseModeOverride(env.PI_VISION_PROXY_MODE));
-	const modelOverride = parseModelOverride(env.PI_VISION_PROXY_MODEL);
+	assignIfDefined(overrides, "mode", parseModeOverride(env.VP_MODE));
+	const modelOverride = parseModelOverride(env.VP_MODEL);
 	if (modelOverride) {
 		assignIfDefined(overrides, "provider", modelOverride.provider);
 		assignIfDefined(overrides, "modelId", modelOverride.modelId);
@@ -707,33 +682,33 @@ export function readEnvOverrides(
 	assignIfDefined(
 		overrides,
 		"includeContext",
-		parseBooleanOverride(env.PI_VISION_PROXY_INCLUDE_CONTEXT),
+		parseBooleanOverride(env.VP_INCLUDE_CONTEXT),
 	);
-	assignIfDefined(overrides, "tool", parseToolOverride(env.PI_VISION_PROXY_TOOL));
+	assignIfDefined(overrides, "tool", parseToolOverride(env.VP_TOOL));
 	assignIfDefined(
 		overrides,
 		"maxImagesPerCall",
-		parseIntOverride(env.PI_VISION_PROXY_MAX_IMAGES_PER_CALL, 1, 20),
+		parseIntOverride(env.VP_MAX_IMAGES_PER_CALL, 1, 20),
 	);
 	assignIfDefined(
 		overrides,
 		"maxBatch",
-		parseIntOverride(env.PI_VISION_PROXY_MAX_BATCH, 1, 10),
+		parseIntOverride(env.VP_MAX_BATCH, 1, 10),
 	);
 	assignIfDefined(
 		overrides,
 		"cacheSize",
-		parseIntOverride(env.PI_VISION_PROXY_CACHE_SIZE, 0, 500),
+		parseIntOverride(env.VP_CACHE_SIZE, 0, 500),
 	);
 	assignIfDefined(
 		overrides,
 		"pHashSimilarityThreshold",
-		parseFloatOverride(env.PI_VISION_PROXY_PHASH_THRESHOLD, 0, 1),
+		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
 	assignIfDefined(
 		overrides,
 		"maxToolCallsPerTurn",
-		parseToolCallsOverride(env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN),
+		parseToolCallsOverride(env.VP_MAX_TOOL_CALLS_PER_TURN),
 	);
 
 	return overrides;
@@ -750,18 +725,17 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxToolCallsPerTurn: boolean;
 } {
 	return {
-		mode: Boolean(env.PI_VISION_PROXY_MODE),
-		model: Boolean(env.PI_VISION_PROXY_MODEL),
-		context: env.PI_VISION_PROXY_INCLUDE_CONTEXT !== undefined,
-		tool: env.PI_VISION_PROXY_TOOL !== undefined,
-		maxImagesPerCall: env.PI_VISION_PROXY_MAX_IMAGES_PER_CALL !== undefined,
-		maxBatch: env.PI_VISION_PROXY_MAX_BATCH !== undefined,
-		cacheSize: env.PI_VISION_PROXY_CACHE_SIZE !== undefined,
-		maxToolCallsPerTurn: env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN !== undefined,
+		mode: Boolean(env.VP_MODE),
+		model: Boolean(env.VP_MODEL),
+		context: env.VP_INCLUDE_CONTEXT !== undefined,
+		tool: env.VP_TOOL !== undefined,
+		maxImagesPerCall: env.VP_MAX_IMAGES_PER_CALL !== undefined,
+		maxBatch: env.VP_MAX_BATCH !== undefined,
+		cacheSize: env.VP_CACHE_SIZE !== undefined,
+		maxToolCallsPerTurn: env.VP_MAX_TOOL_CALLS_PER_TURN !== undefined,
 	};
 }
 
-/** Validate that provider and modelId strings match their respective patterns. */
 function isValidModelParts(provider: string, modelId: string): boolean {
 	if (!PROVIDER_PATTERN.test(provider)) return false;
 	if (!MODEL_ID_PATTERN.test(modelId)) return false;
@@ -856,7 +830,12 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		DEFAULT_CONFIG.maxImagesPerCall,
 	);
 	safe.maxBatch = fallbackRange(safe.maxBatch, 1, 10, DEFAULT_CONFIG.maxBatch);
-	safe.cacheSize = fallbackRange(safe.cacheSize, 0, 500, DEFAULT_CONFIG.cacheSize);
+	safe.cacheSize = fallbackRange(
+		safe.cacheSize,
+		0,
+		500,
+		DEFAULT_CONFIG.cacheSize,
+	);
 	safe.pHashSimilarityThreshold = fallbackRange(
 		safe.pHashSimilarityThreshold,
 		0,
@@ -867,87 +846,42 @@ export function sanitize(config: VisionConfig): VisionConfig {
 	safe.maxToolCallsPerTurn = fallbackToolCallsCap(safe.maxToolCallsPerTurn);
 	return safe;
 }
-export function persistedBase(
-	entries: readonly SessionEntry[],
-	fileConfig: Partial<VisionConfig> = {},
-): VisionConfig {
-	return sanitize({ ...DEFAULT_CONFIG, ...fileConfig, ...readPersistedConfig(entries) });
-}
 
+/** Resolve config from file + env (no session entries in the CLI). */
 export function resolveConfig(
-	entries: readonly SessionEntry[],
 	env: NodeJS.ProcessEnv = process.env,
 	fileConfig: Partial<VisionConfig> = {},
 ): VisionConfig {
-	return sanitize({
-		...DEFAULT_CONFIG,
-		...fileConfig,
-		...readPersistedConfig(entries),
-		...readEnvOverrides(env),
-	});
-}
-
-// ── Session-entry helpers ──────────────────────────────────────────────────
-/** Determine whether a session entry is a description entry with data. */
-function isDescriptionEntry(
-	entry: SessionEntry,
-): entry is SessionEntry & {
-	type: "custom";
-	customType: typeof CUSTOM_TYPE_DESCRIPTION;
-	data: DescriptionEntry;
-} {
-	if (entry.type !== "custom") return false;
-	if (entry.customType !== CUSTOM_TYPE_DESCRIPTION) return false;
-	if (!entry.data) return false;
-	return true;
-}
-
-function hasDescription(d: DescriptionEntry): boolean {
-	if (!d.hash) return false;
-	if (!d.description) return false;
-	return true;
-}
-
-export function findDescriptions(
-	entries: readonly SessionEntry[],
-): Map<string, string> {
-	const map = new Map<string, string>();
-	for (const entry of entries) {
-		if (!isDescriptionEntry(entry)) continue;
-		if (hasDescription(entry.data)) {
-			map.set(entry.data.hash, entry.data.description);
-		}
-	}
-	return map;
+	return sanitize({ ...DEFAULT_CONFIG, ...readEnvOverrides(env), ...fileConfig });
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────
-function isModernPiAiImage(
-	img: PiAiImage | LegacyImage,
-): img is PiAiImage {
+function isModernImageContent(
+	img: ImageContent | LegacyImage,
+): img is ImageContent {
 	if (!("data" in img)) return false;
 	if (typeof img.data !== "string") return false;
-	if (typeof (img as PiAiImage).mimeType !== "string") return false;
+	if (typeof (img as ImageContent).mimeType !== "string") return false;
 	return true;
 }
 
 function legacyImageSource(
-	img: PiAiImage | LegacyImage,
+	img: ImageContent | LegacyImage,
 ): LegacyImage["source"] | undefined {
 	return (img as LegacyImage).source;
 }
 
 function isLegacySource(
 	source: LegacyImage["source"] | undefined,
-): boolean {
+): source is { data: string; mediaType: string } {
 	if (!source) return false;
 	if (!source.data) return false;
 	if (!source.mediaType) return false;
 	return true;
 }
 
-export function toPiAiImage(img: PiAiImage | LegacyImage): PiAiImage {
-	if (isModernPiAiImage(img)) {
+export function toImageContent(img: ImageContent | LegacyImage): ImageContent {
+	if (isModernImageContent(img)) {
 		return {
 			type: "image",
 			data: img.data,
@@ -956,13 +890,11 @@ export function toPiAiImage(img: PiAiImage | LegacyImage): PiAiImage {
 	}
 	const legacy = legacyImageSource(img);
 	if (isLegacySource(legacy)) {
-		return { type: "image", data: legacy.data, mimeType: legacy.mediaType };
+		return { type: "image", data: legacy.data ?? "", mimeType: legacy.mediaType ?? "image/png" };
 	}
 	throw new Error("Unsupported image content shape");
 }
 
-// 128-bit (32-hex-char) prefix of sha256. Image-description cache key — collision is harmless
-// (just a wrong reused description), and the truncation keeps session entries small.
 export function hashImageData(data: string): string {
 	return createHash("sha256").update(data).digest("hex").slice(0, HASH_HEX_LEN);
 }
@@ -987,26 +919,6 @@ const EXT_TO_MIME: Record<string, string> = {
 
 const IMAGE_EXT_ALT = "jpg|jpeg|png|gif|webp|bmp|tiff|tif|ico|avif";
 
-const IMAGE_PATH_PLACEHOLDER =
-	"[image file — see vision proxy description]";
-
-/**
- * Path-aware placeholder that preserves the original file path so the model
- * can use it in tool calls like analyze_image.
- */
-function imageFilePlaceholder(filePath: string): string {
-	return `[Image: ${filePath}]`;
-}
-
-function mimeTypeForExt(filePath: string): string | undefined {
-	return EXT_TO_MIME[extname(filePath).toLowerCase()];
-}
-
-/**
- * Extract candidate image file paths from prompt text.
- * Matches `pi-clipboard-*` temp files and general paths ending with image extensions.
- * Paths with spaces are not supported (use CLI `@file` for those).
- */
 export function extractCandidateImagePaths(text: string): string[] {
 	const paths: string[] = [];
 	const seen = new Set<string>();
@@ -1019,16 +931,12 @@ export function extractCandidateImagePaths(text: string): string[] {
 		}
 	}
 
-	// Pass 1: pi-clipboard temp files — match from drive/root to filename, no whitespace inside path
 	for (const m of text.matchAll(
 		/(?:^|[\s"'])([a-zA-Z]:[/\\][^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+|\/[^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+)/gim,
 	)) {
 		add(m[1]);
 	}
 
-	// Pass 2: general image file paths ending with common extensions (no spaces)
-	// Requires a recognized path prefix (drive letter, /, ~/) followed by at least
-	// one directory separator — this filters out bare filenames in HTML/Markdown attributes.
 	const pass2Pattern = new RegExp(
 		`(?:^|[\\s"'(])((?:[a-zA-Z]:[/\\\\]|/|~)[\\w./\\\\+-]*[/\\\\][\\w.+-]+\\.(?:${IMAGE_EXT_ALT}))\\b`,
 		"gi",
@@ -1037,7 +945,6 @@ export function extractCandidateImagePaths(text: string): string[] {
 		add(m[1]);
 	}
 
-	// Also match ./ and ../ relative paths
 	const relPattern = new RegExp(
 		`(?:^|[\\s"'(])(\\.\\.?/[\\w./\\\\+-]+\\.(?:${IMAGE_EXT_ALT}))\\b`,
 		"gi",
@@ -1049,13 +956,12 @@ export function extractCandidateImagePaths(text: string): string[] {
 	return paths;
 }
 
-// ── Safe file read ─────────────────────────────────────────────────────────
-/**
- * Size limit for images read from file paths.
- * Override with PI_VISION_PROXY_MAX_IMAGE_BYTES.
- */
+function mimeTypeForExt(filePath: string): string | undefined {
+	return EXT_TO_MIME[extname(filePath).toLowerCase()];
+}
+
 function maxImageFileBytes(): number {
-	const raw = process.env.PI_VISION_PROXY_MAX_IMAGE_BYTES;
+	const raw = process.env.VP_MAX_IMAGE_BYTES;
 	if (raw) {
 		const n = Number.parseInt(raw, 10);
 		if (Number.isFinite(n) && n > 0) return n;
@@ -1063,14 +969,8 @@ function maxImageFileBytes(): number {
 	return 10 * 1024 * 1024;
 }
 
-/**
- * Maximum analyze_image tool calls per agent turn.
- * Defaults to Infinity (no limit). A configured value of -1, 0, or a non-numeric
- * env string means unlimited. Env overrides are used only when no explicit value
- * is configured (or when the configured value is invalid).
- */
 export function maxToolCallsPerTurn(configured?: number): number {
-	const n = Number(configured ?? process.env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN);
+	const n = Number(configured ?? process.env.VP_MAX_TOOL_CALLS_PER_TURN);
 	if (Number.isFinite(n) && n > 0) return Math.floor(n);
 	return Infinity;
 }
@@ -1084,10 +984,10 @@ export type ReadImageReason =
 	| "too-large";
 
 export interface ReadImageResult {
-	image: PiAiImage | null;
+	image: ImageContent | null;
 	reason?: ReadImageReason;
 	bytes?: number;
-	filename?: string; // basename of the file
+	filename?: string;
 }
 
 async function canonical(p: string | undefined): Promise<string | null> {
@@ -1107,17 +1007,15 @@ function isInsideOrSame(resolved: string, allowedRoot: string): boolean {
 function isLocalAbsolutePath(resolved: string): boolean {
 	const parsed = parse(resolved);
 	if (!parsed.root) return false;
-	// Keep UNC/network paths denied; default drive access is for local Windows volumes only.
 	if (parsed.root.startsWith("\\\\")) return false;
 	return os.platform() === "win32" && /^[a-z]:[\\/]/i.test(parsed.root);
 }
 
 function driveAccessDisabled(): boolean {
-	const raw = process.env.PI_VISION_PROXY_ALLOW_DRIVES?.toLowerCase();
+	const raw = process.env.VP_ALLOW_DRIVES?.toLowerCase();
 	return raw === "0" || raw === "false" || raw === "no" || raw === "off";
 }
 
-/** Resolve a file path to a lowercase canonical string, returning null on failure. */
 async function resolvedPath(filePath: string): Promise<string | null> {
 	try {
 		return (await realpath(filePath)).toLowerCase();
@@ -1126,7 +1024,6 @@ async function resolvedPath(filePath: string): Promise<string | null> {
 	}
 }
 
-/** Check whether a resolved path sits inside a single canonical root. */
 async function insideRoot(
 	resolved: string,
 	root: Promise<string | null>,
@@ -1144,45 +1041,20 @@ function cwdRoot(): Promise<string | null> {
 	return canonical(process.cwd());
 }
 
-function piRoot(): Promise<string | null> {
-	return canonical(join(os.homedir?.() ?? "/", ".pi")).catch(() => null);
+function homeRoot(): Promise<string | null> {
+	return canonical(os.homedir?.());
 }
 
-/** Check whether a resolved path sits inside any standard safe root. */
-async function isInsideStandardRoots(resolved: string): Promise<boolean> {
-	if (await insideRoot(resolved, tmpRoot())) return true;
-	if (await insideRoot(resolved, cwdRoot())) return true;
-	if (await insideRoot(resolved, piRoot())) return true;
-	return false;
-}
-
-/** Check whether a resolved path sits inside the home directory when allowed. */
-async function isInsideHomeIfAllowed(resolved: string): Promise<boolean> {
-	if (process.env.PI_VISION_PROXY_ALLOW_HOME !== "1") return false;
-	return insideRoot(resolved, canonical(os.homedir?.()));
-}
-
-/** Check whether local drive access allows the resolved path. */
-function isDriveAllowedPath(resolved: string): boolean {
-	if (driveAccessDisabled()) return false;
-	return isLocalAbsolutePath(resolved);
-}
-
-/**
- * Check that a resolved file path is within a safe directory.
- * By default allows tmpdir, cwd, and local Windows drive paths; opt into homedir
- * on non-drive platforms via PI_VISION_PROXY_ALLOW_HOME=1.
- * Both sides are canonicalized via realpath to handle symlinks and Windows 8.3 short names.
- */
 export async function isPathAllowed(filePath: string): Promise<boolean> {
 	const resolved = await resolvedPath(filePath);
 	if (!resolved) return false;
-	if (await isInsideStandardRoots(resolved)) return true;
-	if (await isInsideHomeIfAllowed(resolved)) return true;
-	return isDriveAllowedPath(resolved);
+	if (await insideRoot(resolved, tmpRoot())) return true;
+	if (await insideRoot(resolved, cwdRoot())) return true;
+	if (await insideRoot(resolved, homeRoot())) return true;
+	if (process.env.VP_ALLOW_HOME === "1") return await insideRoot(resolved, homeRoot());
+	return isLocalAbsolutePath(resolved) && !driveAccessDisabled();
 }
 
-/** Strip common wrapping characters from an LLM-provided file path. */
 function cleanFilePath(rawPath: string): string {
 	return rawPath
 		.replace(/^[\s"'`[\]\\]+/, "")
@@ -1194,14 +1066,12 @@ type ReadBytesResult =
 	| { ok: true; content: Buffer }
 	| { ok: false; reason: ReadImageResult["reason"]; bytes?: number };
 
-/** Return a size-related failure reason, or undefined if the size is acceptable. */
 function imageSizeReason(content: Buffer): ReadImageResult["reason"] | undefined {
 	if (content.length === 0) return "empty";
 	if (content.length > maxImageFileBytes()) return "too-large";
 	return undefined;
 }
 
-/** Read file bytes and return a structured failure reason if anything is wrong. */
 async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 	try {
 		await access(filePath);
@@ -1224,9 +1094,6 @@ async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 	return { ok: true, content };
 }
 
-/**
- * Read an image file and return as base64 ImageContent with a structured reason on failure.
- */
 export async function readImageFileWithReason(
 	rawPath: string,
 ): Promise<ReadImageResult> {
@@ -1256,7 +1123,7 @@ export async function readImageFileWithReason(
 }
 
 const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
-	denied: "path outside allowed directories (tmp / cwd / local Windows drives; set PI_VISION_PROXY_ALLOW_HOME=1 to include home on other volumes)",
+	denied: "path outside allowed directories (tmp / cwd / home; set VP_ALLOW_HOME=1 to include home on other volumes)",
 	unreadable: "could not read file",
 	empty: "file is empty",
 	"not-an-image": "unsupported extension",
@@ -1264,49 +1131,22 @@ const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
 	"too-large": "",
 };
 
-/**
- * Convert a ReadImageReason into a human-readable explanation.
- */
 export function describeReadReason(
 	reason: ReadImageReason,
 	bytes?: number,
 ): string {
 	if (reason === "too-large") {
-		return `${bytes ?? "?"} bytes exceeds limit (override with PI_VISION_PROXY_MAX_IMAGE_BYTES)`;
+		return `${bytes ?? "?"} bytes exceeds limit (override with VP_MAX_IMAGE_BYTES)`;
 	}
 	return READ_REASON_MESSAGES[reason];
 }
 
-/**
- * Read an image file. Returns null on any failure. Prefer readImageFileWithReason for diagnostics.
- */
-async function readImageFile(
-	filePath: string,
-): Promise<PiAiImage | null> {
-	return (await readImageFileWithReason(filePath)).image;
-}
-
-/**
- * Replace detected image file paths in text with a path-aware placeholder
- * so the model can still reference the file for tools like analyze_image.
- * The format [ImagePath:<path>] is chosen so extractCandidateImagePaths does
- * not re-detect it (the colon before the path is not in [\s"'()]).
- */
-let _phCounter = 0;
-
-/**
- * Replace detected image file paths in text with a path-aware placeholder
- * so the model can still reference the file for tools like analyze_image.
- * Uses a two-pass approach: unique tokens first, then replace with final format
- * to avoid partial-path collisions (e.g. /tmp/a.png inside /tmp/a.png.bak).
- */
 export function stripImagePaths(
 	text: string,
 	paths: readonly string[],
 ): string {
 	if (paths.length === 0) return text;
 
-	// Pass 1: sort longest-first and replace each path with a unique token
 	const sorted = [...paths].sort((a, b) => b.length - a.length);
 	const tokens = new Map<string, string>();
 	let result = text;
@@ -1317,7 +1157,6 @@ export function stripImagePaths(
 		result = result.replace(new RegExp(escaped, "g"), token);
 	}
 
-	// Pass 2: replace tokens with path-aware placeholders
 	for (const [token, p] of tokens) {
 		result = result.replace(token, `[ImagePath:${p}]`);
 	}
@@ -1328,11 +1167,9 @@ export function stripImagePaths(
 export function splitSubcommand(arg: string): { sub: string; value: string } {
 	const match = arg.match(/^(\S+)(?:\s+([\s\S]*))?$/);
 	if (!match) return { sub: "", value: "" };
-	return { sub: match[1].toLowerCase(), value: (match[2] ?? "").trim() };
+	return { sub: match[1]!.toLowerCase(), value: (match[2] ?? "").trim() };
 }
 
-// Defensive fence — replace any closing/opening tag of any of the fence types
-// in untrusted text so it can't break out. Handles whitespace/attribute variants.
 const FENCE_TAG_RE =
 	/<\/?vision_proxy_(?:description|analysis|joint_description)\b[^>]*>/gi;
 
@@ -1342,10 +1179,9 @@ export function fenceUntrusted(text: string): string {
 	);
 }
 
-/** Escape a string for safe interpolation inside an XML/HTML double-quoted attribute. */
 export function escapeAttr(s: string): string {
 	return s
-		.replace(/\0/g, "\uFFFD") // neutralise null bytes
+		.replace(/\0/g, "�")
 		.replace(/&/g, "&amp;")
 		.replace(/"/g, "&quot;")
 		.replace(/</g, "&lt;")
@@ -1373,26 +1209,25 @@ function extractText(content: unknown): string {
 	return collectTextParts(content).join(" ");
 }
 
-function collectRecentMessages(entries: readonly SessionEntry[]): SessionEntry[] {
-	const messages = entries.filter((e) => e.type === "message");
-	return messages.slice(-RECENT_MESSAGE_COUNT);
+interface MessageLike {
+	role: string;
+	content: unknown;
 }
 
-function messageRole(
-	entry: SessionEntry,
-): { role: string; content: unknown } | null {
-	if (entry.type !== "message") return null;
-	if (!entry.message?.role) return null;
-	return { role: entry.message.role, content: entry.message.content };
-}
-
-function formatMessageLine(entry: SessionEntry): string | null {
-	const msg = messageRole(entry);
-	if (!msg) return null;
-	const text = extractText(msg.content);
-	if (!text) return null;
-	if (msg.role === "user") return `User: ${text}`;
-	return `Assistant: ${text.slice(0, ASSISTANT_TRUNCATE_CHARS)}`;
+export function buildConversationContext(
+	messages: readonly MessageLike[],
+): string {
+	const recent = messages.filter((e) => e.role === "user" || e.role === "assistant").slice(-RECENT_MESSAGE_COUNT);
+	const lines = recent
+		.map((entry) => {
+			const text = extractText(entry.content);
+			if (!text) return null;
+			if (entry.role === "user") return `User: ${text}`;
+			return `Assistant: ${text.slice(0, ASSISTANT_TRUNCATE_CHARS)}`;
+		})
+		.filter((line): line is string => line !== null);
+	const joined = lines.join("\n");
+	return truncateContext(joined);
 }
 
 function truncateContext(result: string): string {
@@ -1400,17 +1235,6 @@ function truncateContext(result: string): string {
 	return "…" + result.slice(-CONTEXT_MAX_CHARS);
 }
 
-export function buildConversationContext(
-	entries: readonly SessionEntry[],
-): string {
-	const recent = collectRecentMessages(entries);
-	const lines = recent
-		.map(formatMessageLine)
-		.filter((line): line is string => line !== null);
-	return truncateContext(lines.join("\n"));
-}
-
-// ── Display helpers ────────────────────────────────────────────────────────
 export function modelLabel(config: {
 	provider: string;
 	modelId: string;
@@ -1429,7 +1253,6 @@ export function modeLabel(mode: ProxyMode): string {
 	}
 }
 
-/** Fuzzy-match: true when every char of `query` appears in order in `target` (case-insensitive). */
 export function fuzzyMatches(target: string, query: string): boolean {
 	const t = target.toLowerCase();
 	const q = query.toLowerCase();
@@ -1452,10 +1275,6 @@ export function shouldStripImages(
 }
 
 // ── Image dimension extraction ─────────────────────────────────────────────
-/**
- * Extract image dimensions from a Buffer using image-size (header-only).
- * Returns undefined on failure.
- */
 export function extractDimensions(
 	data: Buffer,
 ): { width: number; height: number } | undefined {
@@ -1470,16 +1289,6 @@ export function extractDimensions(
 	return undefined;
 }
 
-/**
- * Store image metadata in the in-memory map. Called on first ingestion.
- * Accepts a Buffer directly to avoid re-decoding base64 when the raw bytes
- * are already available (e.g. from readImageFileWithReason).
- */
-
-/**
- * Check if image dimensions exceed the decode bomb threshold.
- * Returns the dims if safe, or undefined if too large.
- */
 function safeDimensions(
 	data: Buffer,
 ): { width: number; height: number } | undefined {
@@ -1499,17 +1308,14 @@ function backfillFilename(
 	}
 }
 
-/** Decode a base64 header or reuse an already-buffered image. */
 function decodeImageBuffer(imageBufferOrData: Buffer | string): Buffer | undefined {
 	if (Buffer.isBuffer(imageBufferOrData)) {
 		return imageBufferOrData;
 	}
 
-	// Only decode enough for dimension extraction (image-size reads headers only).
-	// Round down to a multiple of 4 (base64 quantum boundary) to avoid corruption.
 	const headerB64 = imageBufferOrData.slice(0, 1400);
 	const aligned = Math.floor(headerB64.length / 4) * 4;
-	if (aligned < 4) return; // too short to decode
+	if (aligned < 4) return;
 	return Buffer.from(headerB64.slice(0, aligned), "base64");
 }
 
@@ -1522,6 +1328,12 @@ function storeNewImageMeta(
 	if (!dims) return;
 	_imageMeta.set(hash, { width: dims.width, height: dims.height, filename });
 	evictImageMeta();
+}
+
+interface StoredImageMeta {
+	width: number;
+	height: number;
+	filename?: string;
 }
 
 export function storeImageMeta(
@@ -1566,9 +1378,6 @@ export function isValidNamedRegion(s: string): s is NamedRegion {
 	return NAMED_REGIONS.has(s);
 }
 
-/**
- * Resolve a NamedRegion to a normalized rectangle.
- */
 export function resolveRegion(region: NamedRegion): {
 	x: number;
 	y: number;
@@ -1578,10 +1387,6 @@ export function resolveRegion(region: NamedRegion): {
 	return REGION_MAP[region];
 }
 
-/**
- * Convert normalized coordinates to pixel rectangle, clamped to image bounds.
- * Returns null if the resulting rectangle has zero area.
- */
 export function normalizedToPixels(
 	norm: { x: number; y: number; width: number; height: number },
 	imgWidth: number,
@@ -1600,10 +1405,6 @@ export function normalizedToPixels(
 	return { x, y, width: w, height: h };
 }
 
-/**
- * Clamp pixel coordinates to image bounds.
- * Returns null if the resulting rectangle has zero area.
- */
 export function clampPixels(
 	px: { x: number; y: number; width: number; height: number },
 	imgWidth: number,
@@ -1624,7 +1425,7 @@ type ResolvedCropResult =
 	| { ok: false; label: string };
 
 function cropFromRegion(
-	crop: CropEntry,
+	crop: Extract<CropEntry, { region: NamedRegion }>,
 	imgWidth: number,
 	imgHeight: number,
 ): ResolvedCropResult {
@@ -1640,7 +1441,7 @@ function cropFromRegion(
 }
 
 function cropFromNormalized(
-	crop: CropEntry,
+	crop: Extract<CropEntry, { normalized: { x: number; y: number; width: number; height: number } }>,
 	imgWidth: number,
 	imgHeight: number,
 ): ResolvedCropResult {
@@ -1655,7 +1456,7 @@ function cropFromNormalized(
 }
 
 function cropFromPixels(
-	crop: CropEntry,
+	crop: Extract<CropEntry, { pixels: { x: number; y: number; width: number; height: number } }>,
 	imgWidth: number,
 	imgHeight: number,
 ): ResolvedCropResult {
@@ -1687,10 +1488,6 @@ function resolveCropResult(
 	return invalidCropResult();
 }
 
-/**
- * Resolve a CropEntry to pixel rectangle given image dimensions.
- * Returns null on zero-area crop (error condition for normalized/pixels).
- */
 export function resolveCropEntry(
 	crop: CropEntry,
 	imgWidth: number,
@@ -1704,36 +1501,18 @@ export function resolveCropEntry(
 	return result.crop;
 }
 
-/** Maximum length for telemetry fields stored in session entries. */
 const TELEMETRY_MAX_LEN = 200;
-
-/** Characters considered unsafe in telemetry log fields. */
 const TELEMETRY_UNSAFE_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
-/**
- * Sanitize a string for inclusion in session entry telemetry fields.
- * Strips control characters, enforces length limit.
- */
 export function sanitizeForLog(s: string, maxLen = TELEMETRY_MAX_LEN): string {
 	return s.replace(TELEMETRY_UNSAFE_RE, "").slice(0, maxLen);
 }
 
-/**
- * Build a stable crop signature string for cache keys.
- */
 export function cropSignature(crop: ResolvedCrop): string {
 	return `${crop.x},${crop.y},${crop.width},${crop.height}`;
 }
 
 // ── Image cropping (ImageScript) ────────────────────────────────────────────
-/** Whether ImageScript is available for cropping. */
-const hasCropper = true;
-
-/**
- * Crop an image buffer to the given pixel rectangle using ImageScript.
- * Accepts raw image bytes (JPEG/PNG) and returns cropped bytes in the same format.
- * Returns null if cropping fails.
- */
 function isOversized(width: number, height: number): boolean {
 	return width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION;
 }
@@ -1758,8 +1537,8 @@ async function encodeCroppedImage(
 ): Promise<Buffer> {
 	const encoded =
 		mimeType === "image/png"
-			? await cropped.encode(1) // PNG with compression level 1 (fast)
-			: await cropped.encodeJPEG(90); // JPEG quality 90
+			? await cropped.encode(1)
+			: await cropped.encodeJPEG(90);
 	return Buffer.from(encoded);
 }
 
@@ -1778,77 +1557,57 @@ export async function cropImage(
 	}
 }
 
-/**
- * Convert a PiAiImage (base64 data) to raw bytes for ImageScript processing.
- */
-export function piAiImageToBuffer(img: PiAiImage): Buffer {
+export function imageContentToBuffer(img: ImageContent): Buffer {
 	return Buffer.from(img.data, "base64");
 }
 
-/**
- * Convert raw image bytes back to a PiAiImage (base64) with the same or inferred MIME type.
- */
-export function bufferToPiAiImage(
+export function bufferToImageContent(
 	buf: Buffer,
 	originalMimeType?: string,
-): PiAiImage {
+): ImageContent {
 	const mimeType = originalMimeType ?? "image/png";
 	return { type: "image", data: buf.toString("base64"), mimeType };
 }
 
 // ── Perceptual hashing (imghash) ────────────────────────────────────────────
-let _imghash: typeof import("imghash") | null = null;
+type ImghashModule = { default?: { hash: (input: string | Buffer, bits?: number | null, format?: string) => Promise<string> } };
+let _imghash: ((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>) | null = null;
 let _imghashLoadAttempted = false;
 
-/**
- * Attempt to load the imghash module. Returns null if unavailable.
- */
-async function loadImghash(): Promise<typeof import("imghash") | null> {
+async function loadImghash(): Promise<((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>) | null> {
 	if (_imghash) return _imghash;
 	if (_imghashLoadAttempted) return null;
 	_imghashLoadAttempted = true;
 	try {
-		_imghash = await import("imghash");
+		const mod = (await import("imghash")) as unknown as ImghashModule;
+		_imghash = mod.default?.hash ?? (mod as unknown as ((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>));
 		return _imghash;
 	} catch {
 		return null;
 	}
 }
 
-/**
- * Compute a perceptual hash for an image buffer.
- * Returns the hex hash string, or null if imghash is unavailable or fails.
- */
 export async function computePHash(imageBytes: Buffer): Promise<string | null> {
 	const imghash = await loadImghash();
 	if (!imghash) return null;
 	try {
-		return await imghash.hash(imageBytes);
+		return await imghash(imageBytes);
 	} catch {
 		return null;
 	}
 }
 
-/**
- * Compute the Hamming distance between two perceptual hash hex strings.
- * Returns the number of differing bits, or Infinity if either hash is null/invalid.
- */
 export function hammingDistance(a: string | null, b: string | null): number {
 	if (!a || !b) return Infinity;
-	// Convert hex to binary and count differing bits
 	let dist = 0;
 	const len = Math.min(a.length, b.length);
 	for (let i = 0; i < len; i++) {
 		const xor = parseInt(a[i]!, 16) ^ parseInt(b[i]!, 16);
-		// Count set bits
 		dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
 	}
 	return dist;
 }
 
-/**
- * Build a cache key for analyze_image results.
- */
 export function buildToolCacheKey(
 	sortedHashes: readonly string[],
 	cropSig: string | undefined,
@@ -1859,8 +1618,6 @@ export function buildToolCacheKey(
 }
 
 // ── Fence builders ────────────────────────────────────────────────────────
-
-/** Append width, height, and optional filename parts for a fence. */
 function addImageMetaParts(
 	parts: string[],
 	meta: ImageMeta,
@@ -1872,7 +1629,6 @@ function addImageMetaParts(
 	if (meta.filename) parts.push(`filename="${escapeAttr(meta.filename)}"`);
 }
 
-/** Build the shared attribute parts for description/analysis fences. */
 function buildFenceParts(
 	hash: string,
 	meta?: ImageMeta,
@@ -1885,9 +1641,6 @@ function buildFenceParts(
 	return parts;
 }
 
-/**
- * Build a `<vision_proxy_description>` fence with image metadata.
- */
 export function buildDescriptionFence(
 	hash: string,
 	description: string,
@@ -1898,9 +1651,6 @@ export function buildDescriptionFence(
 	return `<vision_proxy_description ${parts.join(" ")}\n>\n${fenceUntrusted(description)}\n</vision_proxy_description>`;
 }
 
-/**
- * Build a `<vision_proxy_analysis>` fence with image metadata.
- */
 export function buildAnalysisFence(
 	hash: string,
 	analysis: string,
@@ -1915,11 +1665,6 @@ export function buildAnalysisFence(
 	return `<vision_proxy_analysis ${parts.join(" ")}\n>\n${fenceUntrusted(analysis)}\n</vision_proxy_analysis>`;
 }
 
-// ── Grounding helpers ─────────────────────────────────────────────────────
-
-/**
- * Look up the grounding format for a given model in the config.
- */
 export function getGroundingFormat(
 	config: VisionConfig,
 	provider: string,
@@ -1929,10 +1674,6 @@ export function getGroundingFormat(
 	return config.groundingModels[key]?.format ?? "none";
 }
 
-/**
- * Convert a grounding format to an optional fence attribute value.
- * Returns undefined when the effective format is "none".
- */
 export function effectiveGroundingFormat(
 	config: VisionConfig,
 ): GroundingFormat | undefined {
@@ -1954,18 +1695,10 @@ const GROUNDING_INSTRUCTIONS: Record<GroundingFormat, string> = {
 	none: "",
 };
 
-/**
- * Build grounding instruction to append to the system prompt for a model.
- */
 export function buildGroundingInstruction(format: GroundingFormat): string {
 	return GROUNDING_INSTRUCTIONS[format] ?? "";
 }
 
-// ── Joint description helpers (Feature 2) ──────────────────────────────────
-
-/**
- * Build a `<vision_proxy_joint_description>` fence with per-image metadata.
- */
 export function buildJointDescriptionFence(
 	imageMetas: ReadonlyArray<{ hash: string; meta?: ImageMeta }>,
 	description: string,
@@ -1992,9 +1725,6 @@ export function buildJointDescriptionFence(
 	return `<vision_proxy_joint_description ${parts.join(" ")}\n>\n${fenceUntrusted(description)}\n</vision_proxy_joint_description>`;
 }
 
-/**
- * Build the adaptive joint-call system prompt (FR-2.5).
- */
 export function buildAdaptiveJointPrompt(
 	imageMetas: ReadonlyArray<{ hash: string; meta?: ImageMeta }>,
 	userPrompt: string,
@@ -2033,22 +1763,14 @@ export function buildAdaptiveJointPrompt(
 	);
 }
 
-// ── Filename hint patterns (FR-2.5.1, Appendix D) ──────────────────────────
-
-/**
- * Extract the (prefix, version) tuple from a basename per Appendix D.
- * Returns null if no version is found.
- */
 export function extractVersion(
 	filename: string,
 ): { prefix: string; version: number } | null {
 	const base = basename(filename, extname(filename));
-	// Match rightmost occurrence of [vV]?digits(.digits)? at the end of the basename
-	// The [vV] is part of the version delimiter, included in the prefix if present
 	const match = base.match(/^(.*?)(\d+(?:\.\d+)?)$/);
 	if (!match) return null;
 	const prefix = match[1]!;
-	if (!prefix) return null; // no prefix before the version number
+	if (!prefix) return null;
 	return { prefix, version: parseFloat(match[2]!) };
 }
 
@@ -2127,10 +1849,6 @@ function pushSequenceHints(
 		hints.push("time-ordered sequence");
 }
 
-/**
- * Generate filename hint strings for a set of images (Appendix D).
- * Returns an array of hint strings, or empty array if no patterns match.
- */
 export function generateFilenameHints(filenames: string[]): string[] {
 	if (filenames.length < 2) return [];
 
@@ -2140,3 +1858,6 @@ export function generateFilenameHints(filenames: string[]): string[] {
 	pushSequenceHints(hints, basenames, filenames);
 	return hints;
 }
+
+// Global path counter for stripImagePaths tokenization.
+let _phCounter = 0;

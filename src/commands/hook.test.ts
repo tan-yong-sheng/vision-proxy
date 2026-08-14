@@ -15,10 +15,13 @@ import { join } from "node:path";
 import { runHook } from "../commands/hook.ts";
 
 const ORIG_HOME = process.env.HOME;
+const ORIG_ARGV1 = process.argv[1];
 
 function isolate(): string {
 	const home = mkdtempSync(join(tmpdir(), "vp-hook-test-"));
 	process.env.HOME = home;
+	// installDir is derived from process.argv[1]; point it into the isolated home.
+	process.argv[1] = join(home, "vp");
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	mkdirSync(join(home, ".codex"), { recursive: true });
 	return home;
@@ -27,6 +30,8 @@ function isolate(): string {
 function reset() {
 	if (ORIG_HOME === undefined) delete process.env.HOME;
 	else process.env.HOME = ORIG_HOME;
+	if (ORIG_ARGV1 === undefined) delete process.argv[1];
+	else process.argv[1] = ORIG_ARGV1;
 }
 
 test("install claude-code writes UserPromptSubmit into settings.json", async () => {
@@ -37,7 +42,7 @@ test("install claude-code writes UserPromptSubmit into settings.json", async () 
 	const groups = cfg.hooks.UserPromptSubmit;
 	assert.equal(Array.isArray(groups) && groups.length, 1);
 	const cmd = groups[0].hooks[0].command;
-	assert.match(cmd, /claude-code-user-prompt-submit\.mjs$/);
+	assert.match(cmd, /claude-code-vision-proxy-user-prompt-submit\.mjs$/);
 	assert.equal(groups[0].hooks[0].timeout, 30);
 	reset();
 });
@@ -48,7 +53,7 @@ test("install codex appends a [[UserPromptSubmit]] block with additionalContextL
 	assert.equal(r.ok, true);
 	const toml = readFileSync(join(home, ".codex", "config.toml"), "utf8");
 	assert.match(toml, /\[\[UserPromptSubmit\]\]/);
-	assert.match(toml, /command = "node .*codex-user-prompt-submit\.mjs"/);
+	assert.match(toml, /command = "node .*codex-vision-proxy-user-prompt-submit\.mjs"/);
 	assert.match(toml, /additionalContextLimit = 4096/);
 	reset();
 });

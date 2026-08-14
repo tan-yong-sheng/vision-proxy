@@ -195,6 +195,7 @@ function maybeSaveDescription(
 	parsed: DescribeArgs,
 	imagePayloads: ImagePayload[],
 	text: string,
+	pi: ExtensionAPI,
 ): void {
 	if (parsed.save && imagePayloads.length === 1) {
 		pi.appendEntry(CUSTOM_TYPE_DESCRIPTION, {
@@ -211,6 +212,7 @@ function logDescribeTelemetry(
 	parsed: DescribeArgs,
 	descConfig: VisionConfig,
 	latencyMs: number,
+	pi: ExtensionAPI,
 ): void {
 	pi.appendEntry(CUSTOM_TYPE_COMMAND, {
 		command: sub,
@@ -230,14 +232,15 @@ function emitDescribeResult(
 	descConfig: VisionConfig,
 	imagePayloads: ImagePayload[],
 	callResult: Extract<DescribeCallResult, { ok: true }>,
+	pi: ExtensionAPI,
 ): void {
 	const fence = buildDescribeFence(
 		imagePayloads,
 		callResult.text,
 		effectiveGroundingFormat(descConfig),
 	);
-	maybeSaveDescription(parsed, imagePayloads, callResult.text);
-	logDescribeTelemetry(sub, imagePayloads, parsed, descConfig, callResult.latencyMs);
+	maybeSaveDescription(parsed, imagePayloads, callResult.text, pi);
+	logDescribeTelemetry(sub, imagePayloads, parsed, descConfig, callResult.latencyMs, pi);
 	ctx.ui.notify(`\n[Vision Proxy] ${fence}`, "info");
 }
 
@@ -326,5 +329,6 @@ export async function handleDescribeCommand(
 		pipeline.descConfig,
 		pipeline.imagePayloads,
 		pipeline.callResult,
+		pi,
 	);
 };

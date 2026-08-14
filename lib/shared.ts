@@ -6,6 +6,11 @@ import {
 	type VisionConfig,
 } from "../extensions/internal.js";
 
+/** Array of models returned by the registry. */
+type AllModels = ReturnType<ExtensionContext["modelRegistry"]["getAll"]>;
+/** A single model entry from the registry. */
+type ModelInfo = AllModels[number];
+
 // ── Tool result cache (shared across calls in the session) ─────────────────
 export const _toolCache = new LRUCache<string, string>(50);
 
@@ -35,7 +40,7 @@ export function providerSortComparator(
 }
 
 export function buildModelItems(
-	models: ExtensionContext["modelRegistry"]["getAll"],
+	models: AllModels,
 	currentProvider: string,
 	currentModelId: string,
 ): string[] {
@@ -46,7 +51,7 @@ export function buildModelItems(
 }
 
 export function persistModelSelection(
-	m: ExtensionContext["modelRegistry"]["getAll"][number],
+	m: ModelInfo,
 	persisted: VisionConfig,
 	writePersisted: (next: VisionConfig) => VisionConfig,
 ): VisionConfig {
@@ -60,7 +65,7 @@ export function persistModelSelection(
 export async function promptChangeProvider(
 	ctx: ExtensionContext,
 	currentProvider: string,
-	allModels: ExtensionContext["modelRegistry"]["getAll"],
+	allModels: AllModels,
 ): Promise<string | undefined> {
 	const providerSet = [
 		...new Set(allModels.map((m) => m.provider)),
@@ -74,7 +79,7 @@ export async function applyModelSelection(
 	ctx: ExtensionContext,
 	picked: string,
 	providerPicked: string,
-	allModels: ExtensionContext["modelRegistry"]["getAll"],
+	allModels: AllModels,
 	persisted: VisionConfig,
 	writePersisted: (next: VisionConfig) => VisionConfig,
 ): Promise<boolean> {
@@ -114,7 +119,7 @@ export function classifyModelPick(
 export async function promptModelList(
 	ctx: ExtensionContext,
 	providerPicked: string,
-	providerModels: ExtensionContext["modelRegistry"]["getAll"],
+	providerModels: AllModels,
 	persisted: VisionConfig,
 ): Promise<string | undefined> {
 	const baseItems = buildModelItems(
@@ -129,7 +134,7 @@ export async function promptModelList(
 export async function pickModelForProvider(
 	ctx: ExtensionContext,
 	providerPicked: string,
-	allModels: ExtensionContext["modelRegistry"]["getAll"],
+	allModels: AllModels,
 	persisted: VisionConfig,
 	writePersisted: (next: VisionConfig) => VisionConfig,
 ): Promise<string | undefined> {
@@ -154,7 +159,7 @@ async function dispatchModelPick(args: {
 	ctx: ExtensionContext;
 	picked: string | undefined;
 	providerPicked: string;
-	allModels: ExtensionContext["modelRegistry"]["getAll"];
+	allModels: AllModels;
 	persisted: VisionConfig;
 	writePersisted: (next: VisionConfig) => VisionConfig;
 }): Promise<string | undefined> {
@@ -169,7 +174,7 @@ async function dispatchModelPick(args: {
 async function handleChangeProviderAction(args: {
 	ctx: ExtensionContext;
 	providerPicked: string;
-	allModels: ExtensionContext["modelRegistry"]["getAll"];
+	allModels: AllModels;
 }): Promise<string> {
 	const newProvider = await promptChangeProvider(
 		args.ctx,
@@ -184,7 +189,7 @@ async function handleSelectAction(
 	args: {
 		ctx: ExtensionContext;
 		providerPicked: string;
-		allModels: ExtensionContext["modelRegistry"]["getAll"];
+		allModels: AllModels;
 		persisted: VisionConfig;
 		writePersisted: (next: VisionConfig) => VisionConfig;
 	},
@@ -210,7 +215,7 @@ export function initialProvider(
 export function prepareVisionModels(
 	ctx: ExtensionContext,
 	envModel: boolean,
-): ExtensionContext["modelRegistry"]["getAll"] | null {
+): AllModels | null {
 	if (envModel) {
 		ctx.ui.notify(
 			"[vision-proxy] PI_VISION_PROXY_MODEL is set - env overrides commands. Unset to change.",

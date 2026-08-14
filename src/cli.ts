@@ -184,7 +184,7 @@ export async function main(argv: string[]): Promise<void> {
 				model: str(flags, "model"),
 				joint: bool(flags, "joint", false),
 				crops,
-				fence: !bool(flags, "fence", false),
+				fence: bool(flags, "fence", true),
 				configPath: str(flags, "config"),
 				json: bool(flags, "json", false),
 				maxOutputTokens: str(flags, "max-output-tokens")

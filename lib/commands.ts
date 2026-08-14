@@ -41,6 +41,7 @@ interface CommandDispatchContext {
 	value: string;
 	valueLower: string;
 	ctx: ExtensionContext;
+	pi: ExtensionAPI;
 	persisted: VisionConfig;
 	effective: VisionConfig;
 	env: EnvFlags;
@@ -174,6 +175,7 @@ const COMMAND_DISPATCH: Record<
 			c.effective,
 			c.persisted,
 			c.writePersisted,
+			c.pi,
 		);
 		return false;
 	},
@@ -185,6 +187,7 @@ const COMMAND_DISPATCH: Record<
 			c.effective,
 			c.persisted,
 			c.writePersisted,
+			c.pi,
 		);
 		return false;
 	},
@@ -771,6 +774,7 @@ _fileConfig: Partial<VisionConfig>,
 		value,
 		valueLower: value.toLowerCase(),
 		ctx,
+		pi,
 		persisted,
 		effective,
 		env,

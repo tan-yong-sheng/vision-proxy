@@ -29,7 +29,10 @@ function shimDir(): string {
 		join(here, "..", "shims"),
 		join(process.cwd(), "src", "shims"),
 	];
-	for (const c of candidates) if (existsSync(c)) return c;
+	for (const c of candidates) {
+		// Require an actual shim file so we don't mistake an empty install dir for the source dir.
+		if (existsSync(join(c, "claude-code-user-prompt-submit.mjs"))) return c;
+	}
 	return join(here, "..", "shims");
 }
 
@@ -67,7 +70,7 @@ function codexConfigPath(): string {
 }
 
 const claudeCode: AgentSpec = {
-	shimTarget: ({ installDir }) => join(installDir, "claude-code-user-prompt-submit.mjs"),
+	shimTarget: ({ installDir }) => join(installDir, "claude-code-vision-proxy-user-prompt-submit.mjs"),
 	configPath: claudeCodeConfigPath,
 	showBlock: (shimPath) =>
 		JSON.stringify(
@@ -152,7 +155,7 @@ const claudeCode: AgentSpec = {
 };
 
 const codex: AgentSpec = {
-	shimTarget: ({ installDir }) => join(installDir, "codex-user-prompt-submit.mjs"),
+	shimTarget: ({ installDir }) => join(installDir, "codex-vision-proxy-user-prompt-submit.mjs"),
 	configPath: codexConfigPath,
 	showBlock: (shimPath) =>
 		`[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node ${shimPath}"\ntimeout = ${TIMEOUT_SEC}\nadditionalContextLimit = 4096\n`,
@@ -195,9 +198,8 @@ function specFor(agent: string): AgentSpec | undefined {
 }
 
 function installDir(): string {
-	const bin = join(process.cwd(), "dist", "shims");
-	if (existsSync(bin)) return bin;
-	return bin;
+	const script = process.argv[1] ?? fileURLToPath(import.meta.url);
+	return join(dirname(script), "shims");
 }
 
 // fallow-ignore-next-line unused-export

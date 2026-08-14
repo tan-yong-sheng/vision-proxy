@@ -13,13 +13,18 @@ import path from "node:path";
 import { configInit, configGet, configSet, configValidate } from "./config.ts";
 
 let cwd: string;
+let prevHome: string | undefined;
 
 beforeEach(async () => {
 	cwd = await mkdtemp(path.join(os.tmpdir(), "vp-cfg-"));
+	prevHome = process.env.HOME;
+	process.env.HOME = cwd;
 });
 
 afterEach(async () => {
 	await rm(cwd, { recursive: true, force: true });
+	if (prevHome === undefined) delete process.env.HOME;
+	else process.env.HOME = prevHome;
 });
 
 describe("configInit", () => {

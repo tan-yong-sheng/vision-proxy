@@ -25,6 +25,7 @@ const PNG_B64 =
 
 let dir: string;
 let imgPath: string;
+let prevHome: string | undefined;
 
 let prevCacheDir: string | undefined;
 
@@ -37,11 +38,15 @@ beforeEach(async () => {
 	imgPath = path.join(dir, "img.png");
 	await writeFile(imgPath, Buffer.from(PNG_B64, "base64"));
 	process.env.VP_CACHE_DIR = dir;
+	prevHome = process.env.HOME;
+	process.env.HOME = dir;
 	resetCacheState();
 });
 
 afterEach(async () => {
 	await rm(dir, { recursive: true, force: true });
+	if (prevHome === undefined) delete process.env.HOME;
+	else process.env.HOME = prevHome;
 });
 
 after(() => {

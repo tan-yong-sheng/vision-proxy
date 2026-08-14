@@ -557,6 +557,19 @@ export async function readPersistentFile(
 	} catch {
 		// file doesn't exist or is invalid
 	}
+	// Fall back to the legacy Pi extension config path for continuity.
+	if (!agentDir) {
+		try {
+			const legacy = join(os.homedir(), ".pi", "agent", "vision-proxy.json");
+			const raw = await readFile(legacy, "utf8");
+			const parsed = JSON.parse(raw);
+			if (parsed && typeof parsed === "object") {
+				return filterKnownConfigKeys(parsed);
+			}
+		} catch {
+			// legacy file doesn't exist or is invalid
+		}
+	}
 	return {};
 }
 
@@ -840,7 +853,7 @@ export function resolveConfig(
 	env: NodeJS.ProcessEnv = process.env,
 	fileConfig: Partial<VisionConfig> = {},
 ): VisionConfig {
-	return sanitize({ ...DEFAULT_CONFIG, ...fileConfig, ...readEnvOverrides(env) });
+	return sanitize({ ...DEFAULT_CONFIG, ...readEnvOverrides(env), ...fileConfig });
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────
@@ -1039,7 +1052,7 @@ export async function isPathAllowed(filePath: string): Promise<boolean> {
 	if (await insideRoot(resolved, tmpRoot())) return true;
 	if (await insideRoot(resolved, cwdRoot())) return true;
 	if (await insideRoot(resolved, homeRoot())) return true;
-	if (process.env.VP_ALLOW_HOME === "1") return true;
+	if (process.env.VP_ALLOW_HOME === "1") return await insideRoot(resolved, homeRoot());
 	return isLocalAbsolutePath(resolved) && !driveAccessDisabled();
 }
 

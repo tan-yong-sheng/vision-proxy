@@ -128,6 +128,25 @@ describe("runAnalyze single-image cache-first", () => {
 			(e) => e instanceof AnalyzeError,
 		);
 	});
+
+	it("appends grounding instructions to the system prompt for configured models", async () => {
+		await writeFile(
+			path.join(dir, ".vision-proxy.json"),
+			JSON.stringify({
+				groundingModels: { "anthropic/claude-sonnet-4-5": { format: "qwen_pixels" } },
+			}),
+		);
+		let capturedSystemPrompt = "";
+		await runAnalyze(
+			[imgPath],
+			baseFlags(),
+			async (req) => {
+				capturedSystemPrompt = req.systemPrompt;
+				return { text: "desc" };
+			},
+		);
+		assert.ok(capturedSystemPrompt.includes("bounding-box coordinates as [x1, y1, x2, y2]"));
+	});
 });
 
 describe("runAnalyze joint / multi-image", () => {

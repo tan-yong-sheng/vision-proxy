@@ -142,6 +142,7 @@ export async function runAnalyze(
 	const grounding = getGroundingFormat(config, provider, modelId);
 	const effectiveFormat: GroundingFormat =
 		flags.format && flags.format !== "none" ? flags.format : grounding;
+	const systemPrompt = config.systemPrompt + groundingInstructionSuffix(effectiveFormat);
 
 	// Read + hash + crop payloads.
 	const payloads: ImagePayload[] = [];
@@ -185,7 +186,7 @@ export async function runAnalyze(
 
 		const resp = await analyzeImpl({
 			imagePayloads: [p],
-			systemPrompt: config.systemPrompt,
+			systemPrompt,
 			question,
 			model,
 			maxOutputTokens: flags.maxOutputTokens,
@@ -230,7 +231,7 @@ export async function runAnalyze(
 
 	const resp = await analyzeImpl({
 		imagePayloads: payloads,
-		systemPrompt: config.systemPrompt + groundingInstructionSuffix(effectiveFormat),
+		systemPrompt,
 		question,
 		model,
 		providerOptions: buildProviderOptions(effectiveFormat),

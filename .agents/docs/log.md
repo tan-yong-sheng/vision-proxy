@@ -8,3 +8,6 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-14: new worktree worktrees/backend-vision-proxy-cli-core.md
 - 2026-08-14: new worktree worktrees/backend-vision-proxy-hook-shims.md
 - 2026-08-14: archive qa/backend-vision-proxy-cli-migration-review.md -> archive/backend-vision-proxy-cli-migration-review.md (retired)
+- 2026-08-14: new plan plans/backend-vision-proxy-remaining-debt.md
+- 2026-08-14: new worktree worktrees/backend-vision-proxy-shared-shim.md
+- 2026-08-14: new worktree worktrees/backend-vision-proxy-gemini-provider.md

@@ -1,6 +1,6 @@
 ---
 name: worktrunk-orca-delegation
-description: Delegate parallel coding tasks across `worktrunk` worktrees using Orca orchestration. Use when spawning multi-agent worktrees, dispatching workers, or polling for completion.
+description: Delegate parallel coding tasks across `worktrunk` worktrees using Orca orchestration. Use when spawning multi-agent worktrees, dispatching workers, polling for completion, or gating merged results with `/review-gate`.
 ---
 
 # Worktrunk + Orca delegation
@@ -20,7 +20,7 @@ Coordinate multiple agents across `worktrunk` worktrees using `orca` orchestrati
 7. Verify submission: `orca terminal wait --for tui-idle`, `orca terminal show`; nudge with `terminal send --text "" --enter` if stuck.
 8. Poll: `orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json`
 9. Verify commits: `git rev-list --count <base>..<branch>` > 0.
-10. Validation gate: classify each worktree risk; route independent branches to per-worktree review and dependent/shared-contract branches to a single merge-preview review.
+10. Validation gate: classify each worktree risk; route independent branches to per-worktree review and dependent/shared-contract branches to a single merge-preview review. **Do not release or merge until the branch is review-clear.**
 11. Release: `orca orchestration worker-release --dispatch <id> --json`
 12. Merge/cleanup: `wt merge <target>` or `wt remove <branch> --reap`.
 
@@ -101,6 +101,17 @@ Before `worker_done`, the worker must commit. Verify with:
 ```bash
 git rev-list --count <base>..<branch>
 ```
+
+### Review-clear
+
+A branch is **review-clear** when it has either:
+
+- passed `/review-gate` (medium/high risk, new dependencies, shared contracts, auth/security, or large diffs), or
+- passed local checks only and is explicitly classified as **low-risk** (docs, tests, config tweaks, trivial fixes).
+
+**Do not `wt merge` a worker branch until it is review-clear.**
+
+If a branch was already merged without review, make it review-clear retroactively by running `/review-gate` on the integration branch before any further merges.
 
 ### 8. Validation gate
 
@@ -215,6 +226,9 @@ Use this only after confirming the branch has commits, tests pass, and the work 
 ### 9. Release and merge
 
 ```bash
+# 1. Confirm the branch is review-clear.
+# 2. Release the worker terminal.
+# 3. Merge into the target branch.
 orca orchestration worker-release --dispatch <id> --json
 wt merge <target>
 ```
@@ -227,7 +241,7 @@ wt merge <target>
 - Verify commits exist before releasing.
 - Close stale terminals before redispatch.
 - Use a time-driven waker for silent stalls. See [REFERENCE.md](REFERENCE.md).
-- `/review-gate` is dispatched conditionally per worktree; low-risk worktrees run local checks only.
+- `/review-gate` is dispatched conditionally per worktree; low-risk worktrees run local checks only. When in doubt, dispatch `/review-gate` - never merge a branch that is not review-clear.
 - Check the worker runtime for sandbox restrictions. Delegated agents that need local state persistence or browser access may fail with `EACCES` inside locked-down sandboxes (e.g., nono). Move the worktree to a host with full read/write permissions before dispatching visual QA or long-running interactive tasks.
 - If a worker fails to initialize (auth error, model timeout, or stuck at `Combobulating…`/`Blanching…`), retry once with a different model (e.g., `haiku` instead of the default). If it still fails, stop and report the exact blocker.
 - Use repo-local worktrees when running inside a sandbox. Configure Worktrunk with `worktree-path = "{{ repo_path }}/.worktrees/{{ branch | sanitize }}"` and add `.worktrees/` to `.gitignore`. This keeps worktrees under `$WORKDIR`, avoiding the need to grant broad `$HOME` read access just so tools can resolve paths.

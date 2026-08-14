@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.95",
+    "@ai-sdk/google": "^4.0.44",
     "@ai-sdk/openai": "^4.0.0",
     "ai": "^7.0.0",
     "image-size": "^2.0.2",

@@ -9,6 +9,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
 export interface ProviderSpec {
 	id: string;
@@ -43,9 +44,20 @@ const anthropicProvider: ProviderSpec = {
 		createAnthropic({ apiKey, baseURL })(modelId),
 };
 
+const googleProvider: ProviderSpec = {
+	id: "google",
+	label: "Google",
+	apiKeyEnv: "GOOGLE_API_KEY",
+	baseUrlEnv: "GOOGLE_BASE_URL",
+	supportsImage: true,
+	make: ({ apiKey, modelId, baseURL }) =>
+		createGoogleGenerativeAI({ apiKey, baseURL })(modelId),
+};
+
 const PROVIDERS: Record<string, ProviderSpec> = {
 	[openaiProvider.id]: openaiProvider,
 	[anthropicProvider.id]: anthropicProvider,
+	[googleProvider.id]: googleProvider,
 };
 
 export function listProviders(): ProviderSpec[] {

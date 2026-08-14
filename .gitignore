@@ -5,4 +5,5 @@ node_modules/
 .pi/
 .lavish/
 .worktrees/
+.agents/rules/
 *.log

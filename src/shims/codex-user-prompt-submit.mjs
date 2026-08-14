@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 #!/usr/bin/env node
 /**
  * Vision proxy UserPromptSubmit shim for the Codex CLI.

@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 /**
  * End-to-end test for the vision-proxy Claude Code UserPromptSubmit hook.
  *

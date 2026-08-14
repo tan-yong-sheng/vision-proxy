@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 /**
  * `vp hook` — per-agent UserPromptSubmit shim install tooling.
  *
@@ -199,6 +200,7 @@ function installDir(): string {
 	return bin;
 }
 
+// fallow-ignore-next-line unused-export
 export async function hookInstall(agent: string): Promise<HookResult> {
 	const spec = specFor(agent);
 	if (!spec) {
@@ -230,6 +232,7 @@ export async function hookInstall(agent: string): Promise<HookResult> {
 	};
 }
 
+// fallow-ignore-next-line unused-export
 export async function hookShow(agent: string): Promise<HookResult> {
 	const spec = specFor(agent);
 	if (!spec) {
@@ -247,6 +250,7 @@ export async function hookShow(agent: string): Promise<HookResult> {
 	};
 }
 
+// fallow-ignore-next-line unused-export
 export async function hookList(): Promise<HookResult> {
 	const lines: string[] = [];
 	for (const agent of SUPPORTED) {
@@ -258,6 +262,7 @@ export async function hookList(): Promise<HookResult> {
 	return { ok: true, message: lines.join("\n"), code: 0 };
 }
 
+// fallow-ignore-next-line unused-export
 export async function hookUninstall(agent: string): Promise<HookResult> {
 	const spec = specFor(agent);
 	if (!spec) {

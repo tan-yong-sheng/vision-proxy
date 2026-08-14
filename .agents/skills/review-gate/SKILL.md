@@ -43,7 +43,7 @@ A short `bash` timeout can kill the CLI while the daemon is still in `review: fi
 
 ### Polling wrapper for approval gates
 
-Use the bundled polling script to watch a run and auto-approve any parked gates:
+Use the bundled polling script to watch a run and unblock parked gates:
 
 ```bash
 bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh [poll-interval-seconds]
@@ -55,7 +55,18 @@ Run it from inside the target worktree, or set `WORKTREE`:
 WORKTREE=/path/to/qa-worktree bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh 30
 ```
 
-The script prints `RUNNING` while the daemon works, `BLOCKED` when it sees `awaiting_agent: parked`, and `FINISHED` once `outcome:` appears. When blocked it calls `no-mistakes axi respond --action approve` and keeps polling.
+The script prints `RUNNING` while the daemon works, `BLOCKED` when it sees `awaiting_agent: parked`, and `FINISHED` once `outcome:` appears.
+
+When blocked, it inspects each finding's `action`:
+
+- `auto-fix` -> asks no-mistakes to fix the identified ids.
+- `ask-user` -> prints the ids and exits, because these are intent-sensitive findings that should be reviewed.
+
+To also auto-approve `ask-user` findings unattended, set `AUTO_APPROVE_ASK_USER=1`:
+
+```bash
+AUTO_APPROVE_ASK_USER=1 bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh 30
+```
 
 For fully unattended behavior, also enable repo-level auto-fix:
 

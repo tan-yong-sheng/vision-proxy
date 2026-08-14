@@ -7,7 +7,6 @@ Keep it short and update it when workflows change.
 
 - **Name:** `vision-proxy` (npm package `vision-proxy`, formerly `pi-vision-proxy`) - portable CLI that routes images to a vision-capable model and prints fenced, UNTRUSTED descriptions.
 - **Purpose:** Lets any coding agent "see" images by calling the CLI from UserPromptSubmit hooks.
-The Pi extension (`extensions/vision-proxy.ts`) remains for backward compatibility and can still inject descriptions when the active model lacks image support.
 - **Registry:** Published as `vision-proxy` on npm.
 - **Package keyword:** `pi-package`.
 - **Runtime:** Node 22+ (uses `--experimental-strip-types` for native TypeScript).
@@ -17,38 +16,33 @@ The Pi extension (`extensions/vision-proxy.ts`) remains for backward compatibili
 | Entry | File | Purpose |
 |-------|------|---------|
 | CLI binary | `src/cli.ts` | `vp` / `vision-proxy` command entry point. |
-| Pi extension | `extensions/vision-proxy.ts` | Default export registers the `analyze_image` tool, the `/vision-proxy` command, and image stripping. |
 | Pi-free core | `src/core.ts` | Config, env overrides, image loading/hashing, fencing, and provider dispatch. No Pi runtime deps. |
-| Shared extension library | `lib/shared.ts` | State and helpers shared between the extension and CLI adapter. |
+| AI SDK adapter | `src/adapter.ts` | Vercel AI SDK `generateText` wrapper for image payloads. |
 | CLI commands | `src/commands/*.ts` | `analyze`, `config`, `provider`, `cache`, and `hook` subcommands. |
 | Hook shims | `src/shims/*.mjs` | Claude Code and Codex UserPromptSubmit hook shims. |
-| Before-agent handler | `extensions/helpers/before-agent.ts` | Pi `before_agent_start` event handler. |
 
 ## Important directories
 
 - `src/` - CLI source and Pi-free core.
 - `src/commands/` - CLI subcommands.
 - `src/shims/` - Agent hook shims (copied to `dist/` at build time).
-- `lib/` - Shared modules used by the Pi extension.
-- `extensions/` - Pi extension wiring and helpers.
-- `extensions/__tests__/` - Extension unit and integration tests.
 - `scripts/` - Build helpers (`copy-shims.mjs`).
 - `.claude/hooks/` - Generated fallow gate hook.
 
 ## Architecture Notes
 
 - **Module boundary:** `src/core.ts` is the Pi-free core - pure functions and no peer-dep runtime requirements.
-The Pi extension (`extensions/vision-proxy.ts`) wires `lib/*` helpers and `extensions/helpers/before-agent.ts`.
-`lib/commands.ts` imports config helpers from `extensions/internal.ts`; `extensions/vision-proxy.ts` imports shared logic from `lib/*`.
+`src/adapter.ts` calls the Vercel AI SDK.
+`src/commands/*.ts` wire CLI arguments to `src/core.ts` and `src/adapter.ts`.
+`src/shims/*.mjs` shell out to the `vp` binary with no runtime dependencies.
 - **Generated code:** `.fallow/cache.bin` is fallow cache data - do not edit manually.
 `.claude/hooks/fallow-gate.sh` is a generated hook wrapper.
 `scripts/copy-shims.mjs` copies hook shims into `dist/` during `npm run build`.
-- **Sensitive areas:** `lib/analyze.ts` (`analyzeImages`, `handleAnalyzeImage`) makes actual API calls to external vision models.
+- **Sensitive areas:** `src/adapter.ts` and `src/commands/analyze.ts` make actual API calls to external vision models.
 `src/core.ts` handles provider API keys and image payloads.
 Both are adjacent to real API keys and external model endpoints.
 - **Config:** The CLI uses `.vision-proxy.json` (project) and `~/.vision-proxy/config.json` (user), with a legacy fallback to `~/.pi/agent/vision-proxy.json`.
-The Pi extension still reads/writes `~/.pi/agent/vision-proxy.json`.
-Environment overrides use `VP_*` in the CLI and `PI_VISION_PROXY_*` in the extension.
+Environment overrides use `VP_*`.
 - **Test isolation:** Tests use `mkdtemp` for isolated temp directories.
 - **Build step:** `npm run build` compiles `src/` to `dist/` and copies shims.
 
@@ -57,7 +51,6 @@ Environment overrides use `VP_*` in the CLI and `PI_VISION_PROXY_*` in the exten
 | Action | Command |
 |--------|---------|
 | Install (global CLI) | `npm install -g .` or `npm link` |
-| Install (Pi extension) | `pi install ./` |
 | Test | `npm test` |
 | Typecheck | `npm run typecheck` |
 | Build | `npm run build` |
@@ -66,7 +59,6 @@ Environment overrides use `VP_*` in the CLI and `PI_VISION_PROXY_*` in the exten
 Runtime requirements:
 
 - Node 22+ (required for `--experimental-strip-types`)
-- Peer deps (Pi extension only): `@earendil-works/pi-ai >=0.74.0`, `@earendil-works/pi-coding-agent >=0.74.0`, `typebox *`
 
 ## Fallow
 
@@ -93,11 +85,10 @@ Runtime requirements:
 ## Agent Rules
 
 - **Do not edit:** `.fallow/cache.bin` - it's fallow binary cache data, not source.
-`.claude/hooks/fallow-gate.sh` - it's a generated hook; edit `src/core.ts` for CLI sanitization/fencing behavior and `extensions/internal.ts` for extension behavior.
+`.claude/hooks/fallow-gate.sh` - it's a generated hook; edit `src/core.ts` for sanitization/fencing behavior and `src/commands/analyze.ts` for analysis behavior.
 - **Always ask before:** Adding new production dependencies to `package.json` - current deps are minimal and chosen deliberately.
 Changing `VP_*` env var names - they must stay in sync with `src/core.ts`.
-Changing `PI_VISION_PROXY_*` env var names - they must stay in sync with `extensions/internal.ts`.
-- **Preferred style:** Pure functions in `src/core.ts` and `extensions/internal.ts` with type-only imports from peer deps.
+- **Preferred style:** Pure functions in `src/core.ts` and `src/commands/*.ts` with type-only imports from peer deps.
 No side effects at module scope.
 Tests use `node:test` and `node:assert` - no test runner dependency.
 Exported helpers get `@tags` JSDoc.

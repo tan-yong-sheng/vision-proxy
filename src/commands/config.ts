@@ -12,7 +12,7 @@ import {
 	resolveConfig,
 	type VisionConfig,
 } from "../core.ts";
-import { loadConfig } from "../config.ts";
+import { loadConfig, readJsonFile } from "../config.ts";
 import { resolveModel, listProviders } from "../provider.ts";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -76,14 +76,7 @@ export async function configSet(
 		};
 	}
 	const target = projectConfigPath(cwd);
-	let existing: Partial<VisionConfig> = {};
-	try {
-		const raw = await fs.readFile(target, "utf8");
-		const parsed = JSON.parse(raw);
-		if (parsed && typeof parsed === "object") existing = parsed;
-	} catch {
-		// No existing file.
-	}
+	const existing = (await readJsonFile(target)) ?? {};
 
 	const coerced = coerceValue(key, value);
 	(existing as Record<string, unknown>)[key] = coerced;

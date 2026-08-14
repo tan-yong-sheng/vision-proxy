@@ -14,18 +14,6 @@
  * The fenced description is attacker-controlled text, so the fence stays on by
  * default inside `vp analyze`; this shim only forwards it.
  */
-import { emit, extractImagePaths, readEvent, runVP } from "./shared.mjs";
+import { runShim } from "./shared.mjs";
 
-function main() {
-	const event = readEvent();
-	if (!event) return;
-	const prompt = typeof event.prompt === "string" ? event.prompt : "";
-	const images = extractImagePaths(prompt);
-	if (images.length === 0) return; // No images: proceed unchanged.
-
-	const description = runVP(images);
-	if (!description) return;
-	emit(description);
-}
-
-main();
+runShim();

@@ -12,6 +12,7 @@ import {
 	resolveModel,
 	type ProviderSpec,
 } from "../provider.ts";
+import { readJsonFile } from "../config.ts";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -53,14 +54,7 @@ export async function providerAdd(
 		};
 	}
 	const target = userConfigPath(baseDir);
-	let existing: Record<string, unknown> = {};
-	try {
-		const raw = await fs.readFile(target, "utf8");
-		const parsed = JSON.parse(raw);
-		if (parsed && typeof parsed === "object") existing = parsed;
-	} catch {
-		// No existing file.
-	}
+	const existing: Record<string, unknown> = (await readJsonFile(target)) ?? {};
 	existing.provider = spec.id;
 	if (spec.id === "openai" || spec.id === "anthropic") {
 		// No model id change required; the user sets model via --model or config set.

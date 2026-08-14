@@ -89,3 +89,22 @@ export function emit(description) {
 		}) + "\n",
 	);
 }
+
+/**
+ * Shared hook main loop.
+ *
+ * Reads the event, extracts image paths from the prompt, shells out to `vp
+ * analyze`, and emits the description. Returns early (fail-open) on any error
+ * or when no images are found.
+ */
+export function runShim(extraArgs = []) {
+	const event = readEvent();
+	if (!event) return;
+	const prompt = typeof event.prompt === "string" ? event.prompt : "";
+	const images = extractImagePaths(prompt);
+	if (images.length === 0) return; // No images: proceed unchanged.
+
+	const description = runVP(images, extraArgs);
+	if (!description) return;
+	emit(description);
+}

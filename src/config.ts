@@ -30,7 +30,7 @@ function projectConfigPath(cwd: string): string {
 	return path.join(cwd, ".vision-proxy.json");
 }
 
-async function readJsonFile(file: string): Promise<Partial<VisionConfig> | null> {
+export async function readJsonFile(file: string): Promise<Partial<VisionConfig> | null> {
 	try {
 		const raw = await fs.readFile(file, "utf8");
 		const parsed = JSON.parse(raw);

@@ -666,7 +666,7 @@ function parseToolCallsOverride(
 
 /**
  * Read config overrides from environment variables.
- * Precedence prefix is VP_ (e.g. VP_PROVIDER, VP_MODEL, VP_CACHE_SIZE).
+ * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
 export function readEnvOverrides(
 	env: NodeJS.ProcessEnv = process.env,

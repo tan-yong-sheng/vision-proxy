@@ -56,9 +56,6 @@ export async function providerAdd(
 	const target = userConfigPath(baseDir);
 	const existing: Record<string, unknown> = (await readJsonFile(target)) ?? {};
 	existing.provider = spec.id;
-	if (spec.id === "openai" || spec.id === "anthropic") {
-		// No model id change required; the user sets model via --model or config set.
-	}
 	await fs.mkdir(path.dirname(target), { recursive: true });
 	await fs.writeFile(target, JSON.stringify(existing, null, 2) + "\n", "utf8");
 	const keyHint = env[spec.apiKeyEnv]

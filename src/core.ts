@@ -894,7 +894,6 @@ export async function isPathAllowed(filePath: string): Promise<boolean> {
 	if (!resolved) return false;
 	if (await insideRoot(resolved, tmpRoot())) return true;
 	if (await insideRoot(resolved, cwdRoot())) return true;
-	if (await insideRoot(resolved, homeRoot())) return true;
 	if (process.env.VP_ALLOW_HOME === "1") return await insideRoot(resolved, homeRoot());
 	return isLocalAbsolutePath(resolved) && !driveAccessDisabled();
 }

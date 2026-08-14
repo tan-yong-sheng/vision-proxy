@@ -11,3 +11,6 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-14: new plan plans/backend-vision-proxy-remaining-debt.md
 - 2026-08-14: new worktree worktrees/backend-vision-proxy-shared-shim.md
 - 2026-08-14: new worktree worktrees/backend-vision-proxy-gemini-provider.md
+- 2026-08-14: archive worktrees/backend-vision-proxy-shared-shim.md -> archive/backend-vision-proxy-shared-shim.md (merged)
+- 2026-08-14: archive worktrees/backend-vision-proxy-gemini-provider.md -> archive/backend-vision-proxy-gemini-provider.md (merged)
+- 2026-08-14: archive plans/backend-vision-proxy-remaining-debt.md -> archive/backend-vision-proxy-remaining-debt.md (complete)

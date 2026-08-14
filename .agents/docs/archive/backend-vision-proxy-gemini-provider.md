@@ -4,7 +4,7 @@ title: Vision Proxy Gemini provider
 description: Add Google/Gemini vision provider support to the vp CLI.
 area: backend
 tags: [vision-proxy, cli, provider, gemini, google]
-status: active
+status: merged
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-08-28"

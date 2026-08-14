@@ -4,7 +4,7 @@ title: Vision Proxy remaining debt
 description: Pay down the two accepted pieces of migration debt - shared shim module and Google/Gemini provider support.
 area: backend
 tags: [vision-proxy, cli, refactoring, provider, gemini]
-status: active
+status: complete
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-10-13"

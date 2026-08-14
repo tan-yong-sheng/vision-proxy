@@ -1,8 +1,3 @@
-
-.lavish/
-.worktrees/
-
+dist/
 node_modules/
-*.tgz
-.DS_Store
-Thumbs.db
+*.log

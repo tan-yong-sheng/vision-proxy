@@ -1,0 +1,20 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"lib": ["ES2023"],
+		"types": ["node"],
+		"strict": true,
+		"noImplicitOverride": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"verbatimModuleSyntax": false,
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
+		"resolveJsonModule": true
+	},
+	"include": ["src/**/*.ts"]
+}

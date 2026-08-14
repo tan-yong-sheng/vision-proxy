@@ -1,49 +1,42 @@
 {
-	"name": "pi-vision-proxy",
-	"version": "1.6.0",
-	"description": "Automatic image description for any model in Pi. Routes images to a vision model and injects descriptions into context.",
-	"keywords": [
-		"pi-package"
-	],
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/pungggi/pi-vision-proxy.git"
-	},
-	"homepage": "https://github.com/pungggi/pi-vision-proxy#readme",
-	"type": "module",
-	"scripts": {
-		"test": "node --experimental-strip-types --no-warnings --test extensions/__tests__/*.test.ts"
-	},
-	"pi": {
-		"extensions": [
-			"./extensions/vision-proxy.ts"
-		]
-	},
-	"dependencies": {
-		"image-size": "^2.0.2",
-		"imagescript": "^1.3.1",
-		"imghash": "^1.1.4"
-	},
-	"peerDependencies": {
-		"@earendil-works/pi-ai": ">=0.74.0",
-		"@earendil-works/pi-coding-agent": ">=0.74.0",
-		"typebox": "*"
-	},
-	"peerDependenciesMeta": {
-		"@earendil-works/pi-ai": {
-			"optional": true
-		},
-		"@earendil-works/pi-coding-agent": {
-			"optional": true
-		},
-		"typebox": {
-			"optional": true
-		}
-	},
-	"devDependencies": {
-		"@earendil-works/pi-ai": ">=0.74.0",
-		"@earendil-works/pi-coding-agent": ">=0.74.0",
-		"@types/node": "^26.1.1"
-	}
+  "name": "vision-proxy",
+  "version": "0.1.0",
+  "description": "Standalone CLI that routes images to a vision model and prints a fenced, UNTRUSTED description. Drives agent UserPromptSubmit hooks so any coding agent can get image context.",
+  "keywords": [
+    "vision",
+    "image-description",
+    "cli",
+    "vercel-ai-sdk",
+    "agent",
+    "hook"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "vision-proxy": "dist/cli.js",
+    "vp": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --no-warnings --test src/**/*.test.ts",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.95",
+    "@ai-sdk/openai": "^4.0.0",
+    "ai": "^7.0.0",
+    "image-size": "^2.0.2",
+    "imagescript": "^1.3.1",
+    "imghash": "^1.1.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.9.0"
+  }
 }

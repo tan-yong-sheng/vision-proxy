@@ -9,7 +9,6 @@ const src = join(root, "src", "shims");
 const dst = join(root, "dist", "shims");
 mkdirSync(dst, { recursive: true });
 for (const f of readdirSync(src)) {
-	if (f.endsWith(".mjs") && f.includes("user-prompt-submit")) {
-		copyFileSync(join(src, f), join(dst, f));
-	}
+	if (!f.endsWith(".mjs") || f.endsWith(".e2e.mjs")) continue;
+	copyFileSync(join(src, f), join(dst, f));
 }

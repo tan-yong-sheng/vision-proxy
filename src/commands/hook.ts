@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const SUPPORTED = ["claude-code", "codex"];
 const TIMEOUT_SEC = 30;
+const SHARED_SHIM = "shared.mjs";
 
 // shims are co-located with this module: src/shims (dev) or dist/shims (build).
 function shimDir(): string {
@@ -220,6 +221,12 @@ export async function hookInstall(agent: string): Promise<HookResult> {
 	}
 	mkdirSync(dirname(shimDst), { recursive: true });
 	writeFileSync(shimDst, readFileSync(shimSrc), { mode: 0o755 });
+	// The shim imports ./shared.mjs, so it has to land in the same directory.
+	const sharedSrc = join(shimDir(), SHARED_SHIM);
+	if (!existsSync(sharedSrc)) {
+		return { ok: false, message: `shim source not found: ${sharedSrc}`, code: 1 };
+	}
+	writeFileSync(join(dirname(shimDst), SHARED_SHIM), readFileSync(sharedSrc));
 
 	const cfgPath = spec.configPath();
 	mkdirSync(dirname(cfgPath), { recursive: true });

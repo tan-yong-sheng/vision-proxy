@@ -1,0 +1,290 @@
+/**
+ * `vp analyze` — core image analysis command.
+ *
+ * Flow:
+ *   - Resolve config (file + env + flags).
+ *   - Read + hash + (optionally) crop each image.
+ *   - Cache-first: for the single-image default path, look up a cached
+ *     description keyed by content hash + crop + question + model ref.
+ *   - Otherwise call the Vercel AI SDK via the adapter.
+ *   - Emit a fenced description (`<vision_proxy_description>`), unless
+ *     `--no-fence` was passed. The fence is ON by default; image-derived text
+ *     is attacker-controlled, so unfenced output must never be injected.
+ */
+import {
+	buildAnalyzeResult,
+	buildJointDescriptionFence,
+	buildToolCacheKey,
+	cropImage,
+	cropSignature,
+	getGroundingFormat,
+	hashImageData,
+	parseCropArg,
+	type CropEntry,
+	type GroundingFormat,
+	type ImageContent,
+	type ImagePayload,
+	readImageFileWithReason,
+	resolveCropEntry,
+	storeImageMeta,
+	describeReadReason,
+	_imageMeta,
+} from "../core.ts";
+import { analyzeImagesWithModel } from "../adapter.ts";
+import { resolveModel, isKnownProvider } from "../provider.ts";
+import { loadConfig } from "../config.ts";
+import { cacheGet, cacheSet, configureCache } from "../cache.ts";
+import type { LanguageModel } from "ai";
+
+export interface AnalyzeFlags {
+	format?: GroundingFormat;
+	provider?: string;
+	model?: string;
+	joint?: boolean;
+	crops?: CropEntry[];
+	fence: boolean;
+	configPath?: string;
+	json: boolean;
+	maxOutputTokens?: number;
+	question?: string;
+	apiKey?: string;
+	env?: NodeJS.ProcessEnv;
+	cwd?: string;
+}
+
+export interface AnalyzeOutcome {
+	/** Text printed to stdout (fenced or plain). */
+	output: string;
+	/** Whether the result came from cache. */
+	cacheHit: boolean;
+	/** Per-image records for --json. */
+	records: Array<{ hash: string; description: string; error?: string }>;
+}
+
+async function readPayload(path: string): Promise<ImagePayload | { error: string }> {
+	const r = await readImageFileWithReason(path);
+	if (!r.image) {
+		return { error: `could not read image: ${describeReadReason(r.reason ?? "not-an-image", r.bytes)}` };
+	}
+	const img: ImageContent = r.image;
+	const hash = hashImageData(img.data);
+	storeImageMeta(hash, img.data, r.filename);
+	const meta = metaForHash(hash);
+	return { image: img, hash, meta, crop: undefined };
+}
+
+// metaForHash reads from the in-memory map populated by storeImageMeta.
+function metaForHash(hash: string) {
+	return _imageMeta.get(hash);
+}
+
+async function applyCrop(
+	payload: ImagePayload,
+	cropEntry: CropEntry,
+): Promise<ImagePayload | { error: string }> {
+	const meta = payload.meta;
+	if (!meta) return { error: "cannot crop image - dimensions unknown" };
+	try {
+		const resolved = resolveCropEntry(cropEntry, meta.width, meta.height);
+		const buf = Buffer.from(payload.image.data, "base64");
+		const cropped = await cropImage(buf, resolved, payload.image.mimeType);
+		if (!cropped) return { error: "crop failed" };
+		const newImg: ImageContent = {
+			type: "image",
+			data: cropped.toString("base64"),
+			mimeType: payload.image.mimeType,
+		};
+		const newHash = hashImageData(newImg.data);
+		storeImageMeta(newHash, newImg.data, meta.filename);
+		return { image: newImg, hash: newHash, meta: metaForHash(newHash), crop: resolved };
+	} catch (err) {
+		return { error: `crop failed: ${err instanceof Error ? err.message : String(err)}` };
+	}
+}
+
+function buildProviderOptions(format: GroundingFormat | undefined): Record<string, unknown> | undefined {
+	// OpenAI imageDetail etc. would be attached here. Grounding format is
+	// conveyed via the system prompt instead, so nothing extra by default.
+	if (format && format !== "none") return undefined;
+	return undefined;
+}
+
+/**
+ * Run analyze. Returns the outcome (does not print). The CLI layer decides how
+ * to render stdout.
+ */
+export async function runAnalyze(
+	imagePaths: string[],
+	flags: AnalyzeFlags,
+	analyzeImpl: typeof analyzeImagesWithModel = analyzeImagesWithModel,
+): Promise<AnalyzeOutcome> {
+	const env = flags.env ?? process.env;
+	const cwd = flags.cwd ?? process.cwd();
+
+	const { config } = await loadConfig({ explicitConfigPath: flags.configPath, cwd, env });
+	configureCache(config.cacheSize);
+
+	const provider = flags.provider ?? config.provider;
+	const modelId = flags.model ?? config.modelId;
+
+	if (!isKnownProvider(provider)) {
+		throw new AnalyzeError(`unknown provider "${provider}"`);
+	}
+
+	const resolved = resolveModel(provider, modelId, env, flags.apiKey);
+	if (!resolved.ok) {
+		throw new AnalyzeError(
+			`no API key for provider "${resolved.provider}". Set ${resolved.apiKeyEnv} (or pass --api-key).`,
+		);
+	}
+	const model: LanguageModel = resolved.model.model;
+
+	const grounding = getGroundingFormat(config, provider, modelId);
+	const effectiveFormat: GroundingFormat =
+		flags.format && flags.format !== "none" ? flags.format : grounding;
+
+	// Read + hash + crop payloads.
+	const payloads: ImagePayload[] = [];
+	for (let i = 0; i < imagePaths.length; i++) {
+		const read = await readPayload(imagePaths[i]!);
+		if ("error" in read) throw new AnalyzeError(read.error);
+		const cropForIndex = flags.crops?.find((c) => c.image_index === i);
+		if (cropForIndex) {
+			const cropped = await applyCrop(read, cropForIndex);
+			if ("error" in cropped) throw new AnalyzeError(cropped.error);
+			payloads.push(cropped);
+		} else {
+			payloads.push(read);
+		}
+	}
+
+	const question = flags.question ?? "";
+
+	// Cache-first single-image default path.
+	if (!flags.joint && payloads.length === 1) {
+		const p = payloads[0]!;
+		const cropSig = p.crop ? cropSignature(p.crop) : undefined;
+		const cacheKey = buildToolCacheKey(
+			[p.hash],
+			cropSig,
+			hashImageData(question),
+			`${provider}/${modelId}`,
+		);
+		const cached = await cacheGet(cacheKey);
+		if (cached !== undefined) {
+			const description = cached;
+			const output = flags.fence
+				? buildAnalyzeResult([p], description, effectiveFormat)
+				: description;
+			return {
+				output,
+				cacheHit: true,
+				records: [{ hash: p.hash, description }],
+			};
+		}
+
+		const resp = await analyzeImpl({
+			imagePayloads: [p],
+			systemPrompt: config.systemPrompt,
+			question,
+			model,
+			maxOutputTokens: flags.maxOutputTokens,
+		});
+		const description = resp.text;
+		await cacheSet(cacheKey, description);
+		const output = flags.fence
+			? buildAnalyzeResult([p], description, effectiveFormat)
+			: description;
+		return {
+			output,
+			cacheHit: false,
+			records: [{ hash: p.hash, description }],
+		};
+	}
+
+	// Joint multi-image path (explicit --joint, or multiple images).
+	const allHashes = payloads.map((p) => p.hash);
+	const cropSig = payloads.map((p) => (p.crop ? cropSignature(p.crop) : "full")).join("+");
+	const jointCacheKey = buildToolCacheKey(
+		allHashes,
+		flags.joint ? `joint:${cropSig}` : cropSig,
+		hashImageData(question),
+		`${provider}/${modelId}`,
+	);
+	const cachedJoint = await cacheGet(jointCacheKey);
+	if (cachedJoint !== undefined) {
+		const description = cachedJoint;
+		const output = flags.fence
+			? buildJointDescriptionFence(
+					payloads.map((p) => ({ hash: p.hash, meta: p.meta })),
+					description,
+					effectiveFormat,
+				)
+			: description;
+		return {
+			output,
+			cacheHit: true,
+			records: payloads.map((p) => ({ hash: p.hash, description })),
+		};
+	}
+
+	const resp = await analyzeImpl({
+		imagePayloads: payloads,
+		systemPrompt: config.systemPrompt + groundingInstructionSuffix(effectiveFormat),
+		question,
+		model,
+		providerOptions: buildProviderOptions(effectiveFormat),
+		maxOutputTokens: flags.maxOutputTokens,
+	});
+	const description = resp.text;
+	await cacheSet(jointCacheKey, description);
+	const output = flags.fence
+		? buildJointDescriptionFence(
+				payloads.map((p) => ({ hash: p.hash, meta: p.meta })),
+				description,
+				effectiveFormat,
+			)
+		: description;
+	return {
+		output,
+		cacheHit: false,
+		records: payloads.map((p) => ({ hash: p.hash, description })),
+	};
+}
+
+function groundingInstructionSuffix(format: GroundingFormat): string {
+	if (!format || format === "none") return "";
+	const map: Record<GroundingFormat, string> = {
+		qwen_pixels:
+			"\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels relative to the image.",
+		molmo_points:
+			'\nWhen you describe a spatial element, follow the description with point coordinates as <point x="..." y="..." alt="..."/>.',
+		deepseek_bbox:
+			"\nWhen you describe a spatial element, use DeepSeek's native <|ref|>desc<|/ref|><|det|>[[x1,y1,x2,y2]]<|/det|> bounding box format.",
+		internvl_pixels:
+			"\nWhen you describe a spatial element, follow the description with bounding-box coordinates as [x1, y1, x2, y2] in absolute pixels.",
+		gemini_normalized_1000:
+			"\nWhen you describe a spatial element, follow the description with bounding-box coordinates in normalized 0-1000 format.",
+		none: "",
+	};
+	return map[format] ?? "";
+}
+
+/** Parse `--crop` flags (now in the parsed flags map) in the form `<index>:<form>`. */
+export function parseCropFlags(
+	flags: Record<string, string | boolean | string[]>,
+): { crops: CropEntry[] | undefined } {
+	const raw = flags.crop;
+	if (raw === undefined) return { crops: undefined };
+	const values = Array.isArray(raw) ? raw : [raw];
+	const crops: CropEntry[] = [];
+	for (const value of values) {
+		if (typeof value !== "string") continue;
+		const parsed = parseCropArg(value);
+		if (typeof parsed === "string") throw new AnalyzeError(parsed);
+		crops.push(parsed);
+	}
+	return { crops: crops.length > 0 ? crops : undefined };
+}
+
+export class AnalyzeError extends Error {}

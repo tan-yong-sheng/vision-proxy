@@ -22,6 +22,7 @@ import { providerList, providerAdd, providerCheck } from "./commands/provider.ts
 import { cacheStatus, cacheClearCmd, cachePruneCmd } from "./commands/cache.ts";
 import { isKnownProvider } from "./provider.ts";
 import type { GroundingFormat } from "./core.ts";
+import { basename } from "node:path";
 
 const VERSION = "0.1.0";
 
@@ -323,7 +324,8 @@ function handle(r: { ok: boolean; message: string; code: number }): void {
 
 // Run when invoked directly.
 const invokedPath = process.argv[1] ?? "";
-if (invokedPath.endsWith("cli.ts") || invokedPath.endsWith("cli.js") || invokedPath.includes("vision-proxy")) {
+const binName = basename(invokedPath);
+if (["cli.ts", "cli.js", "vision-proxy", "vp"].includes(binName)) {
 	main(process.argv.slice(2)).catch((err) => {
 		fail(`fatal: ${err instanceof Error ? err.message : String(err)}`);
 	});

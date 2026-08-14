@@ -837,9 +837,9 @@ export interface ReadImageResult {
 async function canonical(p: string | undefined): Promise<string | null> {
 	if (!p) return null;
 	try {
-		return (await realpath(p)).toLowerCase();
+		return await realpath(p);
 	} catch {
-		return p.toLowerCase();
+		return p;
 	}
 }
 
@@ -862,7 +862,7 @@ function driveAccessDisabled(): boolean {
 
 async function resolvedPath(filePath: string): Promise<string | null> {
 	try {
-		return (await realpath(filePath)).toLowerCase();
+		return await realpath(filePath);
 	} catch {
 		return null;
 	}

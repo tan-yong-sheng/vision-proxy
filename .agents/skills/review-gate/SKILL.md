@@ -43,19 +43,26 @@ A short `bash` timeout can kill the CLI while the daemon is still in `review: fi
 
 ### Polling wrapper for approval gates
 
-Use the bundled polling script to watch a run and unblock parked gates:
+Use the bundled polling script to watch a run and unblock parked gates.
+It talks to the no-mistakes daemon over its Unix socket and reads JSON-RPC responses, so it is deterministic and not sensitive to CLI text-formatting changes.
 
 ```bash
 bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh [poll-interval-seconds]
 ```
 
-Run it from inside the target worktree, or set `WORKTREE`:
+Run it from inside the target worktree:
 
 ```bash
-WORKTREE=/path/to/qa-worktree bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh 30
+cd /path/to/qa-worktree
+bash /path/to/.agents/skills/review-gate/scripts/poll-no-mistakes.sh 30
 ```
 
-The script prints `RUNNING` while the daemon works, `BLOCKED` when it sees `awaiting_agent: parked`, and `FINISHED` once `outcome:` appears.
+The script:
+
+1. Resolves the main repo path from `git rev-parse --git-common-dir` (linked worktrees share one no-mistakes repo record).
+2. Looks up the `repo_id` in `~/.no-mistakes/state.sqlite`.
+3. Calls `get_active_run` over `~/.no-mistakes/socket` using JSON-RPC.
+4. Prints `RUNNING` while active, `BLOCKED` when `run.awaiting_agent` is true, and `FINISHED` when the run reaches an outcome.
 
 When blocked, it inspects each finding's `action`:
 
@@ -75,24 +82,6 @@ For fully unattended behavior, also enable repo-level auto-fix:
 auto_fix:
   review: 3
 ```
-
-### Deterministic polling via daemon IPC
-
-The CLI's text output is formatted as TOON and can change between versions.
-For a robust, parseable check, talk to the no-mistakes daemon directly over its Unix socket:
-
-```bash
-bash .agents/skills/review-gate/scripts/poll-no-mistakes-structured.sh 30
-```
-
-The script:
-
-1. Resolves the main repo path from `git rev-parse --git-common-dir` (linked worktrees share one no-mistakes repo record).
-2. Looks up the `repo_id` in `~/.no-mistakes/state.sqlite`.
-3. Calls `get_active_run` over `~/.no-mistakes/socket` using JSON-RPC.
-4. Checks `run.awaiting_agent` boolean and the gate step's `findings_json` to decide between `fix` and `approve`.
-
-Use this when you want machine-readable status instead of grepping the TUI text.
 
 ## Core workflow
 

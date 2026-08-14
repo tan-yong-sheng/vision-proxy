@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 /**
  * Vercel AI SDK adapter for the vision-proxy CLI.
  *

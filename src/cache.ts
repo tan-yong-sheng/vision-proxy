@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 /**
  * Per-image description cache for the vision-proxy CLI.
  *

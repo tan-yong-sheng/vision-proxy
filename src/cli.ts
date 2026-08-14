@@ -11,6 +11,7 @@
  *   version | help
  */
 import { runAnalyze, parseCropFlags, AnalyzeError, type AnalyzeFlags } from "./commands/analyze.ts";
+import { runHook } from "./commands/hook.ts";
 import {
 	configInit,
 	configGet,
@@ -136,6 +137,12 @@ cache options:
   status                     hit rate + size
   clear                      drop all entries
   prune [--older <days>]     evict entries older than N days (default 30)
+
+hook options:
+  install <agent>          install UserPromptSubmit shim for claude-code | codex
+  show <agent>             print shim + config block for manual install
+  list                     show installed shims
+  uninstall <agent>        remove the shim from the agent config
 `;
 
 function print(msg: string): void {
@@ -286,6 +293,14 @@ export async function main(argv: string[]): Promise<void> {
 				default:
 					fail(`unknown cache subcommand "${sub ?? ""}". Try: status, clear, prune`);
 			}
+			return;
+		}
+
+		case "hook": {
+			const [sub, ...subRest] = rest;
+			const { positionals } = parseFlags(subRest);
+			const agent = positionals[0];
+			handle(await runHook(sub ?? "", agent ?? ""));
 			return;
 		}
 

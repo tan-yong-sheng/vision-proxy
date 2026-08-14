@@ -15,13 +15,10 @@ import { join } from "node:path";
 import { runHook } from "../commands/hook.ts";
 
 const ORIG_HOME = process.env.HOME;
-const ORIG_ARGV1 = process.argv[1];
 
 function isolate(): string {
 	const home = mkdtempSync(join(tmpdir(), "vp-hook-test-"));
 	process.env.HOME = home;
-	// installDir is derived from process.argv[1]; point it into the isolated home.
-	process.argv[1] = join(home, "vp");
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	mkdirSync(join(home, ".codex"), { recursive: true });
 	return home;
@@ -30,13 +27,15 @@ function isolate(): string {
 function reset() {
 	if (ORIG_HOME === undefined) delete process.env.HOME;
 	else process.env.HOME = ORIG_HOME;
-	if (ORIG_ARGV1 === undefined) delete process.argv[1];
-	else process.argv[1] = ORIG_ARGV1;
+}
+
+function shimDir(home: string): string {
+	return join(home, "shims");
 }
 
 test("install claude-code writes UserPromptSubmit into settings.json", async () => {
 	const home = isolate();
-	const r = await runHook("install", "claude-code");
+	const r = await runHook("install", "claude-code", shimDir(home));
 	assert.equal(r.ok, true);
 	const cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	const groups = cfg.hooks.UserPromptSubmit;
@@ -49,7 +48,7 @@ test("install claude-code writes UserPromptSubmit into settings.json", async () 
 
 test("install codex appends a [[UserPromptSubmit]] block with additionalContextLimit", async () => {
 	const home = isolate();
-	const r = await runHook("install", "codex");
+	const r = await runHook("install", "codex", shimDir(home));
 	assert.equal(r.ok, true);
 	const toml = readFileSync(join(home, ".codex", "config.toml"), "utf8");
 	assert.match(toml, /\[\[UserPromptSubmit\]\]/);
@@ -60,8 +59,8 @@ test("install codex appends a [[UserPromptSubmit]] block with additionalContextL
 
 test("install is idempotent (no duplicate blocks)", async () => {
 	const home = isolate();
-	await runHook("install", "claude-code");
-	const first = await runHook("install", "claude-code");
+	await runHook("install", "claude-code", shimDir(home));
+	const first = await runHook("install", "claude-code", shimDir(home));
 	assert.equal(first.ok, true);
 	const cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -69,9 +68,9 @@ test("install is idempotent (no duplicate blocks)", async () => {
 });
 
 test("list shows installed agents", async () => {
-	isolate();
-	await runHook("install", "claude-code");
-	await runHook("install", "codex");
+	const home = isolate();
+	await runHook("install", "claude-code", shimDir(home));
+	await runHook("install", "codex", shimDir(home));
 	const r = await runHook("list", "");
 	assert.match(r.message, /✓ claude-code/);
 	assert.match(r.message, /✓ codex/);
@@ -80,6 +79,7 @@ test("list shows installed agents", async () => {
 
 test("uninstall removes only the vision-proxy block and leaves others", async () => {
 	const home = isolate();
+	const installDir = shimDir(home);
 	writeFileSync(
 		join(home, ".claude", "settings.json"),
 		JSON.stringify({
@@ -94,10 +94,10 @@ test("uninstall removes only the vision-proxy block and leaves others", async ()
 			},
 		}),
 	);
-	await runHook("install", "claude-code");
+	await runHook("install", "claude-code", installDir);
 	let cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
-	const r = await runHook("uninstall", "claude-code");
+	const r = await runHook("uninstall", "claude-code", installDir);
 	assert.equal(r.ok, true);
 	cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);

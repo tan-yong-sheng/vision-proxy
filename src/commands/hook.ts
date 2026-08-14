@@ -197,13 +197,20 @@ function specFor(agent: string): AgentSpec | undefined {
 	return undefined;
 }
 
-function installDir(): string {
-	const script = process.argv[1] ?? fileURLToPath(import.meta.url);
-	return join(dirname(script), "shims");
+function defaultInstallDir(): string {
+	return join(dirname(fileURLToPath(import.meta.url)), "..", "shims");
+}
+
+interface HookInstallOptions {
+	/** Override the directory where shims are written. Defaults to the shims directory next to this module. */
+	installDir?: string;
 }
 
 // fallow-ignore-next-line unused-export
-export async function hookInstall(agent: string): Promise<HookResult> {
+export async function hookInstall(
+	agent: string,
+	opts: HookInstallOptions = {},
+): Promise<HookResult> {
 	const spec = specFor(agent);
 	if (!spec) {
 		return {
@@ -212,7 +219,7 @@ export async function hookInstall(agent: string): Promise<HookResult> {
 			code: 1,
 		};
 	}
-	const dir = installDir();
+	const dir = opts.installDir ?? defaultInstallDir();
 	mkdirSync(dir, { recursive: true });
 	const shimSrc = join(shimDir(), agent + "-user-prompt-submit.mjs");
 	const shimDst = spec.shimTarget({ installDir: dir });
@@ -271,7 +278,10 @@ export async function hookList(): Promise<HookResult> {
 }
 
 // fallow-ignore-next-line unused-export
-export async function hookUninstall(agent: string): Promise<HookResult> {
+export async function hookUninstall(
+	agent: string,
+	opts: HookInstallOptions = {},
+): Promise<HookResult> {
 	const spec = specFor(agent);
 	if (!spec) {
 		return {
@@ -287,7 +297,7 @@ export async function hookUninstall(agent: string): Promise<HookResult> {
 	const { raw } = spec.readConfig();
 	const { raw: next, removed } = spec.remove(raw);
 	writeFileSync(cfgPath, next);
-	const dir = installDir();
+	const dir = opts.installDir ?? defaultInstallDir();
 	const shimDst = spec.shimTarget({ installDir: dir });
 	if (existsSync(shimDst)) {
 		try {
@@ -306,11 +316,15 @@ export async function hookUninstall(agent: string): Promise<HookResult> {
 }
 
 /** CLI dispatch for `vp hook <subcommand> <agent>`. */
-export async function runHook(sub: string, agent: string): Promise<HookResult> {
+export async function runHook(
+	sub: string,
+	agent: string,
+	installDir?: string,
+): Promise<HookResult> {
 	switch (sub) {
 		case "install":
 			if (!agent) return { ok: false, message: "usage: vp hook install <agent>", code: 1 };
-			return hookInstall(agent);
+			return hookInstall(agent, { installDir });
 		case "show":
 			if (!agent) return { ok: false, message: "usage: vp hook show <agent>", code: 1 };
 			return hookShow(agent);
@@ -318,7 +332,7 @@ export async function runHook(sub: string, agent: string): Promise<HookResult> {
 			return hookList();
 		case "uninstall":
 			if (!agent) return { ok: false, message: "usage: vp hook uninstall <agent>", code: 1 };
-			return hookUninstall(agent);
+			return hookUninstall(agent, { installDir });
 		default:
 			return {
 				ok: false,

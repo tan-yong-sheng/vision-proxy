@@ -966,7 +966,7 @@ export async function readImageFileWithReason(
 }
 
 const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
-	denied: "path outside allowed directories (tmp / cwd / home; set VP_ALLOW_HOME=1 to include home on other volumes)",
+	denied: "path outside allowed directories (tmp / cwd; set VP_ALLOW_HOME=1 to include home)",
 	unreadable: "could not read file",
 	empty: "file is empty",
 	"not-an-image": "unsupported extension",

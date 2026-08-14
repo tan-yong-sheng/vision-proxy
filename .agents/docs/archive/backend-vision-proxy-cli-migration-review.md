@@ -4,7 +4,7 @@ title: Vision Proxy CLI migration review
 description: QA dossier for the reviewed no-mistakes gate on the combined Vercel AI SDK CLI migration.
 area: backend
 tags: [vision-proxy, cli, review-gate, no-mistakes, migration]
-status: active
+status: retired
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-11-12"

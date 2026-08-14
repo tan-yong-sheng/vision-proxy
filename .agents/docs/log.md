@@ -7,3 +7,4 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-14: sync plans/backend-migrate-vision-proxy-to-vercel-ai-sdk-cli-driven-by-agent-userpromptsubmit-hooks.md from .lavish/vision-proxy-cli-plan.html (synced from lavish feedback)
 - 2026-08-14: new worktree worktrees/backend-vision-proxy-cli-core.md
 - 2026-08-14: new worktree worktrees/backend-vision-proxy-hook-shims.md
+- 2026-08-14: archive qa/backend-vision-proxy-cli-migration-review.md -> archive/backend-vision-proxy-cli-migration-review.md (retired)

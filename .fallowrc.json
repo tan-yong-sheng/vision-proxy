@@ -2,6 +2,8 @@
 	"entry": [
 		"extensions/helpers/before-agent.ts",
 		"extensions/vision-proxy.ts",
+		"extensions/__tests__/integration.test.ts",
+		"extensions/__tests__/internal.test.ts",
 		"lib/analyze.ts",
 		"lib/commands.ts",
 		"lib/describe.ts",
@@ -9,6 +11,8 @@
 		"lib/messages.ts",
 		"lib/shared.ts",
 		"src/cli.ts",
+		"src/**/*.test.ts",
+		"src/shims/claude-code-hook.e2e.mjs",
 		"src/shims/claude-code-user-prompt-submit.mjs",
 		"src/shims/codex-user-prompt-submit.mjs"
 	]

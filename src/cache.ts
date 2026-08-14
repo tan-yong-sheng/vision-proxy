@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-file
 /**
  * Per-image description cache for the vision-proxy CLI.
  *
@@ -32,7 +31,7 @@ let _cache: LRUCache<string, CacheRecord> | null = null;
 let _path: string | null = null;
 let _explicitPath: string | null = null;
 
-export function cachePath(): string {
+function cachePath(): string {
 	if (_explicitPath) return _explicitPath;
 	const dir = process.env.VP_CACHE_DIR ?? path.join(os.homedir(), ".vision-proxy");
 	return path.join(dir, "cache.json");

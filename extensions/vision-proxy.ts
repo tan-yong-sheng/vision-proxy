@@ -28,8 +28,8 @@
  * PI_VISION_PROXY_CACHE_SIZE - 0..500
  * PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN - positive number to cap calls per turn; 0, -1, or "infinity" for unlimited (default: -1)
  *
- * Install:
- * pi install ./packages/pi-vision-proxy
+ * Install (Pi extension):
+ * pi install ./
  */
 import type {
 	BeforeAgentStartEvent,

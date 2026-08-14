@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-file
 /**
  * Vercel AI SDK adapter for the vision-proxy CLI.
  *
@@ -35,7 +34,7 @@ export interface AnalyzeResponse {
 }
 
 /** Build a FilePart from decoded image content. */
-export function imageContentToFilePart(img: ImageContent, filename?: string): SdkFilePart {
+function imageContentToFilePart(img: ImageContent, filename?: string): SdkFilePart {
 	return {
 		type: "file",
 		data: Buffer.from(img.data, "base64"),

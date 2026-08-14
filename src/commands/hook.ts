@@ -1,4 +1,3 @@
-// fallow-ignore-file unused-file
 /**
  * `vp hook` — per-agent UserPromptSubmit shim install tooling.
  *

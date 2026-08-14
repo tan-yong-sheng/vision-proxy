@@ -30,10 +30,11 @@ function userConfigPath(): string {
 
 describe("providerList", () => {
 	it("lists all known providers and key presence from env", () => {
-		const r = providerList({ OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "" } as NodeJS.ProcessEnv);
+		const r = providerList({ OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "", GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv);
 		assert.equal(r.ok, true);
 		assert.match(r.message, /openai/);
 		assert.match(r.message, /anthropic/);
+		assert.match(r.message, /google/);
 		assert.match(r.message, /present/);
 		assert.match(r.message, /missing/);
 	});

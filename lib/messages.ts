@@ -39,8 +39,10 @@ export function toolDisabledError(
 }
 
 /** Build the error response when the per-turn tool call limit is exceeded. */
-export function toolRateLimitError(): { content: Array<{ type: "text"; text: string }> } | null {
-	const limit = maxToolCallsPerTurn();
+export function toolRateLimitError(
+	config: VisionConfig,
+): { content: Array<{ type: "text"; text: string }> } | null {
+	const limit = maxToolCallsPerTurn(config.maxToolCallsPerTurn);
 	if (limit === Infinity) return null;
 	_toolCallCount.value++;
 	if (_toolCallCount.value > limit) {

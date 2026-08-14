@@ -39,6 +39,8 @@ export interface VisionConfig {
 	cacheSize: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
+	// 1.6.0 addition
+	maxToolCallsPerTurn: number;
 }
 
 export interface ImageMeta {
@@ -518,6 +520,8 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-2.5-pro": { format: "gemini_normalized_1000" },
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
+	// 1.6.0 addition
+	maxToolCallsPerTurn: -1,
 };
 
 // ── Persistent file storage ────────────────────────────────────────────────
@@ -539,6 +543,7 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"cacheSize",
 	"pHashSimilarityThreshold",
 	"groundingModels",
+	"maxToolCallsPerTurn",
 ]);
 
 /** Filter a parsed config object to known persisted keys only. */
@@ -678,6 +683,16 @@ function parseFloatOverride(
 	return n;
 }
 
+/** Parse the per-turn tool-call cap env override. -1 means unlimited. */
+function parseToolCallsOverride(
+	value: string | undefined,
+): number | undefined {
+	if (value === undefined) return undefined;
+	const n = Number(value);
+	if (Number.isFinite(n) && n > 0) return Math.floor(n);
+	return -1;
+}
+
 export function readEnvOverrides(
 	env: NodeJS.ProcessEnv = process.env,
 ): Partial<VisionConfig> {
@@ -715,6 +730,11 @@ export function readEnvOverrides(
 		"pHashSimilarityThreshold",
 		parseFloatOverride(env.PI_VISION_PROXY_PHASH_THRESHOLD, 0, 1),
 	);
+	assignIfDefined(
+		overrides,
+		"maxToolCallsPerTurn",
+		parseToolCallsOverride(env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN),
+	);
 
 	return overrides;
 }
@@ -727,6 +747,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxImagesPerCall: boolean;
 	maxBatch: boolean;
 	cacheSize: boolean;
+	maxToolCallsPerTurn: boolean;
 } {
 	return {
 		mode: Boolean(env.PI_VISION_PROXY_MODE),
@@ -736,6 +757,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		maxImagesPerCall: env.PI_VISION_PROXY_MAX_IMAGES_PER_CALL !== undefined,
 		maxBatch: env.PI_VISION_PROXY_MAX_BATCH !== undefined,
 		cacheSize: env.PI_VISION_PROXY_CACHE_SIZE !== undefined,
+		maxToolCallsPerTurn: env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN !== undefined,
 	};
 }
 
@@ -812,6 +834,13 @@ function fallbackGroundingModels(
 	return validated;
 }
 
+function fallbackToolCallsCap(value: unknown): number {
+	if (value === -1) return -1;
+	const n = Number(value);
+	if (Number.isFinite(n) && n > 0) return Math.floor(n);
+	return DEFAULT_CONFIG.maxToolCallsPerTurn;
+}
+
 export function sanitize(config: VisionConfig): VisionConfig {
 	const safe: VisionConfig = { ...config };
 	safe.provider = fallbackProvider(safe.provider);
@@ -835,10 +864,14 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		DEFAULT_CONFIG.pHashSimilarityThreshold,
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
+	safe.maxToolCallsPerTurn = fallbackToolCallsCap(safe.maxToolCallsPerTurn);
 	return safe;
 }
-export function persistedBase(entries: readonly SessionEntry[]): VisionConfig {
-	return sanitize({ ...DEFAULT_CONFIG, ...readPersistedConfig(entries) });
+export function persistedBase(
+	entries: readonly SessionEntry[],
+	fileConfig: Partial<VisionConfig> = {},
+): VisionConfig {
+	return sanitize({ ...DEFAULT_CONFIG, ...fileConfig, ...readPersistedConfig(entries) });
 }
 
 export function resolveConfig(
@@ -1032,13 +1065,14 @@ function maxImageFileBytes(): number {
 
 /**
  * Maximum analyze_image tool calls per agent turn.
- * Defaults to Infinity (no limit). Override with
- * PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN. Values <= 0 or non-numeric strings mean unlimited.
+ * Defaults to Infinity (no limit). A configured value of -1, 0, or a non-numeric
+ * env string means unlimited. Env overrides are used only when no explicit value
+ * is configured (or when the configured value is invalid).
  */
-export function maxToolCallsPerTurn(): number {
-	const n = Number(process.env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN);
-	if (!Number.isFinite(n) || n <= 0) return Infinity;
-	return Math.floor(n);
+export function maxToolCallsPerTurn(configured?: number): number {
+	const n = Number(configured ?? process.env.PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN);
+	if (Number.isFinite(n) && n > 0) return Math.floor(n);
+	return Infinity;
 }
 
 export type ReadImageReason =

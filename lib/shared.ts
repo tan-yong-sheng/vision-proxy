@@ -1,7 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	LRUCache,
-	maxToolCallsPerTurn,
 	modelLabel,
 	shouldStripImages as shouldStripImagesPure,
 	type VisionConfig,

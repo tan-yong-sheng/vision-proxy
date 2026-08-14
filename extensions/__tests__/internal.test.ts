@@ -209,6 +209,7 @@ describe("envFlags", () => {
 			maxImagesPerCall: false,
 			maxBatch: false,
 			cacheSize: false,
+			maxToolCallsPerTurn: false,
 		});
 		assert.deepEqual(
 			envFlags({
@@ -224,6 +225,7 @@ describe("envFlags", () => {
 				maxImagesPerCall: false,
 				maxBatch: false,
 				cacheSize: false,
+				maxToolCallsPerTurn: false,
 			},
 		);
 	});
@@ -1302,6 +1304,34 @@ describe("readEnvOverrides (1.4.0 fields)", () => {
 			undefined,
 		);
 	});
+
+	it("reads PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN", () => {
+		assert.equal(
+			readEnvOverrides({ PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN: "5" })
+				.maxToolCallsPerTurn,
+			5,
+		);
+		assert.equal(
+			readEnvOverrides({ PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN: "-1" })
+				.maxToolCallsPerTurn,
+			-1,
+		);
+		assert.equal(
+			readEnvOverrides({ PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN: "0" })
+				.maxToolCallsPerTurn,
+			-1,
+		);
+		assert.equal(
+			readEnvOverrides({ PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN: "infinity" })
+				.maxToolCallsPerTurn,
+			-1,
+		);
+		assert.equal(
+			readEnvOverrides({ PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN: "abc" })
+				.maxToolCallsPerTurn,
+			-1,
+		);
+	});
 });
 
 const TOOL_CALLS_ENV_KEY = "PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN";
@@ -1354,6 +1384,21 @@ describe("maxToolCallsPerTurn", () => {
 		process.env[TOOL_CALLS_ENV_KEY] = "5.9";
 		assert.equal(maxToolCallsPerTurn(), 5);
 	});
+
+	it("uses configured value when provided", () => {
+		delete process.env[TOOL_CALLS_ENV_KEY];
+		assert.equal(maxToolCallsPerTurn(-1), Infinity);
+		assert.equal(maxToolCallsPerTurn(0), Infinity);
+		assert.equal(maxToolCallsPerTurn(5), 5);
+		assert.equal(maxToolCallsPerTurn(5.9), 5);
+		assert.equal(maxToolCallsPerTurn(Number.NaN), Infinity);
+	});
+
+	it("configured value wins over env", () => {
+		process.env[TOOL_CALLS_ENV_KEY] = "3";
+		assert.equal(maxToolCallsPerTurn(5), 5);
+		assert.equal(maxToolCallsPerTurn(-1), Infinity);
+	});
 });
 
 describe("sanitize (1.4.0 fields)", () => {
@@ -1371,6 +1416,7 @@ describe("sanitize (1.4.0 fields)", () => {
 		assert.equal(result.cacheSize, 50);
 		assert.equal(result.pHashSimilarityThreshold, 0.8);
 		assert.ok(result.groundingModels);
+		assert.equal(result.maxToolCallsPerTurn, -1);
 	});
 
 	it("validates maxImagesPerCall range", () => {
@@ -1378,6 +1424,13 @@ describe("sanitize (1.4.0 fields)", () => {
 		assert.equal(bad.maxImagesPerCall, 10); // reset to default
 		const good = sanitize({ ...DEFAULT_CONFIG, maxImagesPerCall: 15 });
 		assert.equal(good.maxImagesPerCall, 15);
+	});
+
+	it("validates maxToolCallsPerTurn values", () => {
+		assert.equal(sanitize({ ...DEFAULT_CONFIG, maxToolCallsPerTurn: -1 }).maxToolCallsPerTurn, -1);
+		assert.equal(sanitize({ ...DEFAULT_CONFIG, maxToolCallsPerTurn: 5 }).maxToolCallsPerTurn, 5);
+		assert.equal(sanitize({ ...DEFAULT_CONFIG, maxToolCallsPerTurn: 0 }).maxToolCallsPerTurn, -1);
+		assert.equal(sanitize({ ...DEFAULT_CONFIG, maxToolCallsPerTurn: Number.NaN }).maxToolCallsPerTurn, -1);
 	});
 });
 

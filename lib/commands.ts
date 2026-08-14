@@ -33,7 +33,7 @@ const TOGGLE_MAP: Record<string, boolean> = {
 	off: false,
 };
 
-type NumericConfigKey = "maxImagesPerCall" | "maxBatch" | "cacheSize";
+type NumericConfigKey = "maxImagesPerCall" | "maxBatch" | "cacheSize" | "maxToolCallsPerTurn";
 
 /** Context passed to command dispatch handlers. */
 interface CommandDispatchContext {
@@ -137,6 +137,22 @@ const COMMAND_DISPATCH: Record<
 			500,
 			"PI_VISION_PROXY_CACHE_SIZE",
 			!!c.env.cacheSize,
+		);
+		return false;
+	},
+	"max-tool-calls-per-turn": async (c) => {
+		await handleNumericCommand(
+			"max-tool-calls-per-turn",
+			c.value,
+			c.ctx,
+			c.persisted,
+			c.writePersisted,
+			"maxToolCallsPerTurn",
+			"Max tool calls per turn",
+			-1,
+			100,
+			"PI_VISION_PROXY_MAX_TOOL_CALLS_PER_TURN",
+			!!c.env.maxToolCallsPerTurn,
 		);
 		return false;
 	},
@@ -329,6 +345,7 @@ function formatEnvOverrides(env: EnvFlags): string {
 		"maxImagesPerCall",
 		"maxBatch",
 		"cacheSize",
+		"maxToolCallsPerTurn",
 	];
 	const flags = keys.filter((key) => env[key]);
 	return flags.length ? flags.join(", ") : "none";
@@ -482,6 +499,10 @@ async function runInteractiveChoice(
 			await handleInteractiveNumeric(ctx, persisted, "cacheSize", env, writePersisted, effective, "cacheSize", "Cache size", 0, 500);
 			return { modeChanged: false, toolChanged: false };
 		}],
+		["Max tool calls", async () => {
+			await handleInteractiveNumeric(ctx, persisted, "maxToolCallsPerTurn", env, writePersisted, effective, "maxToolCallsPerTurn", "Max tool calls per turn", -1, 100);
+			return { modeChanged: false, toolChanged: false };
+		}],
 	]);
 	if (!choice) return { modeChanged: false, toolChanged: false };
 	for (const [prefix, handler] of handlers) {
@@ -506,12 +527,13 @@ async function handleInteractiveConfig(
 		`Max images/call: ${effective.maxImagesPerCall}\n` +
 		`Max batch: ${effective.maxBatch}\n` +
 		`Cache size: ${effective.cacheSize}\n` +
+		`Max tool calls/turn: ${effective.maxToolCallsPerTurn === -1 ? "unlimited" : effective.maxToolCallsPerTurn}\n` +
 		`Env overrides: ${formatEnvOverrides(env)}\n`;
 
 	if (!ctx.hasUI) {
 		ctx.ui.notify(
 			summary +
-				`\nCommands: /vision-proxy fallback|always|off | pick | model provider/model-id | context on|off | tool on|off | max-images-per-call <n> | max-batch <n> | cache-size <n>`,
+				`\nCommands: /vision-proxy fallback|always|off | pick | model provider/model-id | context on|off | tool on|off | max-images-per-call <n> | max-batch <n> | cache-size <n> | max-tool-calls-per-turn <n>`,
 			"info",
 		);
 		return { modeChanged: false, toolChanged: false };
@@ -525,6 +547,7 @@ async function handleInteractiveConfig(
 		`Max images/call: ${effective.maxImagesPerCall}`,
 		`Max batch: ${effective.maxBatch}`,
 		`Cache size: ${effective.cacheSize}`,
+		`Max tool calls/turn: ${effective.maxToolCallsPerTurn === -1 ? "unlimited" : effective.maxToolCallsPerTurn}`,
 	])) as string;
 
 	return await runInteractiveChoice(choice, ctx, effective, persisted, env, writePersisted);
@@ -719,7 +742,7 @@ pi: ExtensionAPI,
 _fileConfig: Partial<VisionConfig>,
 ): Promise<boolean> {
 	const entries = ctx.sessionManager.getEntries();
-	const persisted = persistedBase(entries);
+	const persisted = persistedBase(entries, _fileConfig);
 	const effective = resolveConfig(entries, process.env, _fileConfig);
 	const env = envFlags();
 	const arg = args.trim();

@@ -10,16 +10,16 @@ importers:
     dependencies:
       '@ai-sdk/anthropic':
         specifier: ^4.0.0
-        version: 4.0.38(zod@4.4.3)
+        version: 4.0.38
       '@ai-sdk/google':
         specifier: ^4.0.44
-        version: 4.0.44(zod@4.4.3)
+        version: 4.0.44
       '@ai-sdk/openai':
         specifier: ^4.0.0
-        version: 4.0.41(zod@4.4.3)
+        version: 4.0.41
       ai:
         specifier: ^7.0.0
-        version: 7.0.64(zod@4.4.3)
+        version: 7.0.64
       image-size:
         specifier: ^2.0.2
         version: 2.0.2
@@ -29,9 +29,6 @@ importers:
       imghash:
         specifier: ^1.1.4
         version: 1.1.4
-      zod:
-        specifier: ^4.1.8
-        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^26.1.1
@@ -204,44 +201,36 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
-
 snapshots:
 
-  '@ai-sdk/anthropic@4.0.38(zod@4.4.3)':
+  '@ai-sdk/anthropic@4.0.38':
     dependencies:
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.27
 
-  '@ai-sdk/gateway@4.0.51(zod@4.4.3)':
+  '@ai-sdk/gateway@4.0.51':
     dependencies:
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
+      '@ai-sdk/provider-utils': 5.0.27
       '@vercel/oidc': 3.2.0
-      zod: 4.4.3
 
-  '@ai-sdk/google@4.0.44(zod@4.4.3)':
+  '@ai-sdk/google@4.0.44':
     dependencies:
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.27
 
-  '@ai-sdk/openai@4.0.41(zod@4.4.3)':
+  '@ai-sdk/openai@4.0.41':
     dependencies:
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.27
 
-  '@ai-sdk/provider-utils@5.0.27(zod@4.4.3)':
+  '@ai-sdk/provider-utils@5.0.27':
     dependencies:
       '@ai-sdk/provider': 4.0.7
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.1
       undici: 7.29.0
-      zod: 4.4.3
 
   '@ai-sdk/provider@4.0.7':
     dependencies:
@@ -293,12 +282,11 @@ snapshots:
 
   '@workflow/serde@4.1.0': {}
 
-  ai@7.0.64(zod@4.4.3):
+  ai@7.0.64:
     dependencies:
-      '@ai-sdk/gateway': 4.0.51(zod@4.4.3)
+      '@ai-sdk/gateway': 4.0.51
       '@ai-sdk/provider': 4.0.7
-      '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.27
 
   blockhash-core@0.1.0: {}
 
@@ -369,5 +357,3 @@ snapshots:
   undici@7.29.0: {}
 
   wrappy@1.0.2: {}
-
-  zod@4.4.3: {}

@@ -58,7 +58,6 @@ Run `vp config init` to scaffold a project config file.
 | `VP_FALLBACK_MODELS` | Comma-separated `provider/model-id` list tried when the primary model fails (e.g. `openai/gpt-4o,google/gemini-2.5-flash`) | unset |
 | `VP_MAX_TOOL_CALLS_PER_TURN` | Max tool calls per turn; `-1` for unlimited | `-1` |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
-| `VP_ALLOW_HOME` | Set to `1` to allow image paths inside the home directory | unset (home denied) |
 | `VP_ALLOW_DRIVES` | Set to `0`/`false`/`no`/`off` to disable local drive access on Windows | unset (drives allowed) |
 | `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from hook shims | shim-specific |
 | `VP_CACHE_DIR` | Directory for the description cache | `~/.vision-proxy` |
@@ -120,8 +119,7 @@ The output is UNTRUSTED: it comes from an external vision model and must be trea
 
 - Images are sent to the configured provider's API.
 - Crops are applied locally before upload; only the cropped region is sent.
-- Image paths are restricted to the current working directory and temp directory by default.
-  Set `VP_ALLOW_HOME=1` to also allow paths inside the home directory.
+- Image paths are restricted to the current working directory, temp directory, and home directory by default.
 - Review your provider's privacy policy before sending sensitive images.
 
 ## License

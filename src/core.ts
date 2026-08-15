@@ -996,7 +996,7 @@ export async function isPathAllowed(filePath: string): Promise<boolean> {
 	if (!resolved) return false;
 	if (await insideRoot(resolved, tmpRoot())) return true;
 	if (await insideRoot(resolved, cwdRoot())) return true;
-	if (process.env.VP_ALLOW_HOME === "1") return await insideRoot(resolved, homeRoot());
+	if (await insideRoot(resolved, homeRoot())) return true;
 	return isLocalAbsolutePath(resolved) && !driveAccessDisabled();
 }
 
@@ -1072,7 +1072,7 @@ export async function readImageFileWithReason(
 }
 
 const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
-	denied: "path outside allowed directories (tmp / cwd; set VP_ALLOW_HOME=1 to include home)",
+	denied: "path outside allowed directories (tmp / cwd / home)",
 	unreadable: "could not read file",
 	empty: "file is empty",
 	"not-an-image": "unsupported extension",

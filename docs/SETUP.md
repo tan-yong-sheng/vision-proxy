@@ -123,6 +123,6 @@ vp provider delete-key openai
 | Symptom | Fix |
 |---------|-----|
 | `no API key for provider "openai"` | Set `OPENAI_API_KEY` or use `--api-key` |
-| `path outside allowed directories` | Pass `VP_ALLOW_HOME=1` or use an absolute path |
+| `path outside allowed directories` | Use an absolute path inside tmp, cwd, or the home directory |
 | `model is currently experiencing high demand` | Try a different model or wait |
 | `unknown provider` | Register it with `vp provider add <name>` |

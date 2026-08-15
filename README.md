@@ -83,18 +83,17 @@ A missing API key on the primary provider is always a fatal error; fallbacks are
 
 - `vp analyze <paths...>` - describe one or more images.
 - `vp config init|get|set|validate` - manage config files.
-- `vp provider list|add|check|store-key|delete-key|list-keys` - manage provider registrations and keys.
+- `vp provider list|check|store-key|delete-key|list-keys` - manage provider registrations and keys.
 - `vp cache status|clear|prune` - inspect and clear the local description cache.
-- `vp hook install|show|list|uninstall` - install `UserPromptSubmit` shims for `claude-code` or `codex`.
-- `vp integration install|show|uninstall <agent>` - install the vision-proxy integration for `pi` (Pi coding agent).
+- `vp integration install|show|list|status|uninstall <agent>` - install vision-proxy for `pi`, `claude-code`, or `codex`.
 
 ## Agent hooks
 
 Install a hook so Claude Code or Codex automatically describes images on every user turn:
 
 ```bash
-vp hook install claude-code
-vp hook install codex
+vp integration install claude-code
+vp integration install codex
 ```
 
 The shim shells out to `vp analyze`, then returns the fenced description as additional hook context.
@@ -108,6 +107,8 @@ vp integration install pi
 ```
 
 This writes a single auto-discovered extension into `~/.pi/agent/extensions/vision-proxy.ts`. The generated extension shells out to `vp analyze --json`, reads `VP_BIN` from the environment (falling back to `vp` on `PATH`), and fails open if `vp` is missing. Re-run the installer after a CLI upgrade to refresh the extension, and use `vp integration uninstall pi` to remove it.
+
+Every generated artifact (the Pi extension and the Claude Code / Codex shims) is stamped with the `vp` version that produced it. Run `vp integration status` to list installed integrations alongside their version markers; any integration whose marker predates the installed `vp` is flagged so you know to re-run `vp integration install`.
 
 ## Output
 

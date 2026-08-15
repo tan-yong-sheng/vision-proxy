@@ -16,4 +16,6 @@
  */
 import { runShim } from "./shared.mjs";
 
+// __VP_VERSION__PLACEHOLDER__
+
 runShim();

@@ -3,7 +3,7 @@
  *
  * Kept as plain `.mjs` with no dependencies so an installed shim can run under
  * bare `node` next to the `vp` binary. `scripts/copy-shims.mjs` copies this file
- * into `dist/shims/`, and `vp hook install` copies it next to the installed shim.
+ * into `dist/shims/`, and `vp integration install claude-code|codex` copies it next to the installed shim.
  *
  * Fail-open convention: `readEvent` and `runVP` write their own stderr note and
  * return `undefined` on failure, so a caller only has to bail on a falsy result.

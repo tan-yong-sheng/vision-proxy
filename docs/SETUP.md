@@ -16,12 +16,6 @@ Set the env var:
 export OPENAI_API_KEY="sk-..."
 ```
 
-Or register the key with `vp` so the provider is usable:
-
-```bash
-vp provider add openai
-```
-
 ## 2. Set the default provider and model
 
 ```bash
@@ -125,4 +119,3 @@ vp provider delete-key openai
 | `no API key for provider "openai"` | Set `OPENAI_API_KEY` or use `--api-key` |
 | `path outside allowed directories` | Use an absolute path inside tmp, cwd, or the home directory |
 | `model is currently experiencing high demand` | Try a different model or wait |
-| `unknown provider` | Register it with `vp provider add <name>` |

@@ -6,13 +6,12 @@
  *   analyze <paths...> [--format] [--provider] [--model] [--joint] [--crop i:form]
  *                     [--no-fence] [--config] [--json] [--max-output-tokens] [--question] [--api-key]
  *   config   init | get | set <k> <v> | validate
- *   provider list | add <name> | check [<name>] | store-key <name> | delete-key <name> | list-keys
+ *   provider list | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]
- *   integration install | show | uninstall <agent>
+ *   integration install | show | list | status | uninstall <agent>
  *   version | help
  */
 import { runAnalyze, parseCropFlags, AnalyzeError, type AnalyzeFlags } from "./commands/analyze.ts";
-import { runHook } from "./commands/hook.ts";
 import {
 	configInit,
 	configGet,
@@ -21,7 +20,6 @@ import {
 } from "./commands/config.ts";
 import {
 	providerList,
-	providerAdd,
 	providerCheck,
 	providerStoreKey,
 	providerDeleteKey,
@@ -122,7 +120,7 @@ const HELP = `vision-proxy (vp) ${VERSION}
 Usage:
   vp analyze <paths...> [options]
   vp config <init|get|set|validate> ...
-  vp provider <list|add|check|store-key|delete-key|list-keys> ...
+  vp provider <list|check|store-key|delete-key|list-keys> ...
   vp cache <status|clear|prune> ...
 
 analyze options:
@@ -146,7 +144,6 @@ config options:
 
 provider options:
   list                       list providers + key presence
-  add <name>                 register provider + key/env
   check [<name>]             verify auth
   store-key <name>           read key from stdin, store in system keyring
   delete-key <name>          delete key from the system keyring
@@ -158,15 +155,11 @@ cache options:
   prune [--older <days>]     evict entries older than N days (default 30)
 
 integration options:
-  install <agent>            install the vision-proxy integration for pi
-  show <agent>               print the generated extension source
+  install <agent>            install vision-proxy for pi | claude-code | codex
+  show <agent>               print what install would generate
+  list                       show which agents have vision-proxy installed
+  status                     show installed version markers per agent
   uninstall <agent>          remove the integration
-
-hook options:
-  install <agent>          install UserPromptSubmit shim for claude-code | codex
-  show <agent>             print shim + config block for manual install
-  list                     show installed shims
-  uninstall <agent>        remove the shim from the agent config
 `;
 
 /**
@@ -674,15 +667,6 @@ export async function main(argv: string[]): Promise<void> {
 				case "list":
 					handle(providerList(env));
 					return;
-				case "add": {
-					const name = positionals[0];
-					if (!name) {
-						fail("usage: vp provider add <name>");
-						return;
-					}
-					handle(await providerAdd(name, env));
-					return;
-				}
 				case "check":
 					handle(providerCheck(positionals[0], env));
 					return;
@@ -708,7 +692,7 @@ export async function main(argv: string[]): Promise<void> {
 					handle(providerListKeys());
 					return;
 				default:
-					fail(`unknown provider subcommand "${sub ?? ""}". Try: list, add, check, store-key, delete-key, list-keys`);
+					fail(`unknown provider subcommand "${sub ?? ""}". Try: list, check, store-key, delete-key, list-keys`);
 			}
 			return;
 		}
@@ -733,18 +717,6 @@ export async function main(argv: string[]): Promise<void> {
 				default:
 					fail(`unknown cache subcommand "${sub ?? ""}". Try: status, clear, prune`);
 			}
-			return;
-		}
-
-		case "hook": {
-			const [sub, ...subRest] = rest;
-			const { flags, positionals } = parseFlags(subRest);
-			if (wantsHelp(flags, [sub ?? ""])) {
-				print(renderHelp(["hook", sub ?? ""].filter(Boolean) as string[]));
-				return;
-			}
-			const agent = positionals[0];
-			handle(await runHook(sub ?? "", agent ?? ""));
 			return;
 		}
 

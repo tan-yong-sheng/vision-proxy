@@ -34,6 +34,23 @@ Findings are captured in `.agents/docs/qa/` dossiers; parallel reviews delegate 
 4. **Capture the result.**
    Create or update a QA dossier in `.agents/docs/qa/` through `/agents-docs`.
 
+### Verify CI workflows locally before pushing
+
+Local `lint`, `typecheck`, `test`, and `secrets` gates can pass while the GitHub Actions workflow still fails.
+Common gaps include pnpm build-script approval, action version mismatches, missing CI-only environment variables, and workflow syntax errors.
+If the PR adds or modifies `.github/workflows/*.yml`, run the workflow locally with [`act`](https://github.com/nektos/act) before opening the PR:
+
+```bash
+# Run the default workflow as if it were a pull_request event.
+act pull_request --job verify
+
+# Run a specific workflow file.
+act -W .github/workflows/ci.yml pull_request
+```
+
+`act` requires Docker and may not perfectly replicate GitHub-hosted runners, but it catches environment-specific failures early and avoids a push-fix-push loop.
+Use it as a pre-push smoke test, not a substitute for the actual GitHub Actions run.
+
 ### Long-running reviews
 
 `no-mistakes axi run` can take 20-60 minutes for a deep review.

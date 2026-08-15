@@ -3,7 +3,6 @@
  *
  * Subcommands:
  *   list                 list configured providers + key presence
- *   add <name>           register provider as active (writes ~/.vision-proxy/config.json; key/env must be set separately)
  *   check [<name>]       verify an API key is configured for a provider (or all)
  */
 import {
@@ -18,19 +17,11 @@ import {
 	listStoredProviderKeys,
 	storeProviderKey,
 } from "../keyring.ts";
-import { readJsonFile } from "../config.ts";
-import os from "node:os";
-import path from "node:path";
-import { promises as fs } from "node:fs";
 
 export interface ProviderResult {
 	ok: boolean;
 	message: string;
 	code: number;
-}
-
-function userConfigPath(baseDir: string = os.homedir()): string {
-	return path.join(baseDir, ".vision-proxy", "config.json");
 }
 
 export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResult {
@@ -42,36 +33,6 @@ export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResu
 		);
 	}
 	return { ok: true, message: lines.join("\n"), code: 0 };
-}
-
-export async function providerAdd(
-	name: string,
-	env: NodeJS.ProcessEnv = process.env,
-	baseDir: string = os.homedir(),
-): Promise<ProviderResult> {
-	// We only register known providers; registration means recording that the
-	// CLI should use it as the active provider and rely on the env key.
-	const spec: ProviderSpec | undefined = getProvider(name);
-	if (!spec) {
-		return {
-			ok: false,
-			message: `unknown provider "${name}". Known: ${listProviders().map((p) => p.id).join(", ")}`,
-			code: 1,
-		};
-	}
-	const target = userConfigPath(baseDir);
-	const existing: Record<string, unknown> = (await readJsonFile(target)) ?? {};
-	existing.provider = spec.id;
-	await fs.mkdir(path.dirname(target), { recursive: true });
-	await fs.writeFile(target, JSON.stringify(existing, null, 2) + "\n", "utf8");
-	const keyHint = env[spec.apiKeyEnv]
-		? "key detected in environment"
-		: `remember to set ${spec.apiKeyEnv}`;
-	return {
-		ok: true,
-		message: `registered provider "${spec.id}" in ${target}. ${keyHint}.`,
-		code: 0,
-	};
 }
 
 export function providerCheck(

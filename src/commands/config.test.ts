@@ -2,8 +2,8 @@
  * Unit tests for `vp config` subcommands.
  *
  * Uses an isolated temp cwd so the project .vision-proxy.json is isolated from
- * the user config dir. Provider/user config writes are exercised via `providerAdd`
- * in provider.test.ts with HOME overridden.
+ * the user config dir. Provider configuration is exercised via `configSet`
+ * (writing `provider` into the project file) and `configValidate`.
  */
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";

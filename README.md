@@ -71,18 +71,17 @@ When a key is absent from the environment, `vp` checks the OS keyring as a fallb
 
 - `vp analyze <paths...>` - describe one or more images.
 - `vp config init|get|set|validate` - manage config files.
-- `vp provider list|add|check|store-key|delete-key|list-keys` - manage provider registrations and keys.
+- `vp provider list|check|store-key|delete-key|list-keys` - manage provider registrations and keys.
 - `vp cache status|clear|prune` - inspect and clear the local description cache.
-- `vp hook install|show|list|uninstall` - install `UserPromptSubmit` shims for `claude-code` or `codex`.
-- `vp integration install|show|uninstall <agent>` - install the vision-proxy integration for `pi` (Pi coding agent).
+- `vp integration install|show|list|uninstall <agent>` - install vision-proxy for `pi`, `claude-code`, or `codex`.
 
 ## Agent hooks
 
 Install a hook so Claude Code or Codex automatically describes images on every user turn:
 
 ```bash
-vp hook install claude-code
-vp hook install codex
+vp integration install claude-code
+vp integration install codex
 ```
 
 The shim shells out to `vp analyze`, then returns the fenced description as additional hook context.

@@ -20,7 +20,7 @@ Coordinate multiple agents across [`worktrunk`](https://github.com/max-sixty/wor
 5. `wt switch --create <branch> --base <base> --no-cd`
 6. `orca orchestration worker-start --worktree branch:<branch> --agent claude --task <task-id> --run <run-id> --json`
 7. Verify submission: `orca terminal wait --for tui-idle`, `orca terminal show`; nudge with `terminal send --text "" --enter` if stuck.
-8. Supervise / Poll: launch background waker (`RUN_ID=<run-id> bg_run --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id>" --name "waker" --isAgent false`) or run `orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json`.
+8. Supervise / Poll: launch background waker in Orca (`orca terminal create --title "waker" --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id> --max-ticks 12" --json`) or run `orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json`.
 9. Verify commits: `git rev-list --count <base>..<branch>` > 0.
 10. Validation gate: classify each worktree risk; route independent branches to per-worktree review and dependent/shared-contract branches to a single merge-preview review. **Do not release or merge until the branch is review-clear.**
 11. Release: `orca orchestration worker-release --dispatch <id> --json`
@@ -93,16 +93,16 @@ If `orca status` is not `ready` or the headless model test fails, stop and fix t
 
 ### 6. Poll and recover
 
-Run the bundled waker script as a background process to monitor health and automatically unstick workers across ticks:
+Run the bundled waker script in a managed Orca terminal pane to monitor health and automatically unstick workers across ticks:
 
 ```bash
-bg_run \
-  --name "waker for <run-id>" \
-  --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id>" \
-  --isAgent false
+orca terminal create \
+  --title "waker for <run-id>" \
+  --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id> --max-ticks 12" \
+  --json
 ```
 
-Or perform a one-off foreground poll for incoming events:
+Or hold the coordinator turn with Orca's native event-driven message wait:
 
 ```bash
 orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json
@@ -190,7 +190,32 @@ orca orchestration task-list --run <run-id> --json
 
 Use this only after confirming the branch has commits, tests pass, and the work is actually done.
 
-### 9. Release and merge
+### 9. Working with stacked / dependent worktrees
+
+When a feature set consists of stacked or interdependent branches (such as database migrations, core API refactors, and UI adapters), follow the stacked worktree protocol:
+
+1. **Layer Sequencing & Branch Naming:**
+   Name branches sequentially to indicate dependency order (e.g. `stack-01-core-schema`, `stack-02-api-endpoints`, `stack-03-ui-client`).
+2. **Flight Log Declarations:**
+   Declare dependencies in each worktree's flight log (`.agents/docs/worktrees/<area>-<slug>.md`):
+   ```yaml
+   depends_on: [../worktrees/backend-schema.md]
+   stack_position: 2
+   stack_batch: 2026-02-auth-overhaul
+   ```
+3. **Integration Merge-Preview:**
+   Never merge stacked branches directly into `main` without testing the full stack together.
+   Create a single disposable merge-preview worktree (`qa/<stack-batch>`) following [`/review-gate` Step 10](file:///home/tys203831/Documents/Coding/vision-proxy/.agents/skills/review-gate/SKILL.md#L200), merge layers in order (`stack-01` &rarr; `stack-02` &rarr; `stack-03`), and run the full test suite.
+4. **Bottom-Up Merge Order:**
+   Always land the bottom-most layer into the target default branch first.
+   Once `stack-01` lands, rebase or pull `main` into `stack-02` to resolve any conflicts before landing `stack-02`.
+5. **Post-Merge Layer Checklist:**
+   After each layer merges:
+   - Update its flight log status to `merged`.
+   - Update downstream flight logs to mark the dependency satisfied.
+   - Retarget / rebase remaining active worktrees against the updated target branch.
+
+### 10. Release and merge
 
 ```bash
 # 1. Confirm the branch is review-clear.
@@ -209,6 +234,8 @@ wt merge <target>
 - Close stale terminals before redispatch.
 - Use a time-driven waker for silent stalls. See [REFERENCE.md](REFERENCE.md).
 - `/review-gate` is dispatched conditionally per worktree; low-risk worktrees run local checks only. When in doubt, dispatch `/review-gate` - never merge a branch that is not review-clear.
+- **Single-Preview Worktree Invariant (`qa/<batch-slug>`):** Use the `qa/<batch-slug>` format for integration worktrees (e.g. `qa/vp-post-migration-merge`). Do NOT hardcode literal names. Maintain exactly one preview worktree per integration batch. When base updates arrive, pull them into the existing preview worktree via `git merge <base>`. Upon final merge, immediately prune the preview worktree (`wt remove qa/<batch-slug>`).
+- **Commit Provenance Verification:** Always run `git log -n 5 --format='%h | %an <%ae> | %cr | %s'` to ground author attribution before forming hypotheses about external agent activity on a branch.
 - Check the worker runtime for sandbox restrictions. Delegated agents that need local state persistence or browser access may fail with `EACCES` inside locked-down sandboxes (e.g., nono). Move the worktree to a host with full read/write permissions before dispatching visual QA or long-running interactive tasks.
 - If a worker fails to initialize (auth error, model timeout, or stuck at `Combobulating…`/`Blanching…`), retry once with a different model (e.g., `haiku` instead of the default). If it still fails, stop and report the exact blocker.
 - Use repo-local worktrees when running inside a sandbox. Configure Worktrunk with `worktree-path = "{{ repo_path }}/.worktrees/{{ branch | sanitize }}"` and add `.worktrees/` to `.gitignore`. This keeps worktrees under `$WORKDIR`, avoiding the need to grant broad `$HOME` read access just so tools can resolve paths.

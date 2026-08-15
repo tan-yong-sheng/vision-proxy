@@ -11,11 +11,11 @@
 # because `check --wait --timeout-ms N` only bounds the time until the
 # first message arrives - it returns immediately when the queue is empty.
 #
-# Usage:  WAKER_INTERVAL_MS=600000 RUN_ID=run_... ./waker.sh
+# Usage:  ./waker.sh --run <run-id> [--max-ticks <n>] [--single-tick]
 #
-# Launch as a bg_run background shell process with isAgent:false and
-# notifyOnCompletion:true. Do not use nohup/&/disown - those break the
-# harness wake-up rule.
+# Launch inside a dedicated Orca terminal pane (`orca terminal create`),
+# or asynchronously via your agent harness's background command runner.
+# Do not use untracked nohup/&/disown processes.
 
 set -uo pipefail
 
@@ -23,19 +23,23 @@ RUN_ID="${RUN_ID:-}"
 WAKER_INTERVAL_MS="${WAKER_INTERVAL_MS:-600000}"   # 10 minutes
 STATE_DIR="${WAKER_STATE_DIR:-.waker-state}"
 SINGLE_TICK=0
+MAX_TICKS="${MAX_TICKS:-0}"
+TIMEOUT_MINUTES="${TIMEOUT_MINUTES:-0}"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--run <run-id>] [--single-tick|--once] [--interval-ms <n>] [--state-dir <dir>]
+Usage: $(basename "$0") [--run <run-id>] [--single-tick|--once] [--interval-ms <n>] [--max-ticks <n>] [--timeout-minutes <n>] [--state-dir <dir>]
 
 Walk all recovery rules under rules/*.sh, deduplicate actions, and apply them.
 
 Options:
-  --run <run-id>         The orchestration run ID (or set RUN_ID env).
-  --single-tick, --once  Run rules once and exit without sleeping.
-  --interval-ms <n>      Sleep interval between ticks in ms (default: 600000).
-  --state-dir <dir>      Directory for waker cooldown state (default: .waker-state).
-  -h, --help             Show this help message.
+  --run <run-id>            The orchestration run ID (or set RUN_ID env).
+  --single-tick, --once     Run rules once and exit without sleeping.
+  --interval-ms <n>         Sleep interval between ticks in ms (default: 600000 = 10m).
+  --max-ticks <n>           Max consecutive ticks before exiting (default: 0 = unlimited).
+  --timeout-minutes <n>     Max total runtime in minutes before exiting (default: 0 = unlimited).
+  --state-dir <dir>         Directory for waker cooldown state (default: .waker-state).
+  -h, --help                Show this help message.
 EOF
 }
 
@@ -51,6 +55,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --interval-ms)
       WAKER_INTERVAL_MS="$2"
+      shift 2
+      ;;
+    --max-ticks)
+      MAX_TICKS="$2"
+      shift 2
+      ;;
+    --timeout-minutes)
+      TIMEOUT_MINUTES="$2"
       shift 2
       ;;
     --state-dir)
@@ -124,10 +136,25 @@ if [[ "$SINGLE_TICK" -eq 1 ]]; then
   exit 0
 fi
 
+START_TIME=$(date +%s)
 TICK=0
 while true; do
   TICK=$((TICK + 1))
   run_tick "$TICK"
+
+  if [[ "$MAX_TICKS" -gt 0 && "$TICK" -ge "$MAX_TICKS" ]]; then
+    echo "waker.sh: reached maximum ticks (${MAX_TICKS}), exiting cleanly."
+    exit 0
+  fi
+
+  if [[ "$TIMEOUT_MINUTES" -gt 0 ]]; then
+    NOW=$(date +%s)
+    ELAPSED_MINUTES=$(( (NOW - START_TIME) / 60 ))
+    if [[ "$ELAPSED_MINUTES" -ge "$TIMEOUT_MINUTES" ]]; then
+      echo "waker.sh: reached timeout (${TIMEOUT_MINUTES}m), exiting cleanly."
+      exit 0
+    fi
+  fi
 
   # Time-driven sleep. Use milliseconds -> seconds for portability.
   SLEEP_S=$((WAKER_INTERVAL_MS / 1000))

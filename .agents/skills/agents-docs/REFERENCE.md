@@ -36,10 +36,12 @@ The skill self-triggers from its description: it loads on research/plan/worktree
 | `worktree_path` | Absolute path to the QA worktree, for traceability after removal. | `/home/user/repo/.worktrees/qa-inline-image-merged-2026-08-12` |
 | `source_branches` | Branches merged into the QA worktree for this verification. | `[origin/feat/inline-image-backend, origin/feat/inline-image-frontend]` |
 | `commits_verified` | Commits that were present in the QA worktree when verified. | `[feat/inline-image-backend@53439bb0]` |
-| `screenshot_root` | Directory containing screenshots referenced by the dossier. | `/home/user/.cache/visual-qa/inline-image-2026-08-12/screenshots` |
 | `sources` | Trust family: where the facts came from. | `[url]` |
 | `generated` | Trust family: generated output, with `by` and `at`. | `{by: claude, at: 2026-08-10}` |
 | `verified` | Trust family: verification events, each with `by` and `at`. | `[{by: tuske, at: 2026-08-09}]` |
+| `depends_on` | Stacked worktrees: list of upstream dependency docs. | `[../worktrees/backend-schema.md]` |
+| `stack_position` | Stacked worktrees: integer 1-indexed position in sequential stack. | `2` |
+| `stack_batch` | Stacked worktrees: batch identifier grouping stacked layers. | `2026-02-auth-overhaul` |
 | `okf_version` | Reserved for `index.md` only. | `"0.2"` |
 
 Status values:

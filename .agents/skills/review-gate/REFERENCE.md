@@ -41,23 +41,21 @@ Always use `--yes` for agent-driven runs so approval gates auto-resolve and acti
 
 ### 3. Drive gates
 
-`no-mistakes axi respond` can block while the pipeline agent edits and re-reviews. Run it through `bg_run` so the durable notification wakes you instead of tying up the turn.
+`no-mistakes axi respond` can block while the pipeline agent edits and re-reviews.
+Run it asynchronously through your agent harness or dedicated terminal so the completion signal wakes you instead of tying up the turn.
 
 ```bash
 # approve the step as-is
-bg_run --name "nm-approve-review" -- \
-  no-mistakes axi respond --action approve
+no-mistakes axi respond --action approve
 
 # fix specific auto-fix findings
-bg_run --name "nm-fix-findings" -- \
-  no-mistakes axi respond --action fix --findings r1,r2
+no-mistakes axi respond --action fix --findings r1,r2
 
 # skip the step
-bg_run --name "nm-skip-step" -- \
-  no-mistakes axi respond --action skip
+no-mistakes axi respond --action skip
 ```
 
-Then wait for the `<background-task-notification>` and read `bg_logs` once if you need the gate output.
+Or run unattended via the bundled polling wrapper: `AUTO_APPROVE_ASK_USER=1 bash scripts/poll-no-mistakes.sh 30`.
 
 ### 4. Write the QA dossier
 
@@ -198,24 +196,21 @@ Then:
 
 ## Waiting on long-running no-mistakes commands
 
-Use `bg_run` for anything that may take more than a few seconds. Do not poll with `ps`, repeated `no-mistakes axi status`, or `bg_status` loops.
+Execute commands asynchronously using your harness background runner, an Orca terminal pane (`orca terminal create`), or the bundled polling script `scripts/poll-no-mistakes.sh`.
+Do not poll with `ps`, repeated `no-mistakes axi status`, or tight shell loops.
 
-Example status poll that respects the notification boundary:
-
-```bash
-bg_run --name "nm-status-check" --timeout 600 -- \
-  bash -c "sleep 180 && no-mistakes axi status 2>&1 | tail -100"
-```
-
-When the `<background-task-notification>` arrives, read the output once:
+Example asynchronous status check:
 
 ```bash
-bg_logs <task-id> --tail --max-bytes 30000
+# Check status once or inspect JSON status without blocking
+no-mistakes axi status
 ```
 
-If the run is still at a `gate:`, respond with another `bg_run`. Repeat until the output shows an `outcome:`.
+If the run is still at a `gate:`, respond with the appropriate action.
+Repeat until the output shows an `outcome:`.
 
-If a synchronous `no-mistakes axi respond` command times out, do not assume it failed. Check the run status with `bg_run` before sending another response; the daemon may already be applying the previous request.
+If a synchronous `no-mistakes axi respond` command times out, do not assume it failed.
+Check the run status with `no-mistakes axi status` before sending another response; the daemon may already be applying the previous request.
 
 ## Integration with /worktrunk-orca-delegation
 

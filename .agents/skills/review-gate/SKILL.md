@@ -37,16 +37,21 @@ Findings are captured in `.agents/docs/qa/` dossiers; parallel reviews delegate 
 ### Long-running reviews
 
 `no-mistakes axi run` can take 20-60 minutes for a deep review.
-Run it in the background so the agent is not blocked by a shell timeout:
+Run it asynchronously through your agent harness's background command runner, a dedicated terminal, or the bundled polling script so the agent is not blocked by a shell timeout:
 
 ```bash
-bg_run \
+# Run asynchronously in your harness (e.g. AGY async task, Claude background Bash, or dedicated terminal):
+no-mistakes axi run --intent "Review <area>: ..." --yes --skip push,pr,ci
+
+# Or launch inside a dedicated Orca terminal pane:
+orca terminal create \
+  --title "review-gate <branch>" \
   --command "cd <worktree> && no-mistakes axi run --intent '...' --yes --skip push,pr,ci" \
-  --name "review-gate <branch>" \
-  --isAgent false
+  --json
 ```
 
-Then continue with other work. The terminal notification resumes the agent when the run reaches an outcome.
+Then continue with other work.
+Your harness notification or Orca terminal status resumes the agent when the run reaches an outcome.
 A short `bash` timeout can kill the CLI while the daemon is still in `review: fixing`, leaving the run hard to monitor and resume.
 
 ### Polling wrapper for approval gates
@@ -103,11 +108,11 @@ cd "$QA_PATH"
 npm test
 npx tsc --noEmit
 
-# Run the gate (review-only; do not publish) in the background
-bg_run \
-  --command "no-mistakes axi run --intent 'Review combined vision-proxy CLI migration: verify CLI core and hook shims integrate cleanly' --yes --skip push,pr,ci" \
-  --name "review-gate vp-merge" \
-  --isAgent false
+# Run the gate (review-only; do not publish) asynchronously
+no-mistakes axi run \
+  --intent "Review combined vision-proxy CLI migration: verify CLI core and hook shims integrate cleanly" \
+  --yes \
+  --skip push,pr,ci
 ```
 
 Then follow Step 10 to write the QA dossier and remove the disposable worktree.
@@ -123,6 +128,13 @@ Then follow Step 10 to write the QA dossier and remove the disposable worktree.
 | Low    | Docs, tests, config tweaks, trivial fixes                                   | Do not use `/review-gate`; run local checks instead          |
 
 For low-risk changes, run `fallow audit`, lint, typecheck, and unit tests directly in the worktree.
+
+### Diff-Scope Gating & Second-Review Cost Protection
+
+When a preview worktree has already passed review once and the base branch advances:
+1. Inspect the base changeset: `git diff <old-base>..<new-base> --stat`.
+2. **Doc/Skill-Only Diffs:** If all modified files are in `.agents/docs/`, `.agents/skills/`, or `*.md`, pull base forward (`git merge <base>`) and run local verification (`pnpm test && fallow audit`). **DO NOT re-run `no-mistakes axi run`.**
+3. **Code Diffs Outside PR Scope:** Prompt the user with a token/time cost estimate (variable ~20–60+ min run) before triggering a second full review.
 
 ### Single review
 
@@ -261,12 +273,51 @@ When none of A-F applies, skip Step 10. A clean single-branch review is enough.
 
 ### Fixes found during Step 10
 
-- **Never patch the QA worktree.** The `qa/<slug>` worktree is disposable; fixes committed there are lost when it is removed.
-- **Fix in the owning source PR branch.** Determine ownership with `git log <base>..<pr-branch> -- <file>`. If both PRs touch the file, fix in the branch that merges last so the final `main` state is correct.
-- **Backport any QA-only test/config changes.** If you had to edit `jest.config.js`, `package.json`, or a scenario file in the QA worktree to run the verification, apply that same change to the owning source branch so CI can reproduce it.
-- **Push the fix and re-run Step 10 from scratch.** Remove the old QA worktree, create a fresh `qa/<slug>` worktree from the dynamic base, merge the updated PRs again, and verify. Do not re-use the old QA worktree for verification.
-- **Update the QA dossier.** Record the new PR commit hashes, the fresh merge commit, and the updated verdict. Mark the old QA worktree dossier as retired or add a `superseded_by` link.
-- **File or update the bug dossier.** Use `/agents-docs` to record pre-existing bugs with `pre-existing: true` and the owning branch so the fix location is unambiguous.
+- **Never patch or ship the disposable preview worktree.**
+  The `qa/<slug>` / `int-merge` worktree is disposable; fixes committed directly there are lost when the worktree is destroyed, and the preview branch must NEVER be pushed to `origin`.
+- **Fix in the owning source PR branch.**
+  Determine ownership with `git log <base>..<pr-branch> -- <file>`.
+  If both PRs touch the file, fix in the branch that merges last so the final `main` state is correct.
+- **Backport any QA-only test/config changes.**
+  If you had to edit `jest.config.js`, `package.json`, or a scenario file in the QA worktree to run verification, apply that same change to the owning source branch so CI can reproduce it.
+- **Push the fix and re-run Step 10 from scratch.**
+  Remove the old QA worktree, create a fresh `qa/<slug>` worktree from the dynamic base, merge the updated PRs again, and verify.
+  Do not re-use the old QA worktree for verification.
+- **Update the QA dossier.**
+  Record the new PR commit hashes, the fresh merge commit, and the updated verdict.
+  Mark the old QA worktree dossier as retired or add a `superseded_by` link.
+- **File or update the bug dossier.**
+  Use `/agents-docs` to record pre-existing bugs with `pre-existing: true` and the owning branch so the fix location is unambiguous.
+
+### When no-mistakes auto-fixes the disposable preview
+
+When `--yes` causes `no-mistakes axi run` to auto-fix linter, typecheck, or code findings, it commits those fixes directly onto the local `qa/<slug>` / `int-merge` head.
+Because the preview branch is strictly disposable and must never be pushed to origin, follow this 6-step recovery loop:
+
+1. **Read the auto-fix diff:**
+   Inspect the exact commits applied by the review daemon with `git log -n 5` and `git show HEAD`.
+2. **Trace the owning feature branch:**
+   Run `git log <base>..<feature-branch> -- <file>` for each modified file to locate the feature branch that introduced the issue.
+3. **Re-apply the fixes in the owning feature branch:**
+   Switch to the owning feature branch (or worktree) and cleanly apply or cherry-pick the required changes.
+4. **Commit and verify on the feature branch:**
+   Commit the fixes on the feature branch with a descriptive message and ensure local tests pass.
+5. **Destroy the disposable preview:**
+   Run `wt remove qa/<slug> --force` to delete the auto-fixed preview branch.
+6. **Re-create and re-merge the stack:**
+   Re-create `qa/<slug>` from the base branch, re-merge all feature branches in declared stack order, and re-run verification.
+
+### Manual stacked-PR workflow
+
+The local merge-preview workflow mirrors GitHub's stacked pull requests feature for local development:
+
+- **Stack Declaration:**
+  Each branch in the stack declares its upstream dependency via `depends_on: [../worktrees/<parent>.md]` and `stack_position: <n>` in its flight log.
+- **Merge Order Rule:**
+  Always merge the bottom layer of the stack first (`stack-01`).
+  After `stack-01` lands into the base branch, rebase or retarget `stack-02` onto the updated base before merging.
+- **Preview Integration:**
+  The `qa/<slug>` worktree merges the entire stack in bottom-to-top order to validate combined contract stability before individual feature branches are landed.
 
 ### Conflict resolution discipline
 
@@ -300,7 +351,9 @@ For user-perceived visual regression testing after merge, record a handoff in th
 - **Delegated over standalone.** Prefer `/worktrunk-orca-delegation` for parallel reviews; use the fallback only when that skill is not active.
 - **No embedded doc lifecycle.** Do not recreate `/agents-docs` templates, index logic, or frontmatter rules.
 - **Context-pointer coupling.** When another skill needs review, link to `/review-gate`; do not copy its steps.
-- **Wait asynchronously.** `no-mistakes axi run`, `respond`, and `status` can block for minutes. Start them with `bg_run`, then wait for the `<background-task-notification>`. Do not poll with repeated `ps`, `bg_status`, or synchronous `no-mistakes axi status` calls.
+- **Wait asynchronously.** `no-mistakes axi run`, `respond`, and `status` can block for minutes.
+  Start them asynchronously via your agent harness's background task runner, a dedicated terminal pane, or the bundled polling script.
+  Do not poll with repeated `ps` or synchronous CLI calls in a tight loop.
 
 ## Completion criteria
 
@@ -320,7 +373,9 @@ A `/review-gate` run is complete when:
 - **`branch_sync.state` is `pipeline_owned`** - the pipeline has applied auto-fix commits and owns the branch head. Wait for the run to finish before making any local commits.
 - **Parallel fallback stalls** - check Orca terminal state and nudge with `terminal send --text "" --enter` if a prompt did not submit. See `/worktrunk-orca-delegation` for the full health-check pattern.
 - **Findings dossier is missing** - `/review-gate` must write the QA dossier in `.agents/docs/qa/` via `/agents-docs` before declaring completion.
-- **Stuck polling no-mistakes status** - stop the polling loop, then relaunch the long command with `bg_run` and a sensible timeout. Use the `<background-task-notification>` as the only wake-up signal. Read `bg_logs` once after the notification if you need the gate output. Do not poll `git status` while waiting; it does not reflect pipeline progress and only burns turns.
+- **Stuck polling no-mistakes status** - stop the polling loop, then relaunch the command asynchronously or in a dedicated terminal pane.
+  Wait for the background completion signal or use `scripts/poll-no-mistakes.sh`.
+  Do not poll `git status` while waiting; it does not reflect pipeline progress and only burns turns.
 
 ## See also
 

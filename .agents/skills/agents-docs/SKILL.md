@@ -160,8 +160,10 @@ When a test/build failure is discovered during a worktree/QA pass, classify it b
 > Resolved bugs never move into `qa/`; `qa/` holds the immutable verification evidence, while `archive/` holds the closed ticket history.
 
 Always attempt to reproduce on the base branch before filing.
-If the base branch does not have the test (e.g., the test was added by the PR), check the earliest branch that contains the test.
-Use that evidence to decide whether the failure is pre-existing or a merge interaction.
+Use the **Reliable 3-Step Pre-Existing Detection Protocol**:
+1. **Base Inspection:** Check if the problematic code/warning exists on the base branch (`git show <base>:<file>`).
+2. **Diff Ownership:** Check `git diff <base>...HEAD -- <file>`. If the offending lines were NOT introduced or modified by this PR's diff, it is `pre-existing: true`.
+3. **Historical Tracing:** Run `git log -S "<symbol>" <base>` to confirm the historical commit on base that introduced it.
 
 When ownership is ambiguous, run `git log <base>..<branch> -- <file>` for each candidate branch.
 The branch whose unique commits last touched the file is the `owning_branch`.

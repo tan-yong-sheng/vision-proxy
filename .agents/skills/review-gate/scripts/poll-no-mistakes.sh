@@ -39,17 +39,38 @@ if [ -z "$REPO_ID" ]; then
   exit 1
 fi
 
+decode_toon_status() {
+  local dir="${1:-$MAIN_REPO}"
+  (
+    cd "$dir"
+    no-mistakes axi status 2>/dev/null | npx -y @toon-format/cli 2>/dev/null || \
+    no-mistakes axi status 2>/dev/null | node -e 'import("@toon-format/toon").then(t=>process.stdin.on("data",d=>console.log(JSON.stringify(t.decode(d.toString())))))' 2>/dev/null || true
+  )
+}
+
 rpc_call() {
   local method=$1
   local params=$2
-  printf '{"jsonrpc":"2.0","method":"%s","params":%s,"id":1}\n' "$method" "$params" | nc -U -w 5 "$SOCKET"
+  if [ -S "$SOCKET" ]; then
+    printf '{"jsonrpc":"2.0","method":"%s","params":%s,"id":1}\n' "$method" "$params" | nc -U -w 5 "$SOCKET" 2>/dev/null || true
+  fi
 }
 
 while true; do
-  RESP=$(rpc_call get_active_run "{\"repo_id\":\"$REPO_ID\"}" || true)
+  RESP=""
+  if [ -n "$REPO_ID" ]; then
+    RESP=$(rpc_call get_active_run "{\"repo_id\":\"$REPO_ID\"}" || true)
+  fi
 
   if [ -z "$RESP" ]; then
-    echo "$(date -Iseconds) | daemon not responding"
+    CLI_JSON=$(decode_toon_status "$MAIN_REPO")
+    if [ -n "$CLI_JSON" ] && [ "$CLI_JSON" != "null" ]; then
+      RESP="{\"result\":$CLI_JSON}"
+    fi
+  fi
+
+  if [ -z "$RESP" ]; then
+    echo "$(date -Iseconds) | daemon and cli status not responding"
     sleep "$POLL_INTERVAL"
     continue
   fi

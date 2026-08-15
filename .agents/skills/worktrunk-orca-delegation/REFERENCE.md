@@ -302,19 +302,21 @@ The poll above is event-driven and never wakes without a message, so Mode A and 
 Add a time-driven waker that fires on a fixed cadence and runs every rule under `scripts/rules/`.
 
 ```bash
-# Launch waker background supervisor
-bg_run \
-  --name "waker for <run-id>" \
-  --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id>" \
-  --isAgent false
+# Launch waker supervisor in a managed Orca terminal pane
+orca terminal create \
+  --title "waker for <run-id>" \
+  --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id> --max-ticks 12" \
+  --json
 
 # Or run a single tick manually to health-check/unstick workers immediately
 .agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id> --single-tick
 ```
 
-Launch the waker as a `bg_run` background shell process with `isAgent: false` and `notifyOnCompletion: true` so its completion resumes or notifies this agent.
-Do **not** use `nohup`, `&`, `disown`, or any redirected fire-and-forget process - those break the harness wake-up rule and silently drop wake events.
-A foreground loop is also acceptable when the coordinator has no other work; just expect to hold a coordinator turn.
+Launch the waker inside a dedicated Orca terminal pane using `orca terminal create`, or asynchronously via your agent harness.
+The supervisor automatically checks failure rules, deduplicates recovery actions, and applies targeted recoveries (e.g. lost Enter, progress nudge, worker_done prompt, or dead process reset).
+The waker supports `--max-ticks <n>` and `--timeout-minutes <n>` to cleanly bound background runtime.
+Do **not** use untracked `nohup`, `&`, `disown`, or unmanaged detached processes.
+A foreground wait via `orca orchestration check --wait` with one-shot `waker.sh --single-tick` on timeout is also fully supported.
 
 ### 6.2 scripts/ directory layout
 

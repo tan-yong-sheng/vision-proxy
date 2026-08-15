@@ -37,15 +37,20 @@ Findings are captured in `.agents/docs/qa/` dossiers; parallel reviews delegate 
 ### Verify CI workflows locally before pushing
 
 Local `lint`, `typecheck`, `test`, and `secrets` gates can pass while the GitHub Actions workflow still fails.
-Common gaps include pnpm build-script approval, action version mismatches, missing CI-only environment variables, and workflow syntax errors.
+Common gaps include pnpm build-script approval, action version mismatches, missing CI-only binaries, and workflow syntax errors.
 If the PR adds or modifies `.github/workflows/*.yml`, run the workflow locally with [`act`](https://github.com/nektos/act) before opening the PR:
 
 ```bash
 # Run the default workflow as if it were a pull_request event.
-act pull_request --job verify
+# Pin the runner image and architecture to avoid the interactive prompt.
+act pull_request --job verify \
+  --container-architecture linux/amd64 \
+  -P ubuntu-latest=catthehacker/ubuntu:act-latest
 
 # Run a specific workflow file.
-act -W .github/workflows/ci.yml pull_request
+act -W .github/workflows/ci.yml pull_request \
+  --container-architecture linux/amd64 \
+  -P ubuntu-latest=catthehacker/ubuntu:act-latest
 ```
 
 `act` requires Docker and may not perfectly replicate GitHub-hosted runners, but it catches environment-specific failures early and avoids a push-fix-push loop.

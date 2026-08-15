@@ -163,6 +163,25 @@ test("install codex writes the shim and appends a [[UserPromptSubmit]] block", a
 	reset();
 });
 
+test("install claude-code ships shared.mjs next to the shim and the import resolves", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	const r = await runIntegration("install", "claude-code", dir);
+	assert.equal(r.ok, true);
+	const shim = join(dir, "claude-code-vision-proxy-user-prompt-submit.mjs");
+	const shared = join(dir, "shared.mjs");
+	assert.equal(existsSync(shared), true, "shared.mjs must land next to the installed shim");
+	// Regression: the installed shim does `import "./shared.mjs"`, so the import
+	// must resolve. If shared.mjs were missing this throws ERR_MODULE_NOT_FOUND.
+	await import(shared);
+	// The install-time placeholder must have been rewritten to an absolute path
+	// (the real `vp` binary), not left as the literal token.
+	const sharedText = readFileSync(shared, "utf8");
+	assert.equal(sharedText.includes("__VP_PATH__PLACEHOLDER__"), false, "placeholder must be rewritten to a real path");
+	assert.match(sharedText, /const VP_BIN_PATH = "\/.+/, "placeholder rewritten to an absolute path");
+	reset();
+});
+
 test("install is idempotent (no duplicate blocks) for claude-code", async () => {
 	const home = isolate();
 	const dir = installDir(home);
@@ -216,6 +235,21 @@ test("uninstall pi removes the file and cleans up an empty extensions directory"
 	assert.equal(r.ok, true);
 	assert.equal(existsSync(target), false);
 	assert.equal(existsSync(dir), false);
+	reset();
+});
+
+test("uninstall pi reports the correct success message after install (regression)", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const target = join(dir, "vision-proxy.ts");
+	assert.equal(existsSync(target), true);
+	const r = await runIntegration("uninstall", "pi", dir);
+	assert.equal(r.ok, true);
+	// Regression: pi has no host config, so the message must key off file
+	// deletion, not a config-removal flag that never fires for pi.
+	assert.match(r.message, /^uninstalled pi integration/);
+	assert.equal(existsSync(target), false);
 	reset();
 });
 

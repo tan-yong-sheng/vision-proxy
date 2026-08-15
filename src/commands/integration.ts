@@ -17,7 +17,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
 import { extractMarkerVersion, renderVersionMarker, VERSION } from "../version.ts";
@@ -83,6 +83,29 @@ function shimDir(): string {
 		if (existsSync(join(c, "claude-code-user-prompt-submit.mjs"))) return c;
 	}
 	return join(here, "..", "shims");
+}
+
+/**
+ * Resolve the `shared.mjs` that hook shims `import "./shared.mjs"` from.
+ *
+ * The build normally copies `src/shims/shared.mjs` into `dist/shims` (see
+ * `scripts/copy-shims.mjs`), so `shimDir()`'s result is the first candidate.
+ * If the build is stale, skipped, or changed, that file can be absent: fall
+ * back to the repo source dir (`src/shims`), which always has it. Throw if no
+ * candidate resolves, so we fail loudly instead of installing a shim whose
+ * `import "./shared.mjs"` would throw `node:internal/modules/esm/resolve` at
+ * hook runtime.
+ */
+function resolveSharedShim(): string {
+	const candidates = [shimDir(), join(process.cwd(), "src", "shims")];
+	for (const c of candidates) {
+		const p = join(c, "shared.mjs");
+		if (existsSync(p)) return p;
+	}
+	throw new Error(
+		"could not locate shared.mjs for the hook shim. Looked in: " +
+			candidates.map((c) => join(c, "shared.mjs")).join(", "),
+	);
 }
 
 const piSpec: AgentSpec = {
@@ -286,12 +309,20 @@ export async function integrationInstall(
 	const target = spec.target({ installDir: opts.installDir });
 	mkdirSync(dirname(target), { recursive: true });
 	writeFileSync(target, spec.generate(), { mode: 0o644 });
-	// Hook shims import ./shared.mjs, so it has to land in the same directory.
+	// Hook shims import ./shared.mjs from the same directory, so it has to land
+	// next to the shim. resolveSharedShim() throws (loud failure) if no candidate
+	// resolves, so we never ship a shim that fails at hook runtime.
 	if (spec.sharedShim) {
-		const sharedSrc = join(shimDir(), "shared.mjs");
-		if (existsSync(sharedSrc)) {
-			writeFileSync(join(dirname(target), "shared.mjs"), readFileSync(sharedSrc));
-		}
+		const sharedSrc = resolveSharedShim();
+		// Rewrite the install-time placeholder with the absolute `vp` binary path.
+		// process.argv[1] is the executed script (dist/cli.js), which resolves to
+		// the real binary for curl installs and Homebrew symlinks alike. A global
+		// replace covers every occurrence of the placeholder token.
+		const vpBin = resolve(process.argv[1] ?? "vp");
+		writeFileSync(
+			join(dirname(target), "shared.mjs"),
+			readFileSync(sharedSrc, "utf8").split("__VP_PATH__PLACEHOLDER__").join(vpBin),
+		);
 	}
 	const cfgPath = spec.configPath();
 	if (cfgPath) {
@@ -387,12 +418,12 @@ export async function integrationUninstall(
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
 	const cfgPath = spec.configPath();
-	let removed = false;
+	let configRemoved = false;
 	if (cfgPath && existsSync(cfgPath)) {
 		const { raw } = spec.readConfig();
 		const result = spec.remove(raw);
 		writeFileSync(cfgPath, result.raw);
-		removed = result.removed;
+		configRemoved = result.removed;
 	} else if (!existsSync(target)) {
 		return {
 			ok: true,
@@ -400,9 +431,14 @@ export async function integrationUninstall(
 			code: 0,
 		};
 	}
+	// `removed` must reflect file deletion as well as host-config removal.
+	// Agents like `pi` have no host config (configPath() === ""), so the
+	// config branch never fires for them; the extension file is the signal.
+	let fileDeleted = false;
 	if (existsSync(target)) {
 		try {
 			rmSync(target);
+			fileDeleted = true;
 		} catch {
 			return {
 				ok: false,
@@ -411,6 +447,7 @@ export async function integrationUninstall(
 			};
 		}
 	}
+	const removed = configRemoved || fileDeleted;
 	// Hook agents also ship shared.mjs next to the shim; drop it if now orphaned.
 	if (spec.sharedShim) {
 		const sharedPath = join(dirname(target), "shared.mjs");

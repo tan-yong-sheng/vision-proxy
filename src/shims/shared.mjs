@@ -3,7 +3,8 @@
  *
  * Kept as plain `.mjs` with no dependencies so an installed shim can run under
  * bare `node` next to the `vp` binary. `scripts/copy-shims.mjs` copies this file
- * into `dist/shims/`, and `vp integration install claude-code|codex` copies it next to the installed shim.
+ * into `dist/shims/`, and `vp integration install claude-code|codex` copies it next to the installed shim,
+ * rewriting `__VP_PATH__PLACEHOLDER__` with the absolute `vp` binary path at install time.
  *
  * Fail-open convention: `readEvent` and `runVP` write their own stderr note and
  * return `undefined` on failure, so a caller only has to bail on a falsy result.
@@ -57,9 +58,19 @@ export function readEvent() {
 	}
 }
 
+/**
+ * Path to the `vp` binary, rewritten by `vp integration install` to an absolute
+ * path at install time. The sentinel `"__VP_PATH__PLACEHOLDER__"` means it was
+ * left intact (dev / unset), in which case we fall back to `vp` on PATH.
+ */
+const VP_BIN_PATH = "__VP_PATH__PLACEHOLDER__";
+const VP_PATH_SENTINEL = "__VP_PATH__PLACEHOLDER__";
+
 /** Run `vp analyze <images> [extraArgs]` and return the fenced description. */
 export function runVP(images, extraArgs = []) {
-	const vp = process.env.VP_BIN || "vp";
+	// VP_BIN wins (test override / explicit path). Otherwise prefer the
+	// install-time absolute path; fall back to `vp` on PATH if unset.
+	const vp = process.env.VP_BIN || (VP_BIN_PATH === VP_PATH_SENTINEL ? "vp" : VP_BIN_PATH);
 	const result = spawnSync(vp, ["analyze", ...images, ...extraArgs], {
 		encoding: "utf8",
 		timeout: Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000),

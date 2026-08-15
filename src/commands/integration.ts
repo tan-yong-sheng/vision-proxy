@@ -12,6 +12,7 @@
  *                                   block to config.toml.
  *   show <agent>      print what `install` would generate for manual review.
  *   list              show which agents have vision-proxy installed.
+ *   status            show installed version markers per agent (flags outdated).
  *   uninstall <agent> removes vision-proxy from the agent.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
@@ -19,6 +20,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
+import { VERSION, renderVersionMarker, extractMarkerVersion } from "../version.ts";
 
 const SUPPORTED = ["pi", "claude-code", "codex"];
 const PI_EXTENSION_FILENAME = "vision-proxy.ts";
@@ -52,6 +54,8 @@ interface AgentSpec {
 	isInstalled(raw: string): boolean;
 	/** Hook agents ship a shared.mjs next to the generated shim. */
 	sharedShim: boolean;
+	/** Version stamped into the generated file, or undefined if unstamped/unknown. */
+	installedVersion(opts: { installDir?: string }): string | undefined;
 }
 
 function piExtensionsDir(): string {
@@ -85,13 +89,17 @@ const piSpec: AgentSpec = {
 	id: "pi",
 	target: ({ installDir }) => join(installDir ?? piExtensionsDir(), PI_EXTENSION_FILENAME),
 	locationLabel: ({ installDir }) => join(installDir ?? piExtensionsDir(), PI_EXTENSION_FILENAME),
-	generate: () => PI_EXTENSION_SOURCE,
+	generate: () => PI_EXTENSION_SOURCE.replace("__VP_VERSION__PLACEHOLDER__", renderVersionMarker()),
 	readConfig: () => ({ raw: "" }),
 	configPath: () => "",
 	apply: (targetPath) => targetPath,
 	remove: (raw) => ({ raw, removed: false }),
 	isInstalled: () => existsSync(piSpec.target({})),
 	sharedShim: false,
+	installedVersion: ({ installDir }) => {
+		const path = piSpec.target({ installDir });
+		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
+	},
 };
 
 const claudeCode: AgentSpec = {
@@ -101,7 +109,10 @@ const claudeCode: AgentSpec = {
 	locationLabel: ({ installDir }) =>
 		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "claude-code-vision-proxy-user-prompt-submit.mjs"),
 	generate: () =>
-		readFileSync(join(shimDir(), "claude-code-user-prompt-submit.mjs"), "utf8"),
+		readFileSync(join(shimDir(), "claude-code-user-prompt-submit.mjs"), "utf8").replace(
+			"__VP_VERSION__PLACEHOLDER__",
+			renderVersionMarker(),
+		),
 	readConfig() {
 		const p = claudeCodeConfigPath();
 		const raw = existsSync(p) ? readFileSync(p, "utf8") : "{}";
@@ -163,6 +174,10 @@ const claudeCode: AgentSpec = {
 		}
 	},
 	sharedShim: true,
+	installedVersion: ({ installDir }) => {
+		const path = claudeCode.target({ installDir });
+		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
+	},
 };
 
 const codex: AgentSpec = {
@@ -172,7 +187,10 @@ const codex: AgentSpec = {
 	locationLabel: ({ installDir }) =>
 		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "codex-vision-proxy-user-prompt-submit.mjs"),
 	generate: () =>
-		readFileSync(join(shimDir(), "codex-user-prompt-submit.mjs"), "utf8"),
+		readFileSync(join(shimDir(), "codex-user-prompt-submit.mjs"), "utf8").replace(
+			"__VP_VERSION__PLACEHOLDER__",
+			renderVersionMarker(),
+		),
 	readConfig() {
 		const p = codexConfigPath();
 		const raw = existsSync(p) ? readFileSync(p, "utf8") : "";
@@ -205,6 +223,10 @@ const codex: AgentSpec = {
 		return raw.includes(HOOK_MARKER);
 	},
 	sharedShim: true,
+	installedVersion: ({ installDir }) => {
+		const path = codex.target({ installDir });
+		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
+	},
 };
 
 function specFor(agent: string): AgentSpec | undefined {
@@ -212,6 +234,19 @@ function specFor(agent: string): AgentSpec | undefined {
 	if (agent === "claude-code") return claudeCode;
 	if (agent === "codex") return codex;
 	return undefined;
+}
+
+function isAgentInstalled(spec: AgentSpec): boolean {
+	const target = spec.target({});
+	const targetExists = existsSync(target);
+	let installed = targetExists;
+	// Hook agents are "installed" when their config block is present, even if
+	// the shim file lives in a shared install dir we don't manage.
+	const cfgPath = spec.configPath();
+	if (cfgPath && existsSync(cfgPath)) {
+		installed = installed || spec.isInstalled(spec.readConfig().raw);
+	}
+	return installed;
 }
 
 function rejectUnknownAgent(agent: string): IntegrationResult {
@@ -279,17 +314,51 @@ export async function integrationList(): Promise<IntegrationResult> {
 	const lines: string[] = [];
 	for (const agent of SUPPORTED) {
 		const spec = specFor(agent)!;
-		const target = spec.target({});
-		const targetExists = existsSync(target);
-		let installed = targetExists;
-		// Hook agents are "installed" when their config block is present, even if
-		// the shim file lives in a shared install dir we don't manage.
-		const cfgPath = spec.configPath();
-		if (cfgPath && existsSync(cfgPath)) {
-			installed = installed || spec.isInstalled(spec.readConfig().raw);
-		}
+		const installed = isAgentInstalled(spec);
 		lines.push(`${installed ? "✓" : " "} ${agent}`);
 	}
+	return { ok: true, message: lines.join("\n"), code: 0 };
+}
+
+/**
+ * Report install status per agent, annotated with the vp version embedded in
+ * each installed artifact, so the user can see which integrations predate the
+ * installed `vp` and should be refreshed with `vp integration install`.
+ */
+// fallow-ignore-next-line unused-export
+export async function integrationStatus(): Promise<IntegrationResult> {
+	const lines: string[] = [`vp ${VERSION}`];
+	let outdated = 0;
+	let installedCount = 0;
+	for (const agent of SUPPORTED) {
+		const spec = specFor(agent)!;
+		const installed = isAgentInstalled(spec);
+		if (!installed) {
+			lines.push(`✗ ${agent}  not installed`);
+			continue;
+		}
+		installedCount++;
+		const marker = spec.installedVersion({});
+		if (!marker) {
+			lines.push(`✓ ${agent}  installed (version unknown)`);
+			outdated++;
+			continue;
+		}
+		if (marker === VERSION) {
+			lines.push(`✓ ${agent}  ${marker}`);
+		} else {
+			lines.push(`! ${agent}  ${marker} (installed vp is ${VERSION}, run: vp integration install ${agent})`);
+			outdated++;
+		}
+	}
+	lines.push("");
+	lines.push(
+		installedCount === 0
+			? "no integrations installed"
+			: outdated === 0
+				? `all ${installedCount} integration(s) up to date`
+				: `${outdated} of ${installedCount} integration(s) out of date`,
+	);
 	return { ok: true, message: lines.join("\n"), code: 0 };
 }
 
@@ -370,13 +439,15 @@ export async function runIntegration(
 			return integrationShow(agent);
 		case "list":
 			return integrationList();
+		case "status":
+			return integrationStatus();
 		case "uninstall":
 			if (!agent) return { ok: false, message: "usage: vp integration uninstall <agent>", code: 1 };
 			return integrationUninstall(agent, { installDir });
 		default:
 			return {
 				ok: false,
-				message: `unknown integration subcommand "${sub ?? ""}". Try: install, show, list, uninstall`,
+				message: `unknown integration subcommand "${sub ?? ""}". Try: install, show, list, status, uninstall`,
 				code: 1,
 			};
 	}

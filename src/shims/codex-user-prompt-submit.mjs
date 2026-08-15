@@ -18,6 +18,8 @@
  */
 import { runShim } from "./shared.mjs";
 
+// __VP_VERSION__PLACEHOLDER__
+
 // Codex shows ~2500 tokens by default; stay under the preview limit.
 const MAX_OUTPUT_TOKENS = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
 

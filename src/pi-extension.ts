@@ -27,6 +27,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { spawnSync } from "node:child_process";
 
+// __VP_VERSION__PLACEHOLDER__
+
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TIMEOUT_MS = Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000);
 

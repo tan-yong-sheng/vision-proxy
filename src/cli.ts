@@ -8,7 +8,7 @@
  *   config   init | get | set <k> <v> | validate
  *   provider list | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]
- *   integration install | show | list | uninstall <agent>
+ *   integration install | show | list | status | uninstall <agent>
  *   version | help
  */
 import { runAnalyze, parseCropFlags, AnalyzeError, type AnalyzeFlags } from "./commands/analyze.ts";
@@ -152,6 +152,7 @@ integration options:
   install <agent>            install vision-proxy for pi | claude-code | codex
   show <agent>               print what install would generate
   list                       show which agents have vision-proxy installed
+  status                     show installed version markers per agent
   uninstall <agent>          remove the integration
 `;
 

@@ -73,7 +73,7 @@ When a key is absent from the environment, `vp` checks the OS keyring as a fallb
 - `vp config init|get|set|validate` - manage config files.
 - `vp provider list|check|store-key|delete-key|list-keys` - manage provider registrations and keys.
 - `vp cache status|clear|prune` - inspect and clear the local description cache.
-- `vp integration install|show|list|uninstall <agent>` - install vision-proxy for `pi`, `claude-code`, or `codex`.
+- `vp integration install|show|list|status|uninstall <agent>` - install vision-proxy for `pi`, `claude-code`, or `codex`.
 
 ## Agent hooks
 
@@ -95,6 +95,8 @@ vp integration install pi
 ```
 
 This writes a single auto-discovered extension into `~/.pi/agent/extensions/vision-proxy.ts`. The generated extension shells out to `vp analyze --json`, reads `VP_BIN` from the environment (falling back to `vp` on `PATH`), and fails open if `vp` is missing. Re-run the installer after a CLI upgrade to refresh the extension, and use `vp integration uninstall pi` to remove it.
+
+Every generated artifact (the Pi extension and the Claude Code / Codex shims) is stamped with the `vp` version that produced it. Run `vp integration status` to list installed integrations alongside their version markers; any integration whose marker predates the installed `vp` is flagged so you know to re-run `vp integration install`.
 
 ## Output
 

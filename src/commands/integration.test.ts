@@ -35,6 +35,11 @@ function installDir(home: string): string {
 	return join(home, "ext");
 }
 
+/** Pi's default extensions dir under the isolated HOME (`~/.pi/agent/extensions`). */
+function home_pi(): string {
+	return join(process.env.HOME!, ".pi", "agent", "extensions");
+}
+
 /**
  * Execute the generated Pi extension with stubbed dependencies to verify it
  * conforms to the Pi extension public interface contract: a default export
@@ -283,5 +288,50 @@ test("unknown subcommand reports usage", async () => {
 	const r = await runIntegration("frobnicate", "pi");
 	assert.equal(r.ok, false);
 	assert.match(r.message, /unknown integration subcommand/);
+	reset();
+});
+
+test("status reports not-installed for every agent on a fresh HOME", async () => {
+	isolate();
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /not installed/);
+	assert.match(r.message, /no integrations installed/);
+	reset();
+});
+
+test("status reports installed version markers and up-to-date summary", async () => {
+	isolate(); // pi installs into ~/.pi (temp HOME); status reads the same default location.
+	await runIntegration("install", "pi");
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /vp 0\.1\.0/);
+	assert.match(r.message, /✓ pi\s+0\.1\.0/);
+	assert.match(r.message, /all \d+ integration\(s\) up to date/);
+	reset();
+});
+
+test("status flags an integration whose embedded version marker is stale", async () => {
+	isolate();
+	await runIntegration("install", "pi");
+	// Backdate the version marker baked into the generated Pi extension.
+	const ext = join(home_pi(), "vision-proxy.ts");
+	writeFileSync(ext, readFileSync(ext, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"));
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /! pi\s+0\.0\.9.*installed vp is 0\.1\.0/);
+	assert.match(r.message, /out of date/);
+	reset();
+});
+
+test("status flags an installed integration with no version marker as outdated", async () => {
+	isolate();
+	await runIntegration("install", "pi");
+	const ext = join(home_pi(), "vision-proxy.ts");
+	writeFileSync(ext, readFileSync(ext, "utf8").replace(/__VP_VERSION__:[0-9.]+/, ""));
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /version unknown/);
+	assert.match(r.message, /out of date/);
 	reset();
 });

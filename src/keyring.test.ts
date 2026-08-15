@@ -9,9 +9,9 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
-	type KeyringBackend,
 	deleteProviderKey,
 	getStoredProviderKey,
+	type KeyringBackend,
 	listStoredProviderKeys,
 	providerKeyAccount,
 	setKeyringBackend,

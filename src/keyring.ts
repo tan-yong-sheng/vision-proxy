@@ -44,7 +44,7 @@ export interface KeyringBackend {
  * `undefined` means "not yet determined"; `null` means "determined
  * unavailable".
  */
-let backendOverride: KeyringBackend | null | undefined = undefined;
+let backendOverride: KeyringBackend | null | undefined;
 
 /** Replace the active backend (tests call this; pass `null` to force-unavailable). */
 export function setKeyringBackend(backend: KeyringBackend | null): void {
@@ -124,7 +124,10 @@ export function storeProviderKey(
 ): { ok: true } | { ok: false; error: string } {
 	const backend = getKeyringBackend();
 	if (!backend) {
-		return { ok: false, error: "keyring storage unavailable (native binding missing or disabled via VP_KEYRING=0)" };
+		return {
+			ok: false,
+			error: "keyring storage unavailable (native binding missing or disabled via VP_KEYRING=0)",
+		};
 	}
 	try {
 		backend.set(providerKeyAccount(providerId), apiKey);
@@ -152,7 +155,11 @@ export function deleteProviderKey(
 ): { ok: true; deleted: boolean } | { ok: false; deleted: false; error: string } {
 	const backend = getKeyringBackend();
 	if (!backend) {
-		return { ok: false, deleted: false, error: "keyring storage unavailable (native binding missing or disabled via VP_KEYRING=0)" };
+		return {
+			ok: false,
+			deleted: false,
+			error: "keyring storage unavailable (native binding missing or disabled via VP_KEYRING=0)",
+		};
 	}
 	try {
 		const deleted = backend.delete(providerKeyAccount(providerId));

@@ -1,7 +1,7 @@
 // Copy the standalone hook shims (plain .mjs, not compiled by tsc) into dist/shims
 // so an installed `vp` binary can reference them from the same directory tree.
-import { mkdirSync, readdirSync, copyFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");

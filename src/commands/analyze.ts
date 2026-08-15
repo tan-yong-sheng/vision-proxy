@@ -11,31 +11,32 @@
  *     `--no-fence` was passed. The fence is ON by default; image-derived text
  *     is attacker-controlled, so unfenced output must never be injected.
  */
+
+import { type AnalyzeRequest, analyzeImagesWithModel } from "../adapter.ts";
+import { cacheGet, cacheSet, configureCache } from "../cache.ts";
+import { loadConfig } from "../config.ts";
 import {
+	_imageMeta,
 	buildAnalyzeResult,
 	buildGroundingInstruction,
 	buildJointDescriptionFence,
 	buildToolCacheKey,
+	type CropEntry,
 	cropImage,
 	cropSignature,
+	describeReadReason,
+	type GroundingFormat,
 	getGroundingFormat,
 	hashImageData,
-	parseCropArg,
-	type CropEntry,
-	type GroundingFormat,
 	type ImageContent,
 	type ImagePayload,
+	parseCropArg,
+	parseModelString,
 	readImageFileWithReason,
 	resolveCropEntry,
 	storeImageMeta,
-	describeReadReason,
-	_imageMeta,
-	parseModelString,
 } from "../core.ts";
-import { analyzeImagesWithModel, type AnalyzeRequest } from "../adapter.ts";
-import { resolveModel, isKnownProvider } from "../provider.ts";
-import { loadConfig } from "../config.ts";
-import { cacheGet, cacheSet, configureCache } from "../cache.ts";
+import { isKnownProvider, resolveModel } from "../provider.ts";
 
 export interface AnalyzeFlags {
 	format?: GroundingFormat;
@@ -65,7 +66,9 @@ export interface AnalyzeOutcome {
 async function readPayload(path: string): Promise<ImagePayload | { error: string }> {
 	const r = await readImageFileWithReason(path);
 	if (!r.image) {
-		return { error: `could not read image: ${describeReadReason(r.reason ?? "not-an-image", r.bytes)}` };
+		return {
+			error: `could not read image: ${describeReadReason(r.reason ?? "not-an-image", r.bytes)}`,
+		};
 	}
 	const img: ImageContent = r.image;
 	const hash = hashImageData(img.data);
@@ -103,7 +106,9 @@ async function applyCrop(
 	}
 }
 
-function buildProviderOptions(format: GroundingFormat | undefined): Record<string, unknown> | undefined {
+function buildProviderOptions(
+	format: GroundingFormat | undefined,
+): Record<string, unknown> | undefined {
 	// OpenAI imageDetail etc. would be attached here. Grounding format is
 	// conveyed via the system prompt instead, so nothing extra by default.
 	if (format && format !== "none") return undefined;
@@ -196,13 +201,7 @@ export async function runAnalyze(
 
 	// The primary model must be resolvable (have a key); fallbacks are only
 	// tried on a runtime failure later, so a missing key on the primary is fatal.
-	const resolved = resolveModel(
-		provider,
-		modelId,
-		env,
-		flags.apiKey,
-		config.baseURLs[provider],
-	);
+	const resolved = resolveModel(provider, modelId, env, flags.apiKey, config.baseURLs[provider]);
 	if (!resolved.ok) {
 		throw new AnalyzeError(
 			`no API key for provider "${resolved.provider}". Set ${resolved.apiKeyEnv} (or pass --api-key).`,
@@ -333,11 +332,10 @@ export async function runAnalyze(
 	};
 }
 
-
 /** Parse `--crop` flags (now in the parsed flags map) in the form `<index>:<form>`. */
-export function parseCropFlags(
-	flags: Record<string, string | boolean | string[]>,
-): { crops: CropEntry[] | undefined } {
+export function parseCropFlags(flags: Record<string, string | boolean | string[]>): {
+	crops: CropEntry[] | undefined;
+} {
 	const raw = flags.crop;
 	if (raw === undefined) return { crops: undefined };
 	const values = Array.isArray(raw) ? raw : [raw];

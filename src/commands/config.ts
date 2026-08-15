@@ -7,15 +7,12 @@
  *   set <k> <v>       set a key in the project .vision-proxy.json
  *   validate          check the resolved config + provider reachability
  */
-import {
-	DEFAULT_CONFIG,
-	resolveConfig,
-	type VisionConfig,
-} from "../core.ts";
-import { loadConfig, readJsonFile } from "../config.ts";
-import { resolveModel, listProviders } from "../provider.ts";
-import path from "node:path";
+
 import { promises as fs } from "node:fs";
+import path from "node:path";
+import { loadConfig, readJsonFile } from "../config.ts";
+import { DEFAULT_CONFIG, resolveConfig, type VisionConfig } from "../core.ts";
+import { listProviders, resolveModel } from "../provider.ts";
 
 export interface ConfigResult {
 	ok: boolean;
@@ -63,11 +60,7 @@ export async function configGet(opts: {
 	};
 }
 
-export async function configSet(
-	key: string,
-	value: string,
-	cwd: string,
-): Promise<ConfigResult> {
+export async function configSet(key: string, value: string, cwd: string): Promise<ConfigResult> {
 	if (!KNOWN_KEYS.has(key)) {
 		return {
 			ok: false,

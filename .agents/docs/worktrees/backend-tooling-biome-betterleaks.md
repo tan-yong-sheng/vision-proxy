@@ -1,72 +1,78 @@
 ---
 type: worktree
-title: tooling biome betterleaks
-description: "Worktree to add Biome lint/format and BetterLeaks secret-scanning pre-commit hooks."
+title: "tooling Biome + BetterLeaks"
+description: "Add Biome, BetterLeaks, Lefthook pre-commit, and CI workflow to the vision-proxy backend; apply auto-fixes."
 area: backend
-tags: [tooling, lint, format, secrets, pre-commit, biome, betterleaks]
+tags: [tooling, lint, secrets, ci, biome, betterleaks, lefthook]
 status: active
 branch: vp-tooling-biome-betterleaks
 base: main
 stack_position: 1
-stack_batch: vp-tooling
-created: "2026-08-15"
-updated: "2026-08-15"
+created: "2026-08-16"
+updated: "2026-08-16"
 commits_verified: []
 merge_preview_verified: ""
-stale_after: "2026-08-29"
+stale_after: "2026-08-30"
 related:
-  - ../plans/backend-tooling-biome-betterleaks.md
   - ../qa/backend-post-merge-qa-for-pr-5.md
 ---
-# tooling biome betterleaks
+
+# tooling Biome + BetterLeaks
+
+## Branch
+
+`vp-tooling-biome-betterleaks` (off `main`).
 
 ## Objective
 
-Add Biome as the linter/formatter and BetterLeaks as a pre-commit secret scanner. This tooling should land before the bug-fix and distribution worktrees so later branches inherit the lint/format rules and secret-scanning gate.
+Introduce a first-class tooling layer for the vision-proxy backend: a Biome
+config for format + lint, a BetterLeaks config for secret scanning, a Lefthook
+pre-commit hook that runs both plus the existing fallow gate, and a CI workflow
+that runs the full gate on every push/PR. Then apply Biome auto-fixes.
+
+## Root cause / motivation
+
+The repo had no formatter/linter and no local secret-scanning gate. Native
+Node 22 TypeScript meant we could adopt Biome (single fast tool) and BetterLeaks
+(a gitleaks-compatible Rust scanner) without adding a JS build step for linting.
 
 ## Scope
 
-- `biome.json` - Biome configuration for TS/JS/JSON.
-- `.betterleaks.toml` - BetterLeaks scanner configuration and allowlists.
-- `lefthook.yml` - pre-commit hooks running Biome and BetterLeaks on staged files.
-- `package.json` - add `@biomejs/biome`, `lefthook` dev deps and `lint` / `format` / `lint:fix` scripts.
-- `.github/workflows/ci.yml` - CI running Biome, tests, typecheck, and BetterLeaks history scan.
-- `README.md` - setup instructions for hooks.
-- Auto-format/lint the existing source tree in this PR.
+- `biome.json` - Biome config (tabs, 100-col, recommended preset, project rule tweaks).
+- `.betterleaks.toml` - BetterLeaks secret-scan config with project allowlists.
+- `lefthook.yml` - pre-commit (betterleaks + biome + fallow) and pre-push (betterleaks).
+- `.github/workflows/ci.yml` - install, hooks, biome, typecheck, secrets, test.
+- `package.json` - `lint`, `format`, `secrets`, `hooks:install` scripts; `lefthook` devDependency.
+- `pnpm-lock.yaml` - lefthook lockfile entries.
+- `src/**` - Biome auto-fixes (import ordering, literal keys, template literals, unused imports). Two non-fixable findings suppressed with `biome-ignore` (intentional control-char sanitization regex in `core.ts`; a test mock function type in `integration.test.ts` replaced with a typed signature).
 
-## Tools / MCP / Skills
+## Tasks
 
-- Biome CLI (`@biomejs/biome`).
-- BetterLeaks CLI.
-- Lefthook hook manager.
-- GitHub Actions.
-- `fallow audit` for change review.
+- [x] Add Biome config (`biome.json`).
+- [x] Add BetterLeaks config (`.betterleaks.toml`).
+- [x] Add Lefthook pre-commit (`lefthook.yml`).
+- [x] Add CI workflow (`.github/workflows/ci.yml`).
+- [x] Apply Biome auto-fixes to `src/**` and config files.
+- [x] Run `npm test`, `npm run typecheck`, and `fallow audit`.
+- [x] Commit on `vp-tooling-biome-betterleaks`.
 
 ## Verification
 
 | Check | Command | Result |
 |-------|---------|--------|
-| Biome passes | `npm run lint` | no errors |
-| BetterLeaks pre-commit | stage a file and run `git commit` | no secret findings |
-| BetterLeaks history | `betterleaks git .` | clean or allowlisted |
-| Tests + typecheck | `npm test && npm run typecheck` | green |
-| CI | open PR | all checks pass |
+| Lint + format | `biome check` | 0 errors (warnings/infos non-blocking) |
+| Type check | `tsc --noEmit` | clean |
+| Unit + e2e tests | `npm test` | 141 tests pass, 0 fail |
+| Secret scan (tree) | `betterleaks dir .` | no leaks found |
+| Fallow audit | `fallow audit --gate-marker agent` | verdict: pass |
 
-## Status
+## Notes
 
-- [ ] Add Biome and Lefthook dependencies.
-- [ ] Create `biome.json`.
-- [ ] Create `.betterleaks.toml`.
-- [ ] Create `lefthook.yml`.
-- [ ] Add package scripts.
-- [ ] Run Biome fixes across repo.
-- [ ] Add CI workflow.
-- [ ] Update README.
-- [ ] Run `npm test`, `npm run typecheck`, `fallow audit`.
-- [ ] Open PR and merge to `main`.
-
-## Open questions
-
-- Which Biome rules to enable/disable? Start with recommended and tune based on the initial scan.
-- What BetterLeaks allowlists are needed for existing test data or binary cache files?
-- Should the CI BetterLeaks scan run on every PR or only on push to `main`? Recommended: both.
+- `node_modules/` and `dist/` are excluded from BetterLeaks via the existing
+  `.gitignore`, which the scanner honors.
+- Lefthook's git hooks live in `.git/hooks` (gitignored); CI installs them with
+  `pnpm lefthook install`. The lefthook binary postinstall is approved in CI.
+- Two Biome findings are intentionally suppressed rather than "fixed": the
+  `TELEMETRY_UNSAFE_RE` control-char class in `src/core.ts` and a test-tool mock
+  type in `src/commands/integration.test.ts` (replaced with an explicit typed
+  signature instead of `Function`).

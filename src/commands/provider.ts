@@ -5,18 +5,14 @@
  *   list                 list configured providers + key presence
  *   check [<name>]       verify an API key is configured for a provider (or all)
  */
-import {
-	getProvider,
-	listProviders,
-	resolveModel,
-	type ProviderSpec,
-} from "../provider.ts";
+
 import {
 	deleteProviderKey,
 	getStoredProviderKey,
 	listStoredProviderKeys,
 	storeProviderKey,
 } from "../keyring.ts";
+import { getProvider, listProviders, type ProviderSpec, resolveModel } from "../provider.ts";
 
 export interface ProviderResult {
 	ok: boolean;
@@ -39,7 +35,7 @@ export function providerCheck(
 	name: string | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): ProviderResult {
-	const specs = name ? [getProvider(name)].filter(Boolean) as ProviderSpec[] : listProviders();
+	const specs = name ? ([getProvider(name)].filter(Boolean) as ProviderSpec[]) : listProviders();
 	if (specs.length === 0) {
 		return { ok: false, message: `unknown provider "${name}"`, code: 1 };
 	}
@@ -69,7 +65,9 @@ function requireProvider(providerId: string): ProviderSpec | undefined {
 function unknownProviderResult(providerId: string): ProviderResult {
 	return {
 		ok: false,
-		message: `unknown provider "${providerId}". Known: ${listProviders().map((p) => p.id).join(", ")}`,
+		message: `unknown provider "${providerId}". Known: ${listProviders()
+			.map((p) => p.id)
+			.join(", ")}`,
 		code: 1,
 	};
 }

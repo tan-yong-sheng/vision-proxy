@@ -4,10 +4,10 @@
  * Uses a temp dir for the cache file so we never touch the user config dir.
  */
 import { strict as assert } from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdtemp, rm, readFile, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	cacheClear,
 	cacheGet,

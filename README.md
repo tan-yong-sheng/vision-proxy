@@ -68,6 +68,7 @@ Provider API keys are read from their standard environment variables: `OPENAI_AP
 - `vp provider list|add|check` - manage provider registrations and keys.
 - `vp cache status|clear|prune` - inspect and clear the local description cache.
 - `vp hook install|show|list|uninstall` - install `UserPromptSubmit` shims for `claude-code` or `codex`.
+- `vp integration install|show|uninstall <agent>` - install the vision-proxy integration for `pi` (Pi coding agent).
 
 ## Agent hooks
 
@@ -79,6 +80,16 @@ vp hook install codex
 ```
 
 The shim shells out to `vp analyze`, then returns the fenced description as additional hook context.
+
+## Pi integration
+
+Pi users can install a `analyze_image` tool backed by the CLI:
+
+```bash
+vp integration install pi
+```
+
+This writes a single auto-discovered extension into `~/.pi/agent/extensions/vision-proxy.ts`. The generated extension shells out to `vp analyze --json`, reads `VP_BIN` from the environment (falling back to `vp` on `PATH`), and fails open if `vp` is missing. Re-run the installer after a CLI upgrade to refresh the extension, and use `vp integration uninstall pi` to remove it.
 
 ## Output
 

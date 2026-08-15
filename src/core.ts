@@ -47,6 +47,10 @@ export interface VisionConfig {
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
 	maxToolCallsPerTurn: number;
+	/** Per-provider base URL overrides, e.g. { "openai": "http://localhost:8000/v1" }. */
+	baseURLs: Record<string, string>;
+	/** Alternate `provider/model-id` strings to try when the primary model fails. */
+	fallbackModels: string[];
 }
 
 export interface ImageMeta {
@@ -357,6 +361,8 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
 	maxToolCallsPerTurn: -1,
+	baseURLs: {},
+	fallbackModels: [],
 };
 
 // ── Persistent file storage ────────────────────────────────────────────────
@@ -380,6 +386,8 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"pHashSimilarityThreshold",
 	"groundingModels",
 	"maxToolCallsPerTurn",
+	"baseURLs",
+	"fallbackModels",
 ]);
 
 function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
@@ -512,6 +520,42 @@ function parseToolCallsOverride(
 }
 
 /**
+ * Parse `VP_BASE_URLS` — a comma-separated list of `provider=url` pairs into a
+ * per-provider base URL map. Invalid entries are skipped.
+ */
+function parseBaseUrlsOverride(
+	value: string | undefined,
+): Record<string, string> | undefined {
+	if (value === undefined) return undefined;
+	const out: Record<string, string> = {};
+	for (const pair of value.split(",")) {
+		const eq = pair.indexOf("=");
+		if (eq <= 0 || eq >= pair.length - 1) continue;
+		const provider = pair.slice(0, eq).trim();
+		const url = pair.slice(eq + 1).trim();
+		if (!provider || !url || !PROVIDER_PATTERN.test(provider)) continue;
+		out[provider] = url;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Parse `VP_FALLBACK_MODELS` — a comma-separated list of `provider/model-id`
+ * strings. Malformed entries are skipped.
+ */
+function parseFallbackModelsOverride(
+	value: string | undefined,
+): string[] | undefined {
+	if (value === undefined) return undefined;
+	const out: string[] = [];
+	for (const raw of value.split(",")) {
+		const parsed = parseModelString(raw.trim());
+		if (parsed) out.push(`${parsed.provider}/${parsed.modelId}`);
+	}
+	return out.length > 0 ? out : undefined;
+}
+
+/**
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
@@ -562,6 +606,16 @@ export function readEnvOverrides(
 		"maxToolCallsPerTurn",
 		parseToolCallsOverride(env.VP_MAX_TOOL_CALLS_PER_TURN),
 	);
+	assignIfDefined(
+		overrides,
+		"baseURLs",
+		parseBaseUrlsOverride(env.VP_BASE_URLS),
+	);
+	assignIfDefined(
+		overrides,
+		"fallbackModels",
+		parseFallbackModelsOverride(env.VP_FALLBACK_MODELS),
+	);
 
 	return overrides;
 }
@@ -576,6 +630,8 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
 	maxToolCallsPerTurn: boolean;
+	baseURLs: boolean;
+	fallbackModels: boolean;
 } {
 	return {
 		mode: Boolean(env.VP_MODE),
@@ -587,6 +643,8 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
 		maxToolCallsPerTurn: env.VP_MAX_TOOL_CALLS_PER_TURN !== undefined,
+		baseURLs: env.VP_BASE_URLS !== undefined,
+		fallbackModels: env.VP_FALLBACK_MODELS !== undefined,
 	};
 }
 
@@ -669,6 +727,32 @@ function fallbackToolCallsCap(value: unknown): number {
 	return DEFAULT_CONFIG.maxToolCallsPerTurn;
 }
 
+function fallbackBaseUrls(value: unknown): Record<string, string> {
+	if (!isRecord(value)) return { ...DEFAULT_CONFIG.baseURLs };
+	const out: Record<string, string> = {};
+	for (const [provider, url] of Object.entries(value)) {
+		if (
+			typeof url !== "string" ||
+			!url ||
+			!PROVIDER_PATTERN.test(provider)
+		)
+			continue;
+		out[provider] = url;
+	}
+	return out;
+}
+
+function fallbackFallbackModels(value: unknown): string[] {
+	if (!Array.isArray(value)) return [...DEFAULT_CONFIG.fallbackModels];
+	const out: string[] = [];
+	for (const entry of value) {
+		if (typeof entry !== "string") continue;
+		const parsed = parseModelString(entry.trim());
+		if (parsed) out.push(`${parsed.provider}/${parsed.modelId}`);
+	}
+	return out;
+}
+
 export function sanitize(config: VisionConfig): VisionConfig {
 	const safe: VisionConfig = { ...config };
 	safe.provider = fallbackProvider(safe.provider);
@@ -704,6 +788,8 @@ export function sanitize(config: VisionConfig): VisionConfig {
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
 	safe.maxToolCallsPerTurn = fallbackToolCallsCap(safe.maxToolCallsPerTurn);
+	safe.baseURLs = fallbackBaseUrls(safe.baseURLs);
+	safe.fallbackModels = fallbackFallbackModels(safe.fallbackModels);
 	return safe;
 }
 

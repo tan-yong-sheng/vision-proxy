@@ -193,4 +193,28 @@ describe("resolveModel keyring fallback", () => {
 		const r = resolveModel("openai", "gpt-4o", { OPENAI_API_KEY: "" } as NodeJS.ProcessEnv);
 		assert.equal(r.ok, false);
 	});
+
+	it("prefers the provider env var base URL over an explicit one", () => {
+		const r = resolveModel(
+			"openai",
+			"gpt-4o",
+			{ OPENAI_API_KEY: "sk-x", OPENAI_BASE_URL: "http://env/v1" } as NodeJS.ProcessEnv,
+			undefined,
+			"http://explicit/v1",
+		);
+		assert.equal(r.ok, true);
+		if (r.ok) assert.equal(r.model.baseURL, "http://env/v1");
+	});
+
+	it("uses an explicit base URL when no env var is set", () => {
+		const r = resolveModel(
+			"openai",
+			"gpt-4o",
+			{ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv,
+			undefined,
+			"http://explicit/v1",
+		);
+		assert.equal(r.ok, true);
+		if (r.ok) assert.equal(r.model.baseURL, "http://explicit/v1");
+	});
 });

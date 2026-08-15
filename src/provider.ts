@@ -109,6 +109,7 @@ export function resolveModel(
 	modelId: string,
 	env: NodeJS.ProcessEnv = process.env,
 	explicitApiKey?: string,
+	explicitBaseURL?: string,
 ): ResolveModelOutcome {
 	const provider = PROVIDERS[providerId];
 	if (!provider) {
@@ -122,7 +123,7 @@ export function resolveModel(
 	}
 	const apiKey =
 		explicitApiKey ?? envValue(provider.apiKeyEnv, env) ?? getStoredProviderKey(providerId);
-	const baseURL = envValue(provider.baseUrlEnv, env);
+	const baseURL = envValue(provider.baseUrlEnv, env) ?? explicitBaseURL;
 	if (!apiKey) {
 		return {
 			ok: false,

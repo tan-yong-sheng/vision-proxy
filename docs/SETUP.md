@@ -64,6 +64,30 @@ For Google models:
 GOOGLE_API_KEY="..." vp analyze screenshot.png --provider google --model gemini-3.7-flash
 ```
 
+### Set a fallback model chain
+
+If your primary model is occasionally rate-limited or unavailable, configure fallback models that `vp` tries in order after a call fails:
+
+```bash
+vp config set fallbackModels '["openai/gpt-4o","google/gemini-2.5-flash"]'
+```
+
+Or via env var (comma-separated):
+
+```bash
+VP_FALLBACK_MODELS="openai/gpt-4o,google/gemini-2.5-flash" vp analyze screenshot.png
+```
+
+A missing API key on the primary provider is a fatal error; fallbacks only kick in once a model call actually fails.
+
+### Override the base URL per provider
+
+`baseURLs` maps a provider id to a custom endpoint and persists across calls (the `*_BASE_URL` env var overrides it for a single invocation):
+
+```bash
+vp config set baseURLs '{"openai":"http://localhost:8000/v1"}'
+```
+
 ## 4. (Optional) Keyring storage
 
 API keys can be stored in the OS keyring instead of env vars:

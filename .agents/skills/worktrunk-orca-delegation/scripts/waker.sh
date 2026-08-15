@@ -19,23 +19,68 @@
 
 set -uo pipefail
 
-WAKER_INTERVAL_MS=${WAKER_INTERVAL_MS:-600000}   # 10 minutes
-RUN_ID=${RUN_ID:-}
+RUN_ID="${RUN_ID:-}"
+WAKER_INTERVAL_MS="${WAKER_INTERVAL_MS:-600000}"   # 10 minutes
+STATE_DIR="${WAKER_STATE_DIR:-.waker-state}"
+SINGLE_TICK=0
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--run <run-id>] [--single-tick|--once] [--interval-ms <n>] [--state-dir <dir>]
+
+Walk all recovery rules under rules/*.sh, deduplicate actions, and apply them.
+
+Options:
+  --run <run-id>         The orchestration run ID (or set RUN_ID env).
+  --single-tick, --once  Run rules once and exit without sleeping.
+  --interval-ms <n>      Sleep interval between ticks in ms (default: 600000).
+  --state-dir <dir>      Directory for waker cooldown state (default: .waker-state).
+  -h, --help             Show this help message.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run)
+      RUN_ID="$2"
+      shift 2
+      ;;
+    --single-tick|--once)
+      SINGLE_TICK=1
+      shift
+      ;;
+    --interval-ms)
+      WAKER_INTERVAL_MS="$2"
+      shift 2
+      ;;
+    --state-dir)
+      STATE_DIR="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [ -z "$RUN_ID" ]; then
-  echo "waker.sh: RUN_ID is required" >&2
+  echo "waker.sh: RUN_ID is required (--run <run-id> or RUN_ID env)" >&2
   exit 1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RULES_DIR="$SCRIPT_DIR/rules"
-STATE_DIR=${WAKER_STATE_DIR:-.waker-state}
 mkdir -p "$STATE_DIR"
+export WAKER_STATE_DIR="$STATE_DIR"
 
-TICK=0
-
-while true; do
-  TICK=$((TICK + 1))
+run_tick() {
+  local tick="$1"
 
   # Collect every action from every rule into an in-memory buffer,
   # dedup by task_id so each task gets at most one action per tick.
@@ -72,6 +117,17 @@ while true; do
   for TASK_ID in "${!BEST_PAYLOAD[@]}"; do
     bash "$SCRIPT_DIR/apply_recovery.sh" "${BEST_PAYLOAD[$TASK_ID]}"
   done
+}
+
+if [[ "$SINGLE_TICK" -eq 1 ]]; then
+  run_tick 1
+  exit 0
+fi
+
+TICK=0
+while true; do
+  TICK=$((TICK + 1))
+  run_tick "$TICK"
 
   # Time-driven sleep. Use milliseconds -> seconds for portability.
   SLEEP_S=$((WAKER_INTERVAL_MS / 1000))

@@ -111,6 +111,12 @@ function bool(flags: FlagMap, key: string, dflt: boolean): boolean {
 	return v === true || v === "true" || v === "1" || v === "on";
 }
 
+/** True when a `--help`/`-h` flag or a literal "help"/"-h"/"--help" token appears. */
+function wantsHelp(flags: FlagMap, tokens: string[]): boolean {
+	if (bool(flags, "help", false) || bool(flags, "h", false)) return true;
+	return tokens.includes("help") || tokens.includes("-h") || tokens.includes("--help");
+}
+
 const HELP = `vision-proxy (vp) ${VERSION}
 
 Usage:
@@ -163,8 +169,387 @@ hook options:
   uninstall <agent>        remove the shim from the agent config
 `;
 
+/**
+ * Per-subcommand help blocks. Keyed by the command path (e.g. "config" or
+ * "config init"). `renderHelp` resolves the most specific block, falling back
+ * to the parent command, then the top-level HELP.
+ */
+const HELP_INDEX: Record<string, string> = {
+	analyze: `vp analyze <paths...> [options]
+
+Analyze one or more images with a vision model and print a fenced,
+UNTRUSTED description.
+
+Usage:
+  vp analyze <paths...> [options]
+
+Arguments:
+  <paths...>           one or more image file paths or URLs to analyze
+
+Options:
+  --format <name>      grounding format: plain (default) | qwen_pixels |
+                       molmo_points | deepseek_bbox | internvl_pixels |
+                       gemini_normalized_1000
+  --provider <name>    override the configured provider
+  --model <id>         override the configured model id
+  --joint              force a joint multi-image batch
+  --crop <i:form>      crop image <index> before analysis (repeatable),
+                       e.g. 0:0.1,0.1,0.5,0.5
+  --no-fence           drop the <vision_proxy_description> fence (debug only)
+  --config <path>      use an explicit config file
+  --json               emit machine-readable JSON to stdout
+  --max-output-tokens <n>  cap the model response tokens
+  --question <text>    text to analyze against the image (-q)
+  --api-key <key>      explicit provider API key (-apiKey)
+  -h, --help           show this help
+
+Notes:
+  The description fence is ON by default. Image-derived text is
+  attacker-controlled, so only use --no-fence for local debugging.`,
+
+	"config": `vp config <subcommand> [options]
+
+Manage the VisionConfig (.vision-proxy.json).
+
+Usage:
+  vp config init [--config <path>]       scaffold a config in the cwd
+  vp config get  [--config <path>]       print the resolved config
+  vp config set  <key> <value>           set a key in the project config
+  vp config validate [--config <path>]   check config + provider reachability
+
+Subcommands:
+  init               scaffold .vision-proxy.json in the current directory
+  get                print the resolved config with precedence notes
+  set <key> <value>  set a key in the project config
+  validate           validate config + probe provider auth
+
+Options:
+  --config <path>    explicit config file path (get/set/validate)
+  -h, --help         show this help`,
+
+	"config init": `vp config init
+
+Scaffold a .vision-proxy.json in the current directory.
+
+Usage:
+  vp config init
+
+Notes:
+  Fails if a .vision-proxy.json already exists in the cwd.`,
+
+	"config get": `vp config get [--config <path>]
+
+Print the resolved config (with precedence notes).
+
+Usage:
+  vp config get [--config <path>]
+
+Options:
+  --config <path>    explicit config file path
+  -h, --help         show this help`,
+
+	"config set": `vp config set <key> <value>
+
+Set a key in the project .vision-proxy.json.
+
+Usage:
+  vp config set <key> <value>
+
+Arguments:
+  <key>              a known config key (provider, modelId, mode, ...)
+  <value>            value to set (coerced to the key's type)
+
+Notes:
+  Unknown keys are rejected. Run \`vp config get\` to see the current keys.`,
+
+	"config validate": `vp config validate [--config <path>]
+
+Validate config and probe provider reachability.
+
+Usage:
+  vp config validate [--config <path>]
+
+Options:
+  --config <path>    explicit config file path
+  -h, --help         show this help`,
+
+	"provider": `vp provider <subcommand> [options]
+
+Manage the provider registry and credentials.
+
+Usage:
+  vp provider list                       list providers + key presence
+  vp provider check [<name>]             verify provider auth
+  vp provider store-key <name>           read key from stdin -> keyring
+  vp provider delete-key <name>          delete key from keyring
+  vp provider list-keys                  list keyring-stored keys
+
+Subcommands:
+  list                list configured providers and key presence
+  check [<name>]      verify API key is configured (all if omitted)
+  store-key <name>    read a key from stdin, store in the system keyring
+  delete-key <name>   delete a provider's keyring-stored key
+  list-keys           list providers with a keyring-stored key
+
+Notes:
+  Credentials come from an env var (e.g. ANTHROPIC_API_KEY) or the system
+  keyring. Supply the key via the env var or \`vp provider store-key <name>\`.
+  Set the active provider with \`vp config set provider <name>\`.`,
+
+	"provider list": `vp provider list
+
+List configured providers and key presence.
+
+Usage:
+  vp provider list
+
+For each known provider, shows its id, label, image support, and whether
+a key is present (env var or keyring).`,
+
+	"provider check": `vp provider check [<name>]
+
+Verify that an API key is configured for a provider.
+
+Usage:
+  vp provider check [<name>]
+
+Arguments:
+  <name>              provider id to check (all providers if omitted)
+
+Exits non-zero if any checked provider is missing a key.`,
+
+	"provider store-key": `vp provider store-key <name>
+
+Read a provider API key from stdin and store it in the system keyring.
+
+Usage:
+  vp provider store-key <name>
+
+Arguments:
+  <name>              a known provider id
+
+Example:
+  echo -n "$KEY" | vp provider store-key anthropic
+
+The key is read from stdin so it never lands in shell history or process
+listings.`,
+
+	"provider delete-key": `vp provider delete-key <name>
+
+Delete a provider's API key from the system keyring.
+
+Usage:
+  vp provider delete-key <name>
+
+Arguments:
+  <name>              a known provider id`,
+
+	"provider list-keys": `vp provider list-keys
+
+List providers that have a key stored in the system keyring.
+
+Usage:
+  vp provider list-keys`,
+
+	"cache": `vp cache <subcommand> [options]
+
+Inspect and manage the pHash / description cache.
+
+Usage:
+  vp cache status                  show hit rate, size, and path
+  vp cache clear                   drop all cached entries
+  vp cache prune [--older <days>]  evict entries older than N days
+
+Subcommands:
+  status             show hit rate, entry count, and cache path
+  clear              drop all cached entries
+  prune [--older]    evict entries older than N days (default 30)`,
+
+	"cache status": `vp cache status
+
+Show cache hit rate, size, and path.
+
+Usage:
+  vp cache status`,
+
+	"cache clear": `vp cache clear
+
+Drop all cached entries.
+
+Usage:
+  vp cache clear`,
+
+	"cache prune": `vp cache prune [--older <days>]
+
+Evict cache entries older than N days.
+
+Usage:
+  vp cache prune [--older <days>]
+
+Options:
+  --older <days>     age threshold in days (default 30)
+
+Entries are removed by content age, not last access.`,
+
+	"integration": `vp integration <subcommand> [agent]
+
+Install, inspect, list, or remove the vision-proxy integration for an agent.
+
+Usage:
+  vp integration install <agent>    install the integration
+  vp integration show <agent>       print the generated extension source
+  vp integration list               show which agents have vision-proxy installed
+  vp integration status             show installed version markers per agent
+  vp integration uninstall <agent>  remove the integration
+
+Subcommands:
+  install <agent>    write the integration into the agent's extensions dir
+  show <agent>       print the generated extension source for review
+  list               show installed agents
+  status             show installed version markers per agent
+  uninstall <agent>  remove the generated extension file
+
+Agents:
+  pi                 Pi coding agent (global extensions directory)
+  claude-code        Claude Code agent (UserPromptSubmit hook)
+  codex              Codex agent (UserPromptSubmit hook)
+
+Options:
+  -h, --help         show this help`,
+
+	"integration install": `vp integration install <agent>
+
+Install the vision-proxy integration for an agent.
+
+Usage:
+  vp integration install <agent>
+
+Arguments:
+  <agent>            supported agent id (currently: pi)`,
+
+	"integration show": `vp integration show <agent>
+
+Print the generated extension source for manual review.
+
+Usage:
+  vp integration show <agent>
+
+Arguments:
+  <agent>            supported agent id (currently: pi)`,
+
+	"integration uninstall": `vp integration uninstall <agent>
+
+Remove the vision-proxy integration for an agent.
+
+Usage:
+  vp integration uninstall <agent>
+
+Arguments:
+  <agent>            supported agent id (currently: pi)`,
+
+	"integration list": `vp integration list
+
+Show which agents have vision-proxy installed.
+
+Usage:
+  vp integration list
+
+Output:
+  one line per supported agent, prefixed with ✓ when installed
+  (i.e. the installed agents list)`,
+
+	"integration status": `vp integration status
+
+Show installed version markers per agent.
+
+Usage:
+  vp integration status
+
+Output:
+  one line per supported agent with its install state and the version
+  marker embedded in the installed artifact. Outdated integrations are
+  flagged with a refresh hint.`,
+
+	"hook": `vp hook <subcommand> <agent>
+
+Install, inspect, or remove a per-agent UserPromptSubmit hook.
+
+Usage:
+  vp hook install <agent>     wire the shim into the agent config
+  vp hook show <agent>        print shim + config block for manual install
+  vp hook list                show installed shims
+  vp hook uninstall <agent>   remove the shim from the agent config
+
+Subcommands:
+  install <agent>     install the UserPromptSubmit shim for an agent
+  show <agent>        print the shim + config block
+  list                show installed shims (detected from agent configs)
+  uninstall <agent>   remove the shim from the agent config
+
+Agents:
+  claude-code         Claude Code (settings.json)
+  codex               Codex (config.toml)
+
+Options:
+  -h, --help          show this help`,
+
+	"hook install": `vp hook install <agent>
+
+Install the UserPromptSubmit shim for an agent.
+
+Usage:
+  vp hook install <agent>
+
+Arguments:
+  <agent>            claude-code | codex
+
+This wires the shim into the agent config and copies the shim files next
+to the vp binary.`,
+
+	"hook show": `vp hook show <agent>
+
+Print the shim path and the config block for manual install.
+
+Usage:
+  vp hook show <agent>
+
+Arguments:
+  <agent>            claude-code | codex`,
+
+	"hook list": `vp hook list
+
+Show installed shims detected from agent configs.
+
+Usage:
+  vp hook list`,
+
+	"hook uninstall": `vp hook uninstall <agent>
+
+Remove the shim from an agent's config.
+
+Usage:
+  vp hook uninstall <agent>
+
+Arguments:
+  <agent>            claude-code | codex`,
+};
+
 function print(msg: string): void {
 	process.stdout.write(msg + "\n");
+}
+
+/**
+ * Resolve help text for a command path. Falls back from the most specific
+ * path (e.g. "config set") to its parent ("config") to the top-level HELP.
+ */
+function renderHelp(path: string[]): string {
+	const full = path.join(" ");
+	if (HELP_INDEX[full]) return HELP_INDEX[full]!;
+	if (path.length > 1) {
+		const parent = path.slice(0, -1).join(" ");
+		if (HELP_INDEX[parent]) return HELP_INDEX[parent]!;
+	}
+	return HELP;
 }
 
 function fail(msg: string, code = 1): void {
@@ -188,6 +573,10 @@ export async function main(argv: string[]): Promise<void> {
 	switch (command) {
 		case "analyze": {
 			const { flags, positionals } = parseFlags(rest);
+			if (wantsHelp(flags, positionals)) {
+				print(renderHelp(["analyze"]));
+				return;
+			}
 			const { crops } = parseCropFlags(flags);
 			const images = positionals.filter((a) => !a.startsWith("-"));
 			if (images.length === 0) {
@@ -238,6 +627,10 @@ export async function main(argv: string[]): Promise<void> {
 		case "config": {
 			const [sub, ...subRest] = rest;
 			const { flags, positionals } = parseFlags(subRest);
+			if (wantsHelp(flags, [sub ?? ""])) {
+				print(renderHelp(["config", sub ?? ""].filter(Boolean) as string[]));
+				return;
+			}
 			switch (sub) {
 				case "init":
 					handle(await configInit(process.cwd()));
@@ -272,7 +665,11 @@ export async function main(argv: string[]): Promise<void> {
 
 		case "provider": {
 			const [sub, ...subRest] = rest;
-			const { positionals } = parseFlags(subRest);
+			const { flags, positionals } = parseFlags(subRest);
+			if (wantsHelp(flags, [sub ?? ""])) {
+				print(renderHelp(["provider", sub ?? ""].filter(Boolean) as string[]));
+				return;
+			}
 			switch (sub) {
 				case "list":
 					handle(providerList(env));
@@ -319,6 +716,10 @@ export async function main(argv: string[]): Promise<void> {
 		case "cache": {
 			const [sub, ...subRest] = rest;
 			const { flags } = parseFlags(subRest);
+			if (wantsHelp(flags, [sub ?? ""])) {
+				print(renderHelp(["cache", sub ?? ""].filter(Boolean) as string[]));
+				return;
+			}
 			switch (sub) {
 				case "status":
 					handle(await cacheStatus());
@@ -337,7 +738,11 @@ export async function main(argv: string[]): Promise<void> {
 
 		case "hook": {
 			const [sub, ...subRest] = rest;
-			const { positionals } = parseFlags(subRest);
+			const { flags, positionals } = parseFlags(subRest);
+			if (wantsHelp(flags, [sub ?? ""])) {
+				print(renderHelp(["hook", sub ?? ""].filter(Boolean) as string[]));
+				return;
+			}
 			const agent = positionals[0];
 			handle(await runHook(sub ?? "", agent ?? ""));
 			return;
@@ -345,7 +750,11 @@ export async function main(argv: string[]): Promise<void> {
 
 		case "integration": {
 			const [sub, ...subRest] = rest;
-			const { positionals } = parseFlags(subRest);
+			const { flags, positionals } = parseFlags(subRest);
+			if (wantsHelp(flags, [sub ?? ""])) {
+				print(renderHelp(["integration", sub ?? ""].filter(Boolean) as string[]));
+				return;
+			}
 			const agent = positionals[0];
 			handle(await runIntegration(sub ?? "", agent ?? ""));
 			return;

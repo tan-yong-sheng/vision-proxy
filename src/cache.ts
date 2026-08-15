@@ -72,9 +72,20 @@ async function persist(): Promise<void> {
 	const target = _path ?? cachePath();
 	const out: Record<string, CacheRecord> = {};
 	for (const [k, v] of cache().entries()) out[k] = v;
+	const dir = path.dirname(target);
 	try {
-		await fs.mkdir(path.dirname(target), { recursive: true });
-		await fs.writeFile(target, JSON.stringify(out), "utf8");
+		await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+	} catch {
+		// Ignore: directory may already exist or be inaccessible.
+	}
+	try {
+		await fs.chmod(dir, 0o700);
+	} catch {
+		// Ignore: may lack permission to change existing directory mode.
+	}
+	try {
+		await fs.writeFile(target, JSON.stringify(out), { encoding: "utf8", mode: 0o600 });
+		await fs.chmod(target, 0o600);
 	} catch {
 		// Best effort.
 	}
@@ -91,6 +102,7 @@ export async function cacheGet(key: string): Promise<string | undefined> {
 		_hits++;
 		// Refresh createdAt on access so prune keeps hot entries.
 		cache().set(key, { ...hit, createdAt: Date.now() });
+		await persist();
 		return hit.value;
 	}
 	_misses++;

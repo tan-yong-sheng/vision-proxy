@@ -5,7 +5,7 @@
  */
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -48,6 +48,35 @@ describe("cacheGet / cacheSet", () => {
 		const parsed = JSON.parse(raw);
 		assert.equal(parsed["k1"].value, "v1");
 		assert.equal(typeof parsed["k1"].createdAt, "number");
+	});
+
+	it("refreshes createdAt on a hit and persists the update", async () => {
+		await cacheSet("k1", "v1");
+		const first = JSON.parse(await readFile(cacheFile, "utf8"));
+		const originalCreatedAt = first.k1.createdAt;
+
+		// Simulate an older access timestamp and reload from disk.
+		first.k1.createdAt = originalCreatedAt - 1000 * 60 * 60 * 24;
+		await writeFile(cacheFile, JSON.stringify(first), "utf8");
+		configureCache(10, cacheFile);
+		resetCacheState(false);
+
+		const hit = await cacheGet("k1");
+		assert.equal(hit, "v1");
+		const second = JSON.parse(await readFile(cacheFile, "utf8"));
+		assert.ok(
+			second.k1.createdAt > originalCreatedAt,
+			"createdAt must be refreshed and persisted on a cache hit",
+		);
+	});
+
+	it("writes the cache file and directory with owner-only permissions", async () => {
+		await cacheSet("k1", "v1");
+		if (process.platform === "win32") return;
+		const fileStat = await stat(cacheFile);
+		const dirStat = await stat(tmp);
+		assert.equal(fileStat.mode & 0o777, 0o600, "cache file must be owner-only");
+		assert.equal(dirStat.mode & 0o777, 0o700, "cache directory must be owner-only");
 	});
 
 	it("reloads from file on a fresh cache instance", async () => {

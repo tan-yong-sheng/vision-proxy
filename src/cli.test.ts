@@ -111,32 +111,21 @@ describe("cli help", () => {
 		assert.match(prune, /--older <days>/);
 	});
 
-	it("prints help for hook subcommands", async () => {
-		const parent = await run(["hook", "--help"]);
-		assert.match(parent, /vp hook <subcommand> <agent>/);
-
-		const install = await run(["hook", "install", "--help"]);
-		assert.match(install, /UserPromptSubmit shim for an agent/);
-
-		const show = await run(["hook", "show", "--help"]);
-		assert.match(show, /Print the shim path/);
-
-		const list = await run(["hook", "list", "--help"]);
-		assert.match(list, /installed shims/);
-
-		const uninstall = await run(["hook", "uninstall", "--help"]);
-		assert.match(uninstall, /Remove the shim/);
-	});
-
 	it("prints help for integration subcommands", async () => {
 		const parent = await run(["integration", "--help"]);
-		assert.match(parent, /vp integration <subcommand> <agent>/);
+		assert.match(parent, /vp integration <subcommand> \[agent\]/);
 
 		const install = await run(["integration", "install", "--help"]);
 		assert.match(install, /Install the vision-proxy integration/);
 
 		const show = await run(["integration", "show", "--help"]);
 		assert.match(show, /generated extension source/);
+
+		const list = await run(["integration", "list", "--help"]);
+		assert.match(list, /installed agents/);
+
+		const status = await run(["integration", "status", "--help"]);
+		assert.match(status, /version markers/);
 
 		const uninstall = await run(["integration", "uninstall", "--help"]);
 		assert.match(uninstall, /Remove the vision-proxy integration/);

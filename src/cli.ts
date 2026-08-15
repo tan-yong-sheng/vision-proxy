@@ -407,22 +407,28 @@ Options:
 
 Entries are removed by content age, not last access.`,
 
-	"integration": `vp integration <subcommand> <agent>
+	"integration": `vp integration <subcommand> [agent]
 
-Install, inspect, or remove the vision-proxy integration for an agent.
+Install, inspect, list, or remove the vision-proxy integration for an agent.
 
 Usage:
   vp integration install <agent>    install the integration
   vp integration show <agent>       print the generated extension source
+  vp integration list               show which agents have vision-proxy installed
+  vp integration status             show installed version markers per agent
   vp integration uninstall <agent>  remove the integration
 
 Subcommands:
   install <agent>    write the integration into the agent's extensions dir
   show <agent>       print the generated extension source for review
+  list               show installed agents
+  status             show installed version markers per agent
   uninstall <agent>  remove the generated extension file
 
 Agents:
   pi                 Pi coding agent (global extensions directory)
+  claude-code        Claude Code agent (UserPromptSubmit hook)
+  codex              Codex agent (UserPromptSubmit hook)
 
 Options:
   -h, --help         show this help`,
@@ -456,6 +462,29 @@ Usage:
 
 Arguments:
   <agent>            supported agent id (currently: pi)`,
+
+	"integration list": `vp integration list
+
+Show which agents have vision-proxy installed.
+
+Usage:
+  vp integration list
+
+Output:
+  one line per supported agent, prefixed with ✓ when installed
+  (i.e. the installed agents list)`,
+
+	"integration status": `vp integration status
+
+Show installed version markers per agent.
+
+Usage:
+  vp integration status
+
+Output:
+  one line per supported agent with its install state and the version
+  marker embedded in the installed artifact. Outdated integrations are
+  flagged with a refresh hint.`,
 
 	"hook": `vp hook <subcommand> <agent>
 

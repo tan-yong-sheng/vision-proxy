@@ -198,6 +198,21 @@ describe("resolveConfig", () => {
 		const cfg = resolveConfig({ VP_MAX_IMAGES_PER_CALL: "not-a-number" } as NodeJS.ProcessEnv);
 		assert.equal(cfg.maxImagesPerCall, DEFAULT_CONFIG.maxImagesPerCall);
 	});
+
+	it("exposes cacheMaxAgeDays default of 30", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
+		assert.equal(cfg.cacheMaxAgeDays, 30);
+	});
+
+	it("applies VP_CACHE_MAX_AGE_DAYS env override", () => {
+		const cfg = resolveConfig({ VP_CACHE_MAX_AGE_DAYS: "7" } as NodeJS.ProcessEnv);
+		assert.equal(cfg.cacheMaxAgeDays, 7);
+	});
+
+	it("falls back to default for out-of-range VP_CACHE_MAX_AGE_DAYS", () => {
+		const cfg = resolveConfig({ VP_CACHE_MAX_AGE_DAYS: "99999" } as NodeJS.ProcessEnv);
+		assert.equal(cfg.cacheMaxAgeDays, DEFAULT_CONFIG.cacheMaxAgeDays);
+	});
 });
 
 describe("fence builders", () => {

@@ -28,11 +28,11 @@ Implement `vp integration install pi` (plus `show` and `uninstall`) so Pi users 
 
 ## Tasks
 
-- [ ] Add `src/commands/integration.ts` with `install`, `show`, and `uninstall` subcommands for `pi`.
-- [ ] Embed or generate a Pi extension TypeScript template that registers an `analyze_image` tool.
-- [ ] Wire `vp integration <install|show|uninstall> <agent>` into `src/cli.ts`.
-- [ ] Write the generated extension to `~/.pi/agent/extensions/vision-proxy.ts` on install.
-- [ ] Add unit tests covering install/show/uninstall paths (using temp dirs).
+- [x] Add `src/commands/integration.ts` with `install`, `show`, and `uninstall` subcommands for `pi`.
+- [x] Embed or generate a Pi extension TypeScript template that registers an `analyze_image` tool.
+- [x] Wire `vp integration <install|show|uninstall> <agent>` into `src/cli.ts`.
+- [x] Write the generated extension to `~/.pi/agent/extensions/vision-proxy.ts` on install.
+- [x] Add unit tests covering install/show/uninstall paths (using temp dirs).
 
 ## Verification
 

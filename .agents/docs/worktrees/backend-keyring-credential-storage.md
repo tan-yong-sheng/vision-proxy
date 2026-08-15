@@ -28,11 +28,11 @@ Add optional OS keyring-backed API key storage with `vp provider store-key/delet
 
 ## Tasks
 
-- [ ] Add `@napi-rs/keyring` as an optional dependency in `package.json`.
-- [ ] Create `src/keyring.ts` with `storeKey`, `loadKey`, `deleteKey`, and `isAvailable` helpers.
-- [ ] Add `vp provider store-key <provider>` (read from stdin/prompt), `delete-key <provider>`, and `list-keys`.
-- [ ] Integrate keyring lookup into `resolveModel` after explicit flag and env var.
-- [ ] Add tests with mocked keyring and fallback paths.
+- [x] Add `@napi-rs/keyring` as an optional dependency in `package.json`.
+- [x] Create `src/keyring.ts` with `storeProviderKey`, `getStoredProviderKey`, `deleteProviderKey`, and `keyringAvailable` helpers.
+- [x] Add `vp provider store-key <provider>` (read from stdin/prompt), `delete-key <provider>`, and `list-keys`.
+- [x] Integrate keyring lookup into `resolveModel` after explicit flag and env var.
+- [x] Add tests with mocked keyring and fallback paths.
 
 ## Verification
 

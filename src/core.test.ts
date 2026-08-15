@@ -56,7 +56,7 @@ describe("escapeAttr", () => {
 
 	it("replaces null bytes with the replacement character", () => {
 		// U+FFFD replacement character.
-		const input = "a" + String.fromCharCode(0) + "b";
+		const input = `a${String.fromCharCode(0)}b`;
 		assert.equal(escapeAttr(input), "a�b");
 	});
 });

@@ -17,7 +17,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -45,7 +45,7 @@ function writeFakeVp(dir) {
 	return fake;
 }
 
-function runShim(dir, eventJson, vpBin) {
+function runShim(_dir, eventJson, vpBin) {
 	const env = { ...process.env, VP_BIN: vpBin, VP_HOOK_TIMEOUT_MS: "10000" };
 	return spawnSync("node", [shimPath], {
 		input: eventJson,

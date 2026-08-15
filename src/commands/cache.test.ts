@@ -38,7 +38,7 @@ afterEach(async () => {
 async function writeUserConfig(config: object): Promise<void> {
 	const dir = path.join(home, ".vision-proxy");
 	await mkdir(dir, { recursive: true });
-	await writeFile(path.join(dir, "config.json"), JSON.stringify(config, null, 2) + "\n", "utf8");
+	await writeFile(path.join(dir, "config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
 async function writeCacheEntries(

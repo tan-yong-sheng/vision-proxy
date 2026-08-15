@@ -168,7 +168,7 @@ test("install claude-code ships shared.mjs next to the shim and the import resol
 	const dir = installDir(home);
 	const r = await runIntegration("install", "claude-code", dir);
 	assert.equal(r.ok, true);
-	const shim = join(dir, "claude-code-vision-proxy-user-prompt-submit.mjs");
+	const _shim = join(dir, "claude-code-vision-proxy-user-prompt-submit.mjs");
 	const shared = join(dir, "shared.mjs");
 	assert.equal(existsSync(shared), true, "shared.mjs must land next to the installed shim");
 	// Regression: the installed shim does `import "./shared.mjs"`, so the import

@@ -39,7 +39,7 @@ export async function configInit(cwd: string): Promise<ConfigResult> {
 		modelId: DEFAULT_CONFIG.modelId,
 		mode: DEFAULT_CONFIG.mode,
 	};
-	await fs.writeFile(target, JSON.stringify(initial, null, 2) + "\n", "utf8");
+	await fs.writeFile(target, `${JSON.stringify(initial, null, 2)}\n`, "utf8");
 	return { ok: true, message: `wrote ${target}`, code: 0 };
 }
 
@@ -55,7 +55,7 @@ export async function configGet(opts: {
 	});
 	return {
 		ok: true,
-		message: `resolved from: ${resolvedFrom}\n` + JSON.stringify(config, null, 2),
+		message: `resolved from: ${resolvedFrom}\n${JSON.stringify(config, null, 2)}`,
 		code: 0,
 	};
 }
@@ -73,7 +73,7 @@ export async function configSet(key: string, value: string, cwd: string): Promis
 
 	const coerced = coerceValue(key, value);
 	(existing as Record<string, unknown>)[key] = coerced;
-	await fs.writeFile(target, JSON.stringify(existing, null, 2) + "\n", "utf8");
+	await fs.writeFile(target, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
 	return { ok: true, message: `set ${key} = ${JSON.stringify(coerced)} in ${target}`, code: 0 };
 }
 

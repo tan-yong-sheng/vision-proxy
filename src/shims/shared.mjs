@@ -90,12 +90,12 @@ export function runVP(images, extraArgs = []) {
 /** Write the UserPromptSubmit hook output JSON that Claude Code and Codex both accept. */
 export function emit(description) {
 	process.stdout.write(
-		JSON.stringify({
+		`${JSON.stringify({
 			hookSpecificOutput: {
 				hookEventName: "UserPromptSubmit",
 				additionalContext: description,
 			},
-		}) + "\n",
+		})}\n`,
 	);
 }
 

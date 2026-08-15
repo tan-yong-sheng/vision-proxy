@@ -25,7 +25,7 @@ export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResu
 	for (const p of listProviders()) {
 		const hasKey = Boolean(env[p.apiKeyEnv]) || Boolean(getStoredProviderKey(p.id));
 		lines.push(
-			`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : "missing (" + p.apiKeyEnv + ")"}`,
+			`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : `missing (${p.apiKeyEnv})`}`,
 		);
 	}
 	return { ok: true, message: lines.join("\n"), code: 0 };

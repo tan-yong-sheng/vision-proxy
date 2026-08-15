@@ -423,7 +423,7 @@ export async function writePersistentFile(
 	try {
 		const path = getPersistentConfigPath(agentDir);
 		await mkdir(dirname(path), { recursive: true });
-		await writeFile(path, JSON.stringify(config, null, 2) + "\n", "utf8");
+		await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 	} catch {
 		// Best effort — don't break the CLI if disk write fails
 	}
@@ -1079,7 +1079,7 @@ export function buildConversationContext(messages: readonly MessageLike[]): stri
 
 function truncateContext(result: string): string {
 	if (result.length <= CONTEXT_MAX_CHARS) return result;
-	return "…" + result.slice(-CONTEXT_MAX_CHARS);
+	return `…${result.slice(-CONTEXT_MAX_CHARS)}`;
 }
 
 export function modelLabel(config: { provider: string; modelId: string }): string {
@@ -1444,7 +1444,7 @@ export function buildToolCacheKey(
 	questionHash: string,
 	modelId: string,
 ): string {
-	return `${sortedHashes.join("+")}${cropSig ? "#crop:" + cropSig : ""}?q=${questionHash}&m=${modelId}`;
+	return `${sortedHashes.join("+")}${cropSig ? `#crop:${cropSig}` : ""}?q=${questionHash}&m=${modelId}`;
 }
 
 // ── Fence builders ────────────────────────────────────────────────────────

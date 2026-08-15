@@ -248,11 +248,10 @@ const codex: AgentSpec = {
 			kept.push(`[[UserPromptSubmit]]${blocks[i]!}`);
 		}
 		return {
-			raw:
-				kept
-					.join("")
-					.replace(/\n{3,}/g, "\n\n")
-					.trimEnd() + "\n",
+			raw: `${kept
+				.join("")
+				.replace(/\n{3,}/g, "\n\n")
+				.trimEnd()}\n`,
 			removed,
 		};
 	},

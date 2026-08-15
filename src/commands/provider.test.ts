@@ -23,7 +23,7 @@ import {
 } from "./provider.ts";
 
 let home: string;
-let env: NodeJS.ProcessEnv;
+let _env: NodeJS.ProcessEnv;
 let savedBackend: KeyringBackend | null | undefined;
 
 function fakeBackend(): KeyringBackend {
@@ -38,7 +38,7 @@ function fakeBackend(): KeyringBackend {
 
 beforeEach(async () => {
 	home = await mkdtemp(path.join(os.tmpdir(), "vp-home-"));
-	env = { ...process.env, HOME: home, USERPROFILE: home };
+	_env = { ...process.env, HOME: home, USERPROFILE: home };
 	savedBackend = undefined;
 	setKeyringBackend(fakeBackend());
 });

@@ -523,7 +523,7 @@ Arguments:
 };
 
 function print(msg: string): void {
-	process.stdout.write(msg + "\n");
+	process.stdout.write(`${msg}\n`);
 }
 
 /**
@@ -541,7 +541,7 @@ function renderHelp(path: string[]): string {
 }
 
 function fail(msg: string, code = 1): void {
-	process.stderr.write(msg + "\n");
+	process.stderr.write(`${msg}\n`);
 	process.exitCode = code;
 }
 

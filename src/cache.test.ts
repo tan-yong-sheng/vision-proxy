@@ -46,8 +46,8 @@ describe("cacheGet / cacheSet", () => {
 		await cacheSet("k1", "v1");
 		const raw = await readFile(cacheFile, "utf8");
 		const parsed = JSON.parse(raw);
-		assert.equal(parsed["k1"].value, "v1");
-		assert.equal(typeof parsed["k1"].createdAt, "number");
+		assert.equal(parsed.k1.value, "v1");
+		assert.equal(typeof parsed.k1.createdAt, "number");
 	});
 
 	it("refreshes createdAt on a hit and persists the update", async () => {

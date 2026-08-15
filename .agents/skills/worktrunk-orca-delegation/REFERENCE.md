@@ -302,24 +302,14 @@ The poll above is event-driven and never wakes without a message, so Mode A and 
 Add a time-driven waker that fires on a fixed cadence and runs every rule under `scripts/rules/`.
 
 ```bash
-# scripts/waker.sh - time-driven waker + rule iterator
-WAKER_INTERVAL_MS=600000   # 10 minutes
-RUN_ID=run_367fba168394
+# Launch waker background supervisor
+bg_run \
+  --name "waker for <run-id>" \
+  --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id>" \
+  --isAgent false
 
-while true; do
-  orca orchestration check --wait \
-    --types worker_done,escalation,question \
-    --timeout-ms $WAKER_INTERVAL_MS --json
-
-  # On every tick, walk every rule under scripts/rules/.
-  # Rules exit 0 and emit one JSON line per recovery action, or exit 0 silent.
-  for rule in "$(dirname "$0")"/rules/*.sh; do
-    bash "$rule" "$RUN_ID" 2>/dev/null \
-      | while IFS= read -r ACTION_JSON; do
-          apply_recovery "$ACTION_JSON"   # uses section 5.6 decision table
-        done
-  done
-done
+# Or run a single tick manually to health-check/unstick workers immediately
+.agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id> --single-tick
 ```
 
 Launch the waker as a `bg_run` background shell process with `isAgent: false` and `notifyOnCompletion: true` so its completion resumes or notifies this agent.

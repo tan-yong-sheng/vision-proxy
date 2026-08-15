@@ -4,7 +4,8 @@ title: Keyring credential storage for vision-proxy
 description: Research optional OS keyring-backed storage for vision-proxy provider API keys.
 area: backend
 tags: []
-status: active
+status: complete
+superseded_by: ../plans/backend-vision-proxy-post-migration-feature-set.md
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-09-13"

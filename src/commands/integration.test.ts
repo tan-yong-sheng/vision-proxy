@@ -167,6 +167,25 @@ test("install codex writes the shim and appends a [[UserPromptSubmit]] block", a
 	reset();
 });
 
+test("install claude-code ships shared.mjs next to the shim and the import resolves", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	const r = await runIntegration("install", "claude-code", dir);
+	assert.equal(r.ok, true);
+	const shim = join(dir, "claude-code-vision-proxy-user-prompt-submit.mjs");
+	const shared = join(dir, "shared.mjs");
+	assert.equal(existsSync(shared), true, "shared.mjs must land next to the installed shim");
+	// Regression: the installed shim does `import "./shared.mjs"`, so the import
+	// must resolve. If shared.mjs were missing this throws ERR_MODULE_NOT_FOUND.
+	await import(shared);
+	// The install-time placeholder must have been rewritten to an absolute path
+	// (the real `vp` binary), not left as the literal token.
+	const sharedText = readFileSync(shared, "utf8");
+	assert.equal(sharedText.includes("__VP_PATH__PLACEHOLDER__"), false, "placeholder must be rewritten to a real path");
+	assert.match(sharedText, /const VP_BIN_PATH = "\/.+/, "placeholder rewritten to an absolute path");
+	reset();
+});
+
 test("install is idempotent (no duplicate blocks) for claude-code", async () => {
 	const home = isolate();
 	const dir = installDir(home);

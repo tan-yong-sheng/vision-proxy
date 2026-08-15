@@ -3,7 +3,7 @@ type: plan
 title: Vision proxy post-migration feature set
 description: Implement lazy cache pruning, Pi extension installer, and optional keyring credential storage after the CLI migration.
 area: backend
-tags: []
+tags: [post-migration, cache, pi, keyring, parallel-worktrees]
 status: active
 created: "2026-08-14"
 updated: "2026-08-14"
@@ -29,9 +29,9 @@ Each feature is independent enough to be implemented in its own worktree, but al
 - The Pi extension was intentionally removed; only hook shims for Claude Code and Codex remain.
 - API keys are resolved only from environment variables or the `--api-key` flag.
 - Research docs capture the options and recommendations for each feature:
-  - [Lazy cache pruning](../research/backend-lazy-cache-pruning-for-vision-proxy.md)
-  - [Pi extension installer](../research/backend-pi-extension-installer-for-vision-proxy.md)
-  - [Keyring credential storage](../research/backend-keyring-credential-storage-for-vision-proxy.md)
+  - [Lazy cache pruning](../archive/research-backend-lazy-cache-pruning-for-vision-proxy.md)
+  - [Pi extension installer](../archive/research-backend-pi-extension-installer-for-vision-proxy.md)
+  - [Keyring credential storage](../archive/research-backend-keyring-credential-storage-for-vision-proxy.md)
 
 ## Target state
 
@@ -45,6 +45,25 @@ Each feature is independent enough to be implemented in its own worktree, but al
 2. **Pi integration**: generate a single TypeScript extension file into `~/.pi/agent/extensions/vision-proxy.ts` that shells out to `vp`. Start with a global install only; project-local can be added later.
 3. **Keyring storage**: use `@napi-rs/keyring` as an optional dependency. Store keys under service `vision-proxy` and account equal to the provider id. Fall back to env/missing-key if the keyring is unavailable.
 
+## Tools / MCP / Skills
+
+- `worktrunk-orca-delegation` — dispatch parallel worktrees to Claude agents and poll for completion.
+- `review-gate` — run `/review-gate` on a disposable merge-preview worktree before merging into `configurable-analyze-image-limit`.
+- `agents-docs` — keep research, plan, and worktree flight logs in sync.
+- Native tools: `wt` (worktrunk), `git`, `pnpm`, `fallow`, `no-mistakes`.
+
+## Worktree Strategy
+
+Implement the three features in isolated worktrees off `configurable-analyze-image-limit`. Each worktree owns one deliverable and can be reviewed, tested, and merged independently.
+
+| worktree | branch | base | scope | verification |
+|---|---|---|---|---|
+| `vp-lazy-cache-prune` | `vp-lazy-cache-prune` | `configurable-analyze-image-limit` | Add `cacheMaxAgeDays` config/env and lazy pruning on `cacheGet`. | `pnpm install && pnpm run build && pnpm test && pnpm run typecheck && fallow audit` |
+| `vp-pi-extension` | `vp-pi-extension` | `configurable-analyze-image-limit` | Add `vp integration install pi`, `show`, `uninstall`; generate Pi extension file. | `pnpm install && pnpm run build && pnpm test && pnpm run typecheck && fallow audit` |
+| `vp-keyring-storage` | `vp-keyring-storage` | `configurable-analyze-image-limit` | Add `@napi-rs/keyring` support and `vp provider store-key/delete-key/list-keys`. | `pnpm install && pnpm run build && pnpm test && pnpm run typecheck && fallow audit` |
+
+After all three are complete, merge them into a disposable `int-merge` worktree and run `/review-gate`.
+
 ## Deliverables
 
 | # | Deliverable | File changes |
@@ -55,12 +74,9 @@ Each feature is independent enough to be implemented in its own worktree, but al
 
 ## Build steps
 
-1. Create worktrees for each feature off `configurable-analyze-image-limit`:
-   - `vp-lazy-cache-prune`
-   - `vp-pi-extension`
-   - `vp-keyring-storage`
-2. Implement each feature with tests and update the relevant research doc to `status: complete` when decisions are finalized.
-3. Run per-worktree verification: `pnpm install`, `pnpm run build`, `pnpm test`, `pnpm run typecheck`, `fallow audit`.
+1. Run `scaffold-worktrees` on this plan to generate flight logs.
+2. Dispatch each worktree via `/worktrunk-orca-delegation` with its flight log and research doc.
+3. Poll workers to completion and verify each branch independently.
 4. Merge each worktree into `configurable-analyze-image-limit` using a disposable `int-merge` worktree.
 5. Run `/review-gate` on the combined branch before any push/PR.
 

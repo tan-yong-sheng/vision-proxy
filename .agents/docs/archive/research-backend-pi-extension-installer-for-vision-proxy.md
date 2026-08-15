@@ -1,10 +1,11 @@
 ---
 type: research
 title: Pi extension installer for vision-proxy
-description: Research how to add a `vp integration install pi` command that wires the CLI into Pi as an extension.
+description: "Research how to add a `vp integration install pi` command that wires the CLI into Pi as an extension."
 area: backend
 tags: []
-status: active
+status: complete
+superseded_by: ../plans/backend-vision-proxy-post-migration-feature-set.md
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-09-13"

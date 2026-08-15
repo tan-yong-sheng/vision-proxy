@@ -21,3 +21,10 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-14: archive worktrees/backend-vision-proxy-hook-shims.md -> archive/backend-vision-proxy-hook-shims.md (merged)
 - 2026-08-14: archive worktrees/backend-vision-proxy-cli-core.md -> archive/backend-vision-proxy-cli-core.md (merged)
 - 2026-08-14: new plan plans/backend-vision-proxy-post-migration-feature-set.md
+- 2026-08-15: scaffold-worktrees plans/backend-vision-proxy-post-migration-feature-set.md -> worktrees/backend-lazy-cache-pruning.md
+- 2026-08-15: scaffold-worktrees plans/backend-vision-proxy-post-migration-feature-set.md -> worktrees/backend-pi-extension-installer.md
+- 2026-08-15: scaffold-worktrees plans/backend-vision-proxy-post-migration-feature-set.md -> worktrees/backend-keyring-credential-storage.md
+- 2026-08-15: archive research/backend-lazy-cache-pruning-for-vision-proxy.md -> archive/research-backend-lazy-cache-pruning-for-vision-proxy.md (complete)
+- 2026-08-15: archive research/backend-pi-extension-installer-for-vision-proxy.md -> archive/research-backend-pi-extension-installer-for-vision-proxy.md (complete)
+- 2026-08-15: archive research/backend-keyring-credential-storage-for-vision-proxy.md -> archive/research-backend-keyring-credential-storage-for-vision-proxy.md (complete)
+- 2026-08-15: new coverage qa/backend-vision-proxy-post-migration-merge-review.md

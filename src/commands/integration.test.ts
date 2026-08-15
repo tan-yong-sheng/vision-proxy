@@ -218,6 +218,7 @@ test("uninstall pi removes the file and cleans up an empty extensions directory"
 	assert.equal(existsSync(target), true);
 	const r = await runIntegration("uninstall", "pi", dir);
 	assert.equal(r.ok, true);
+	assert.match(r.message, /uninstalled pi integration/);
 	assert.equal(existsSync(target), false);
 	assert.equal(existsSync(dir), false);
 	reset();

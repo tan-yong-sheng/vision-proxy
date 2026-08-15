@@ -4,7 +4,7 @@ title: Migrate vision proxy to Vercel AI SDK CLI driven by agent UserPromptSubmi
 description: Deprecate the Pi extension; rewrite the vision core on the Vercel AI SDK and ship it as a portable CLI driven by per-agent UserPromptSubmit hooks.
 area: backend
 tags: [migration, vercel-ai-sdk, cli, hooks, vision]
-status: active
+status: complete
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-10-13"

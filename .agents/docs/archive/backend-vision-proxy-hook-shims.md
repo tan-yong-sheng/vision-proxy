@@ -4,7 +4,7 @@ title: Vision proxy hook shims
 description: Implement per-agent hook install tooling and Claude Code + Codex UserPromptSubmit shims for the vision proxy CLI.
 area: backend
 tags: [worktree, hooks, claude-code, codex, vision]
-status: active
+status: merged
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-08-28"

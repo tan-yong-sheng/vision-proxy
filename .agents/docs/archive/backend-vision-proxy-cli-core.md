@@ -1,10 +1,10 @@
 ---
 type: worktree
 title: Vision proxy CLI core
-description: Scaffold the vision-proxy CLI, port Pi-free core, and implement analyze/config/provider/cache commands on the Vercel AI SDK.
+description: "Scaffold the vision-proxy CLI, port Pi-free core, and implement analyze/config/provider/cache commands on the Vercel AI SDK."
 area: backend
 tags: [worktree, cli, vercel-ai-sdk, vision]
-status: active
+status: merged
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-08-28"

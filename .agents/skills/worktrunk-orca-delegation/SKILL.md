@@ -20,7 +20,7 @@ Coordinate multiple agents across [`worktrunk`](https://github.com/max-sixty/wor
 5. `wt switch --create <branch> --base <base> --no-cd`
 6. `orca orchestration worker-start --worktree branch:<branch> --agent claude --task <task-id> --run <run-id> --json`
 7. Verify submission: `orca terminal wait --for tui-idle`, `orca terminal show`; nudge with `terminal send --text "" --enter` if stuck.
-8. Poll: `orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json`
+8. Supervise / Poll: launch background waker (`RUN_ID=<run-id> bg_run --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id>" --name "waker" --isAgent false`) or run `orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json`.
 9. Verify commits: `git rev-list --count <base>..<branch>` > 0.
 10. Validation gate: classify each worktree risk; route independent branches to per-worktree review and dependent/shared-contract branches to a single merge-preview review. **Do not release or merge until the branch is review-clear.**
 11. Release: `orca orchestration worker-release --dispatch <id> --json`
@@ -93,11 +93,23 @@ If `orca status` is not `ready` or the headless model test fails, stop and fix t
 
 ### 6. Poll and recover
 
+Run the bundled waker script as a background process to monitor health and automatically unstick workers across ticks:
+
+```bash
+bg_run \
+  --name "waker for <run-id>" \
+  --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id>" \
+  --isAgent false
+```
+
+Or perform a one-off foreground poll for incoming events:
+
 ```bash
 orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json
 ```
 
-Health-check stalled workers every ~30 min with `worker-show` and terminal preview. See [REFERENCE.md](REFERENCE.md).
+Health-check stalled workers manually or via `waker.sh --single-tick` if needed.
+See [REFERENCE.md](REFERENCE.md).
 
 ### 7. Commit gate
 

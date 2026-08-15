@@ -37,9 +37,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Allow lefthook build script
-        run: pnpm config set --location project enable-pre-post-scripts true && pnpm approve-builds --yes lefthook || true
-
       - name: Install hooks (lefthook)
         run: pnpm lefthook install
 

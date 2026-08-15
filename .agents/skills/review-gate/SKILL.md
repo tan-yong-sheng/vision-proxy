@@ -274,14 +274,14 @@ When none of A-F applies, skip Step 10. A clean single-branch review is enough.
 ### Fixes found during Step 10
 
 - **Never patch or ship the disposable preview worktree.**
-  The `qa/<slug>` / `int-merge` worktree is disposable; fixes committed directly there are lost when the worktree is destroyed, and the preview branch must NEVER be pushed to `origin`.
+  The `qa/<batch-slug>` worktree is disposable; fixes committed directly there are lost when the worktree is destroyed, and the preview branch must NEVER be pushed to `origin`.
 - **Fix in the owning source PR branch.**
   Determine ownership with `git log <base>..<pr-branch> -- <file>`.
   If both PRs touch the file, fix in the branch that merges last so the final `main` state is correct.
 - **Backport any QA-only test/config changes.**
   If you had to edit `jest.config.js`, `package.json`, or a scenario file in the QA worktree to run verification, apply that same change to the owning source branch so CI can reproduce it.
 - **Push the fix and re-run Step 10 from scratch.**
-  Remove the old QA worktree, create a fresh `qa/<slug>` worktree from the dynamic base, merge the updated PRs again, and verify.
+  Remove the old QA worktree, create a fresh `qa/<batch-slug>` worktree from the dynamic base, merge the updated PRs again, and verify.
   Do not re-use the old QA worktree for verification.
 - **Update the QA dossier.**
   Record the new PR commit hashes, the fresh merge commit, and the updated verdict.
@@ -291,7 +291,7 @@ When none of A-F applies, skip Step 10. A clean single-branch review is enough.
 
 ### When no-mistakes auto-fixes the disposable preview
 
-When `--yes` causes `no-mistakes axi run` to auto-fix linter, typecheck, or code findings, it commits those fixes directly onto the local `qa/<slug>` / `int-merge` head.
+When `--yes` causes `no-mistakes axi run` to auto-fix linter, typecheck, or code findings, it commits those fixes directly onto the local `qa/<batch-slug>` head.
 Because the preview branch is strictly disposable and must never be pushed to origin, follow this 6-step recovery loop:
 
 1. **Read the auto-fix diff:**
@@ -299,13 +299,29 @@ Because the preview branch is strictly disposable and must never be pushed to or
 2. **Trace the owning feature branch:**
    Run `git log <base>..<feature-branch> -- <file>` for each modified file to locate the feature branch that introduced the issue.
 3. **Re-apply the fixes in the owning feature branch:**
-   Switch to the owning feature branch (or worktree) and cleanly apply or cherry-pick the required changes.
+   Extract the fix directly from the QA preview into the owning feature worktree:
+   ```bash
+   # Option A: Direct file checkout from QA preview
+   git -C "$FEAT_PATH" checkout "qa/<batch-slug>" -- <file>
+
+   # Option B: Scoped patch apply
+   git -C "$QA_PATH" diff HEAD~1 HEAD -- <file> | git -C "$FEAT_PATH" apply -
+   ```
 4. **Commit and verify on the feature branch:**
-   Commit the fixes on the feature branch with a descriptive message and ensure local tests pass.
+   Commit the fixes on the feature branch with a descriptive message and ensure local tests pass:
+   ```bash
+   git -C "$FEAT_PATH" commit -am "fix(<scope>): backport auto-fix from QA preview"
+   ```
 5. **Destroy the disposable preview:**
-   Run `wt remove qa/<slug> --force` to delete the auto-fixed preview branch.
+   Run `wt remove qa/<batch-slug> --force` to delete the auto-fixed preview branch.
 6. **Re-create and re-merge the stack:**
-   Re-create `qa/<slug>` from the base branch, re-merge all feature branches in declared stack order, and re-run verification.
+   Re-create `qa/<batch-slug>` from the base branch, re-merge all feature branches in declared stack order, and re-run verification:
+   ```bash
+   wt switch --create "qa/<batch-slug>" --base <base>
+   # Merge layers in declared stack order
+   git merge --no-ff <stack-01>
+   git merge --no-ff <stack-02>
+   ```
 
 ### Manual stacked-PR workflow
 
@@ -317,7 +333,7 @@ The local merge-preview workflow mirrors GitHub's stacked pull requests feature 
   Always merge the bottom layer of the stack first (`stack-01`).
   After `stack-01` lands into the base branch, rebase or retarget `stack-02` onto the updated base before merging.
 - **Preview Integration:**
-  The `qa/<slug>` worktree merges the entire stack in bottom-to-top order to validate combined contract stability before individual feature branches are landed.
+  The `qa/<batch-slug>` worktree merges the entire stack in bottom-to-top order to validate combined contract stability before individual feature branches are landed.
 
 ### Conflict resolution discipline
 

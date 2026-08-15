@@ -25,6 +25,10 @@ The default provider is `anthropic/claude-sonnet-4-5`.
 
 Use `vp --help` for the full command reference.
 
+## Setup
+
+See [`docs/SETUP.md`](docs/SETUP.md) — covers provider setup, model selection, keyring storage, and troubleshooting.
+
 ## Configuration
 
 Configuration is layered in this order:

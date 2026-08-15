@@ -1,10 +1,18 @@
 ---
 type: research
 title: integration status command
-description: Design a `vp integration status` command that reports whether vision-proxy integrations and hooks are installed, current, or outdated, similar to `herdr integration status`.
+description: "Design a `vp integration status` command that reports whether vision-proxy integrations and hooks are installed, current, or outdated, similar to `herdr integration status`."
 area: backend
-tags: [integration, hook, status, version, herdr, pi, claude-code, codex]
-status: active
+tags:
+  - integration
+  - hook
+  - status
+  - version
+  - herdr
+  - pi
+  - claude-code
+  - codex
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-09-14"

@@ -1,10 +1,10 @@
 ---
 type: research
 title: Pi hook versus integration support
-description: Determine whether `vp hook install pi` is feasible or whether Pi support belongs under `vp integration install pi`, compared to herdr.
+description: "Determine whether `vp hook install pi` is feasible or whether Pi support belongs under `vp integration install pi`, compared to herdr."
 area: backend
 tags: [pi, hook, integration, extension]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-09-14"

@@ -1,10 +1,10 @@
 ---
 type: plan
 title: Add --help output for every CLI subcommand
-description: Currently vp help and vp --help print the full help text, but subcommands like vp provider, vp cache, and vp config do not respond to --help. They fail with unknown subcommand.
+description: "Currently vp help and vp --help print the full help text, but subcommands like vp provider, vp cache, and vp config do not respond to --help. They fail with unknown subcommand."
 area: fullstack
 tags: [CLI, help, UX]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

@@ -72,3 +72,15 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: new coverage qa/backend-vp-cli-cleanup-merge-preview.md
 - 2026-08-15: archive worktrees/backend-vp-cli-simplify.md -> archive/worktree-backend-vp-cli-simplify.md (merged)
 - 2026-08-15: archive qa/backend-vp-cli-cleanup-merge-preview.md -> archive/coverage-backend-vp-cli-cleanup-merge-preview.md (retired)
+- 2026-08-15: new coverage qa/backend-post-merge-qa-for-pr-5.md
+- 2026-08-15: new plan plans/backend-cli-distribution-strategy.md
+- 2026-08-15: new research research/backend-hook-based-tool-interception-for-vision-proxy.md
+- 2026-08-15: new worktree worktrees/backend-fix-pi-uninstall-message.md
+- 2026-08-15: archive plans/backend-add-config-keys-for-fallback-models-and-provider-baseurl.md -> archive/plan-backend-add-config-keys-for-fallback-models-and-provider-baseurl.md (complete)
+- 2026-08-15: archive plans/backend-integration-status-command.md -> archive/plan-backend-integration-status-command.md (complete)
+- 2026-08-15: archive plans/backend-remove-vp-allow-home-path-restriction.md -> archive/plan-backend-remove-vp-allow-home-path-restriction.md (complete)
+- 2026-08-15: archive plans/backend-simplify-cli-surface-drop-vp-provider-add-and-unify-vp-hook-into-vp-integration.md -> archive/plan-backend-simplify-cli-surface-drop-vp-provider-add-and-unify-vp-hook-into-vp-integration.md (complete)
+- 2026-08-15: archive plans/fullstack-add-help-output-for-every-cli-subcommand.md -> archive/plan-fullstack-add-help-output-for-every-cli-subcommand.md (complete)
+- 2026-08-15: archive research/backend-integration-status-command.md -> archive/research-backend-integration-status-command.md (complete)
+- 2026-08-15: archive research/backend-pi-hook-versus-integration-support.md -> archive/research-backend-pi-hook-versus-integration-support.md (complete)
+- 2026-08-15: archive research/backend-hook-based-tool-interception-for-vision-proxy.md -> archive/research-backend-hook-based-tool-interception-for-vision-proxy.md (complete)

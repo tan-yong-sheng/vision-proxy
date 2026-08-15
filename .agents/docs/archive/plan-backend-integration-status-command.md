@@ -1,10 +1,10 @@
 ---
 type: plan
 title: integration status command handoff
-description: Handoff plan for adding `vp integration status` to the existing `vp-cli-simplify` worktree, delegated to a Claude agent via worktrunk-orca-delegation.
+description: "Handoff plan for adding `vp integration status` to the existing `vp-cli-simplify` worktree, delegated to a Claude agent via worktrunk-orca-delegation."
 area: backend
 tags: [integration, hook, status, version, cli, handoff, delegation]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

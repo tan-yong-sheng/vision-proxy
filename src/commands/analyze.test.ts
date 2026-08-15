@@ -6,18 +6,13 @@
  * cache uses a temp dir via VP_CACHE_DIR.
  */
 import { strict as assert } from "node:assert";
-import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-	runAnalyze,
-	AnalyzeError,
-	type AnalyzeFlags,
-	type AnalyzeOutcome,
-} from "./analyze.ts";
-import { resetCacheState } from "../cache.ts";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import type { AnalyzeRequest, AnalyzeResponse } from "../adapter.ts";
+import { resetCacheState } from "../cache.ts";
+import { AnalyzeError, type AnalyzeFlags, type AnalyzeOutcome, runAnalyze } from "./analyze.ts";
 
 // 1x1 transparent PNG.
 const PNG_B64 =
@@ -86,14 +81,10 @@ describe("runAnalyze single-image cache-first", () => {
 	it("returns a cache hit without calling the model again", async () => {
 		await runAnalyze([imgPath], baseFlags(), stubAnalyze("first"));
 		let called = false;
-		const out: AnalyzeOutcome = await runAnalyze(
-			[imgPath],
-			baseFlags(),
-			async () => {
-				called = true;
-				return { text: "should-not-appear" };
-			},
-		);
+		const out: AnalyzeOutcome = await runAnalyze([imgPath], baseFlags(), async () => {
+			called = true;
+			return { text: "should-not-appear" };
+		});
 		assert.equal(out.cacheHit, true);
 		assert.equal(called, false);
 		assert.ok(out.output.includes("first::q=what is this?"));
@@ -137,14 +128,10 @@ describe("runAnalyze single-image cache-first", () => {
 			}),
 		);
 		let capturedSystemPrompt = "";
-		await runAnalyze(
-			[imgPath],
-			baseFlags(),
-			async (req) => {
-				capturedSystemPrompt = req.systemPrompt;
-				return { text: "desc" };
-			},
-		);
+		await runAnalyze([imgPath], baseFlags(), async (req) => {
+			capturedSystemPrompt = req.systemPrompt;
+			return { text: "desc" };
+		});
 		assert.ok(capturedSystemPrompt.includes("bounding-box coordinates as [x1, y1, x2, y2]"));
 	});
 
@@ -154,15 +141,11 @@ describe("runAnalyze single-image cache-first", () => {
 			JSON.stringify({ fallbackModels: ["openai/gpt-4o"] }),
 		);
 		let calls = 0;
-		const out: AnalyzeOutcome = await runAnalyze(
-			[imgPath],
-			baseFlags(),
-			async () => {
-				calls += 1;
-				if (calls === 1) throw new Error("primary rate limited");
-				return { text: "from-fallback" };
-			},
-		);
+		const out: AnalyzeOutcome = await runAnalyze([imgPath], baseFlags(), async () => {
+			calls += 1;
+			if (calls === 1) throw new Error("primary rate limited");
+			return { text: "from-fallback" };
+		});
 		assert.equal(calls, 2);
 		assert.ok(out.output.includes("from-fallback"));
 	});
@@ -174,13 +157,9 @@ describe("runAnalyze single-image cache-first", () => {
 		);
 		await assert.rejects(
 			() =>
-				runAnalyze(
-					[imgPath],
-					baseFlags(),
-					async () => {
-						throw new Error("always fails");
-					},
-				),
+				runAnalyze([imgPath], baseFlags(), async () => {
+					throw new Error("always fails");
+				}),
 			(e) => e instanceof AnalyzeError && /always fails/.test(e.message),
 		);
 	});
@@ -200,10 +179,7 @@ describe("runAnalyze joint / multi-image", () => {
 
 describe("runAnalyze image limits", () => {
 	it("enforces maxImagesPerCall", async () => {
-		await writeFile(
-			path.join(dir, ".vision-proxy.json"),
-			JSON.stringify({ maxImagesPerCall: 2 }),
-		);
+		await writeFile(path.join(dir, ".vision-proxy.json"), JSON.stringify({ maxImagesPerCall: 2 }));
 		await assert.rejects(
 			() => runAnalyze([imgPath, imgPath, imgPath], baseFlags(), stubAnalyze("x")),
 			(e) => e instanceof AnalyzeError && /too many images \(3\)/.test(e.message),

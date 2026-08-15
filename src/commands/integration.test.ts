@@ -11,11 +11,12 @@
  *   - uninstall removes only our block (idempotent, leaves others intact)
  *   - unknown agent/subcommand is rejected
  */
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { test } from "node:test";
 import { runIntegration } from "../commands/integration.ts";
 
 const ORIG_HOME = process.env.HOME;
@@ -74,12 +75,17 @@ export function spawnSync(..._args) { return nextResult; }
 	);
 
 	const mod = await import(join(dir, "vision-proxy.ts"));
-	const registered: Array<{ name: string; execute: Function }> = [];
+	const registered: Array<{ name: string; execute: (args: unknown) => Promise<unknown> }> = [];
 	const mockPi = {
-		registerTool: (tool: { name: string; execute: Function }) => registered.push(tool),
+		registerTool: (tool: { name: string; execute: (args: unknown) => Promise<unknown> }) =>
+			registered.push(tool),
 	};
 
-	assert.equal(typeof mod.default, "function", "generated extension must export a default setup function");
+	assert.equal(
+		typeof mod.default,
+		"function",
+		"generated extension must export a default setup function",
+	);
 	mod.default(mockPi);
 
 	assert.equal(registered.length, 1, "setup must register exactly one tool");
@@ -233,9 +239,7 @@ test("uninstall claude-code removes only the vision-proxy block and leaves other
 			hooks: {
 				UserPromptSubmit: [
 					{
-						hooks: [
-							{ type: "command", command: "node /some/other-hook.mjs", timeout: 10 },
-						],
+						hooks: [{ type: "command", command: "node /some/other-hook.mjs", timeout: 10 }],
 					},
 				],
 			},
@@ -316,7 +320,10 @@ test("status flags an integration whose embedded version marker is stale", async
 	await runIntegration("install", "pi");
 	// Backdate the version marker baked into the generated Pi extension.
 	const ext = join(home_pi(), "vision-proxy.ts");
-	writeFileSync(ext, readFileSync(ext, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"));
+	writeFileSync(
+		ext,
+		readFileSync(ext, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"),
+	);
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /! pi\s+0\.0\.9.*installed vp is 0\.1\.0/);

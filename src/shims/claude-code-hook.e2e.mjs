@@ -14,14 +14,14 @@
  *
  * Run: node --test src/shims/claude-code-hook.e2e.mjs
  */
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 
 const shimPath = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -38,7 +38,7 @@ function writeFakeVp(dir) {
 		[
 			"#!/usr/bin/env node",
 			'const out = "<vision_proxy_description image=\\"test.png\\">A red square on white.</vision_proxy_description>";',
-			"process.stdout.write(out + \"\\n\");",
+			'process.stdout.write(out + "\\n");',
 		].join("\n"),
 		{ mode: 0o755 },
 	);

@@ -15,12 +15,12 @@
  *   status            show installed version markers per agent (flags outdated).
  *   uninstall <agent> removes vision-proxy from the agent.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
-import { VERSION, renderVersionMarker, extractMarkerVersion } from "../version.ts";
+import { extractMarkerVersion, renderVersionMarker, VERSION } from "../version.ts";
 
 const SUPPORTED = ["pi", "claude-code", "codex"];
 const PI_EXTENSION_FILENAME = "vision-proxy.ts";
@@ -105,9 +105,15 @@ const piSpec: AgentSpec = {
 const claudeCode: AgentSpec = {
 	id: "claude-code",
 	target: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "claude-code-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"claude-code-vision-proxy-user-prompt-submit.mjs",
+		),
 	locationLabel: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "claude-code-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"claude-code-vision-proxy-user-prompt-submit.mjs",
+		),
 	generate: () =>
 		readFileSync(join(shimDir(), "claude-code-user-prompt-submit.mjs"), "utf8").replace(
 			"__VP_VERSION__PLACEHOLDER__",
@@ -132,9 +138,7 @@ const claudeCode: AgentSpec = {
 			hooks: [{ type: "command", command: `node ${targetPath}`, timeout: HOOK_TIMEOUT_SEC }],
 		};
 		const existing = Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
-		const filtered = (existing as any[]).filter(
-			(g) => !JSON.stringify(g).includes(HOOK_MARKER),
-		);
+		const filtered = (existing as any[]).filter((g) => !JSON.stringify(g).includes(HOOK_MARKER));
 		hooks.UserPromptSubmit = [...filtered, entry];
 		cfg.hooks = hooks;
 		return JSON.stringify(cfg, null, 2);
@@ -183,9 +187,15 @@ const claudeCode: AgentSpec = {
 const codex: AgentSpec = {
 	id: "codex",
 	target: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "codex-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"codex-vision-proxy-user-prompt-submit.mjs",
+		),
 	locationLabel: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "codex-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"codex-vision-proxy-user-prompt-submit.mjs",
+		),
 	generate: () =>
 		readFileSync(join(shimDir(), "codex-user-prompt-submit.mjs"), "utf8").replace(
 			"__VP_VERSION__PLACEHOLDER__",
@@ -215,7 +225,11 @@ const codex: AgentSpec = {
 			kept.push(`[[UserPromptSubmit]]${blocks[i]!}`);
 		}
 		return {
-			raw: kept.join("").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n",
+			raw:
+				kept
+					.join("")
+					.replace(/\n{3,}/g, "\n\n")
+					.trimEnd() + "\n",
 			removed,
 		};
 	},
@@ -347,7 +361,9 @@ export async function integrationStatus(): Promise<IntegrationResult> {
 		if (marker === VERSION) {
 			lines.push(`✓ ${agent}  ${marker}`);
 		} else {
-			lines.push(`! ${agent}  ${marker} (installed vp is ${VERSION}, run: vp integration install ${agent})`);
+			lines.push(
+				`! ${agent}  ${marker} (installed vp is ${VERSION}, run: vp integration install ${agent})`,
+			);
 			outdated++;
 		}
 	}

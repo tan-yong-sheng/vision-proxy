@@ -9,10 +9,11 @@
  * image content hash + crop signature + question hash + model ref, so a hit is
  * safe to return verbatim.
  */
-import { LRUCache } from "./core.ts";
+
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { LRUCache } from "./core.ts";
 
 export interface CacheStats {
 	entries: number;
@@ -38,11 +39,7 @@ function cachePath(): string {
 	return path.join(dir, "cache.json");
 }
 
-export function configureCache(
-	maxEntries: number,
-	cacheFile?: string,
-	maxAgeDays = 30,
-): void {
+export function configureCache(maxEntries: number, cacheFile?: string, maxAgeDays = 30): void {
 	_explicitPath = cacheFile ?? null;
 	_path = cacheFile ?? cachePath();
 	_maxAgeDays = maxAgeDays;

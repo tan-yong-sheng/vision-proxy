@@ -22,7 +22,8 @@ export function extractImagePaths(text) {
 		if (p) paths.add(p);
 	};
 	// Pass 1: pi-clipboard temp files.
-	const re1 = /(?:^|[\s"'])([a-zA-Z]:[/\\][^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+|\/[^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+)/gim;
+	const re1 =
+		/(?:^|[\s"'])([a-zA-Z]:[/\\][^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+|\/[^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+)/gim;
 	for (const m of text.matchAll(re1)) add(m[1]);
 	// Pass 2: general image paths with a recognized prefix (filter bare filenames).
 	const re2 = new RegExp(
@@ -31,10 +32,7 @@ export function extractImagePaths(text) {
 	);
 	for (const m of text.matchAll(re2)) add(m[1]);
 	// Pass 3: relative ./ and ../ paths.
-	const re3 = new RegExp(
-		`(?:^|[\\s"'(])(\\.\\.?/[\\w./\\\\+-]+\\.(?:${IMAGE_EXT}))\\b`,
-		"gi",
-	);
+	const re3 = new RegExp(`(?:^|[\\s"'(])(\\.\\.?/[\\w./\\\\+-]+\\.(?:${IMAGE_EXT}))\\b`, "gi");
 	for (const m of text.matchAll(re3)) add(m[1]);
 	return [...paths];
 }

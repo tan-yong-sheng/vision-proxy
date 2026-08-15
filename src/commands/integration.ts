@@ -371,12 +371,12 @@ export async function integrationUninstall(
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
 	const cfgPath = spec.configPath();
-	let removed = false;
+	let configRemoved = false;
 	if (cfgPath && existsSync(cfgPath)) {
 		const { raw } = spec.readConfig();
 		const result = spec.remove(raw);
 		writeFileSync(cfgPath, result.raw);
-		removed = result.removed;
+		configRemoved = result.removed;
 	} else if (!existsSync(target)) {
 		return {
 			ok: true,
@@ -384,9 +384,14 @@ export async function integrationUninstall(
 			code: 0,
 		};
 	}
+	// `removed` must reflect file deletion as well as host-config removal.
+	// Agents like `pi` have no host config (configPath() === ""), so the
+	// config branch never fires for them; the extension file is the signal.
+	let fileDeleted = false;
 	if (existsSync(target)) {
 		try {
 			rmSync(target);
+			fileDeleted = true;
 		} catch {
 			return {
 				ok: false,
@@ -395,6 +400,7 @@ export async function integrationUninstall(
 			};
 		}
 	}
+	const removed = configRemoved || fileDeleted;
 	// Hook agents also ship shared.mjs next to the shim; drop it if now orphaned.
 	if (spec.sharedShim) {
 		const sharedPath = join(dirname(target), "shared.mjs");

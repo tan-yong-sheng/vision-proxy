@@ -223,6 +223,21 @@ test("uninstall pi removes the file and cleans up an empty extensions directory"
 	reset();
 });
 
+test("uninstall pi reports the correct success message after install (regression)", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const target = join(dir, "vision-proxy.ts");
+	assert.equal(existsSync(target), true);
+	const r = await runIntegration("uninstall", "pi", dir);
+	assert.equal(r.ok, true);
+	// Regression: pi has no host config, so the message must key off file
+	// deletion, not a config-removal flag that never fires for pi.
+	assert.match(r.message, /^uninstalled pi integration/);
+	assert.equal(existsSync(target), false);
+	reset();
+});
+
 test("uninstall claude-code removes only the vision-proxy block and leaves others", async () => {
 	const home = isolate();
 	const dir = installDir(home);

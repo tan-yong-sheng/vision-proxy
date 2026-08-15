@@ -5,9 +5,11 @@ description: Delegate parallel coding tasks across `worktrunk` worktrees using O
 
 # Worktrunk + Orca delegation
 
-Coordinate multiple agents across `worktrunk` worktrees using `orca` orchestration.
+Coordinate multiple agents across [`worktrunk`](https://github.com/max-sixty/worktrunk) (`wt`) worktrees using [`orca`](https://github.com/stablyai/orca) orchestration.
 
-> **Use `orca`, not `orca-ide`.** All commands use the `orca` CLI.
+> **Use `orca`, not `orca-ide`.**
+> All commands use the [`orca`](https://github.com/stablyai/orca) CLI.
+> Worktree operations use [`worktrunk`](https://github.com/max-sixty/worktrunk) (`wt`).
 
 ## Quick start
 
@@ -26,9 +28,14 @@ Coordinate multiple agents across `worktrunk` worktrees using `orca` orchestrati
 
 ## Workflow
 
-### 1. Plan splits
+### 1. Plan splits & dispatch lifecycle
 
 Group work so each worktree has a narrow, reviewable scope. Only independent worktrees run in parallel.
+
+> **Worktree Dispatch Contract:**
+> 1. `agents-docs` plans the feature and runs `scaffold-worktrees` to generate flight logs (`worktrees/<area>-<slug>.md`).
+> 2. Each flight log specifies the task scope, branch name, and dependencies for `worktrunk-orca-delegation`.
+> 3. The orchestrator updates the flight log status (`active` &rarr; `merged`) as workers complete, and dispatches `/review-gate` before release.
 
 ### 2. Create run and tasks
 
@@ -45,7 +52,7 @@ wt switch --create <branch> --base <base> --no-cd
 
 Prime fresh worktrees once to skip first-run screens. See [REFERENCE.md](REFERENCE.md).
 
-**Agent skills must be present in the worktree.** After merging the source branches, overlay any skills that exist in the orchestrator's worktree but are missing in the new worktree. Use `--ignore-existing` so branch-specific skill edits are never overwritten.
+**Overlay skills into the worktree:** After creating the worktree, copy over any orchestrator skills with `--ignore-existing`:
 
 ```bash
 if [ -d <source-worktree>/.agents/skills ]; then
@@ -58,9 +65,7 @@ if [ -d <source-worktree>/.claude/skills ]; then
 fi
 ```
 
-`<source-worktree>` is the orchestrator's own worktree (usually the current one); `<worktree>` is the new disposable worktree.
-
-Do not use a Worktrunk `post-start` hook for this: hooks run before source-branch merges, so the synced files become untracked and block `git merge`. Sync after the merges instead.
+For hook execution order and sandbox setup details, see [REFERENCE.md](REFERENCE.md).
 
 ### 4. Dispatch workers
 
@@ -102,29 +107,38 @@ Before `worker_done`, the worker must commit. Verify with:
 git rev-list --count <base>..<branch>
 ```
 
-### Review-clear
+### Review-clear & merge
 
 A branch is **review-clear** when it has either:
 
 - passed `/review-gate` (medium/high risk, new dependencies, shared contracts, auth/security, or large diffs), or
 - passed local checks only and is explicitly classified as **low-risk** (docs, tests, config tweaks, trivial fixes).
 
-**Do not `wt merge` a worker branch until it is review-clear.**
+**Do not merge a worker branch until it is review-clear.**
+
+Once review-clear, integrate the branch using:
+
+```bash
+wt merge <target-branch>
+```
+
+`wt merge` runs configured pre-merge hooks and handles branch integration.
+Use `git merge --no-ff <branch>` only as a fallback for raw git checkouts.
 
 If a branch was already merged without review, make it review-clear retroactively by running `/review-gate` on the integration branch before any further merges.
 
-### 8. Validation gate
+### 8. Validation gate & multi-worktree routing
 
-Before releasing, classify the worktree risk and choose the validation path.
-**Default to a disposable merge-preview worktree; use per-worktree review only when the branch is provably independent and low-risk.**
+Before releasing, classify worktree risk and route to the appropriate validation path.
+**Default to a disposable merge-preview QA worktree; use per-worktree review only when branches are provably independent and low-risk.**
 
-| Risk   | Signals                                                                     | Path                                                                        |
-| ------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| High   | Shared contracts, stacked PRs, auth/security, new dependencies, large diffs | Disposable merge-preview worktree + `/review-gate`                          |
-| Medium | Feature work with UI/API surface changes, provider/registry changes         | Disposable merge-preview worktree + `/review-gate` with `--skip push,pr,ci` |
-| Low    | Docs, tests, config tweaks, trivial fixes, provably independent branches    | Per-worktree `/review-gate` or local checks only                            |
+| Risk / Relationship | Signals | Validation Path |
+|---|---|---|
+| **High / Medium Risk** | Shared contracts, stacked PRs, auth/security, new dependencies, large diffs | Disposable merge-preview QA worktree + `/review-gate` |
+| **Dependent / Stacked** | Worktree doc has `depends on` or files overlap | Disposable merge-preview QA worktree + `/review-gate` |
+| **Low Risk & Independent** | Docs, tests, config tweaks, no `depends on`, disjoint files | Per-worktree `/review-gate` or local checks |
 
-A branch is **provably independent** when its worktree doc has no `depends on` field and its changed files do not overlap with any other active worktree.
+A branch is **provably independent** when its worktree doc has no `depends on` and its changed files do not overlap with any other active branch.
 
 **Local checks only:**
 
@@ -133,74 +147,12 @@ fallow audit --format json --quiet --explain --gate-marker agent
 bun run lint
 bun run format:check
 bunx turbo run type-check
-# run relevant unit tests
 ```
 
-**Dispatch /review-gate:**
+**Dispatching `/review-gate`:**
 
-```bash
-orca orchestration worker-start \
-  --worktree branch:<branch> \
-  --agent claude \
-  --task <review-task-id> \
-  --run <run-id> \
-  --json
-```
-
-Task spec: "Run `/review-gate` on branch `<branch>` with intent ... and write findings to `.agents/docs/qa/` via `/agents-docs`."
-
-### Multi-worktree validation routing
-
-When orchestrating several worktrees, default to a single disposable merge-preview worktree. Route to per-worktree review only when every branch is provably independent and low-risk.
-
-| Worktree relationship | Signals | Validation path |
-| --- | --- | --- |
-| Default (when in doubt) | Any medium/high risk, new dependencies, shared contracts, or overlapping files | Disposable merge-preview worktree + `/review-gate` |
-| Independent and low-risk branches only | Each worktree doc has no `depends on` and file lists do not overlap | Per-worktree `/review-gate` or local checks |
-
-To detect dependencies, read the worktree docs' `depends on` field. If a worktree depends on another active branch, do not dispatch per-worktree `/review-gate` until its dependency is merged; instead create a single merge-preview task that merges both branches in order and runs `/review-gate`.
-
-#### Example: merge-preview review task
-
-Create a disposable QA worktree from the integration base:
-
-```bash
-wt switch --create qa/vp-merge --base <base-branch> --no-hooks --no-cd
-QA_PATH=$(wt list --format=json | jq -r '.items[] | select(.branch == "qa/vp-merge") | .worktree.path')
-```
-
-Merge branches in dependency order:
-
-```bash
-git -C "$QA_PATH" merge --no-ff <dependency-branch>
-git -C "$QA_PATH" merge --no-ff <dependent-branch>
-```
-
-Run local verification:
-
-```bash
-cd "$QA_PATH"
-npm test
-npx tsc --noEmit
-```
-
-Dispatch `/review-gate` on the combined state:
-
-```bash
-orca orchestration task-create \
-  --run <run-id> \
-  --spec "Run /review-gate on merge-preview branch qa/vp-merge. Intent: Review combined integration of <dependency-branch> and <dependent-branch>. Use --skip push,pr,ci. Write findings to .agents/docs/qa/<area>-vp-merge.md via /agents-docs." \
-  --json
-
-orca orchestration worker-start \
-  --worktree branch:qa/vp-merge \
-  --agent claude \
-  --task <review-task-id> \
-  --run <run-id> \
-  --json
-```
-
-Remove the QA worktree after the dossier is written.
+- **Independent branch:** dispatch a task running `/review-gate` directly in the branch worktree.
+- **Combined / Stacked branches:** create a single disposable merge-preview QA worktree following [`/review-gate` Step 10](file:///home/tys203831/Documents/Coding/vision-proxy/.agents/skills/review-gate/SKILL.md#L229), run `/review-gate`, and write findings to `.agents/docs/qa/`.
 
 ### Manual `worker_done`
 

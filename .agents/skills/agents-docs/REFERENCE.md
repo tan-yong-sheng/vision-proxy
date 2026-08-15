@@ -77,8 +77,6 @@ Stale windows (days without `updated` before an active doc is flagged as stale):
 
 `new` writes `stale_after = today + stale_window`. Docs without `stale_after` use the type window for stale checks.
 
-`new` auto-sets `stale_after` to `today + stale_window`.
-
 ## 2. Per-type templates
 
 All docs share the frontmatter contract above. The one-line summary under `# <title>` is the description of the doc.
@@ -105,7 +103,7 @@ All docs share the frontmatter contract above. The one-line summary under `# <ti
 ## Target state
 ## Key technical decisions     # table: ID | Decision | Rationale
 ## Tools / MCP / Skills        # native tools, MCP servers, and agent skills the plan relies on
-## Build steps
+## Worktree Strategy           # single worktree or parallel tracks: branch, area, objective, tasks, verification
 ## Risks / open questions      # checked off as they resolve
 ## Related
 ```
@@ -159,30 +157,35 @@ All docs share the frontmatter contract above. The one-line summary under `# <ti
 
 ## 3. Folder lifecycle mechanics
 
-Per-folder archive vs prune triggers. The auto model: "is done?" is semantic (declared by you in conversation or in the doc's frontmatter) - the sweep never guesses. "Move the done doc" is mechanical and fully automatic. Three automatic rules + one advisory:
+Per-folder archive vs prune triggers.
+The auto model: "is done?" is semantic (declared by you in conversation or in the doc's frontmatter) - the sweep never guesses.
+"Move the done doc" is mechanical and fully automatic.
+Three automatic rules + one advisory:
 
-1. **auto-archive** - an active doc whose status is terminal for its `type`, or that carries a `superseded_by`, moves to `archive/` on the next sweep. Destination is ALWAYS flat `archive/<basename>.md` (subfolder paths collapse); collisions fail loudly, never overwrite.
+1. **auto-archive** - an active doc whose status is terminal for its `type`, or that carries a `superseded_by`, moves to `archive/` on the next sweep. Destination is flat `archive/<type>-<basename>.md` to prevent collisions between research, plan, and worktree docs of the same title.
 2. **auto-prune** - an archive doc that is superseded AND past the TTL (default 180d) AND unreferenced may be GC'd. If still referenced from a live doc it is refused with the linker names; `--force` overrides.
-3. **auto-cadence** - the sweep runs at the end of every lifecycle command (`new`, `visual`, `sync`, `archive`, `ensure --apply`) and before review gates on skill load.
+3. **auto-cadence** - the sweep runs at the end of every lifecycle command (`new`, `visual`, `sync`, `archive`, `abandon`, `revive`, `scaffold-worktrees`, `ensure --apply`) and before review gates on skill load.
 4. **(advisory)** - active docs older than their type's stale window with no terminal status and no `stale_after` are surfaced as "declare live or dead" - the one manual line. Stable evidence is a legitimate state; the sweep never auto-archives it. `new` writes a `stale_after` so the advisory usually fires only for docs created before this convention or for docs whose clock has genuinely run out.
 
 | Folder | Archives when | Prunes (GC) when |
 |---|---|---|
-| `research/` | concluded - promoted to a plan or dead-end. Set `status: complete` (+ `superseded_by` if promoted) and move to `archive/` | in archive, superseded + past TTL |
-| `plans/` | `complete` (full execution, links to verification) or `dropped`. Deferred stays in `plans/` | deferred past a max-defer window -> mark abandoned, archive, then GC |
-| `worktrees/` | `merged` (link merge commit + dossiers) or `abandoned` | merged/abandoned worktrees are the prime GC candidates |
-| `bugs/` | `fixed` (link fix commit + dossier) or `wontfix`. A regression files a NEW bug, never un-archives | fixed bugs past TTL |
+| `research/` | concluded - promoted to a plan or dead-end. Set `status: complete` (+ `superseded_by` if promoted) and move to `archive/research-*.md` | in archive, superseded + past TTL |
+| `plans/` | `complete` (full execution, links to verification) or `dropped` / `deferred`. Moves to `archive/plan-*.md` | deferred past a max-defer window -> mark abandoned, archive, then GC |
+| `worktrees/` | `merged` (link merge commit + dossiers) or `abandoned`. Moves to `archive/worktree-*.md` | merged/abandoned worktrees are the prime GC candidates |
+| `bugs/` | `fixed` (link fix commit + dossier) or `wontfix`. Moves to `archive/bug-*.md` | fixed bugs past TTL |
 | `qa/` | coverage matrix retired when the surface disappears; dossiers retired when `stale_after` passes or their matrix retires | evidence is longest-retained; GC only well past TTL |
 | `archive/` | - | the only folder that ever deletes - superseded AND past TTL; `log.md` keeps a trace line |
 
 Two terminal states; nothing is hard-deleted directly.
 
-1. **`archive/`** is checkpoint + history. Every clearly-done doc moves here, and the move is always reversible (git is the version history). This is the normal terminal state.
+1. **`archive/`** is checkpoint + history. Every clearly-done doc moves here as `archive/<type>-<name>.md`, and the move is always reversible via `revive` (git is the version history). This is the normal terminal state.
 2. **`prune --gc`** (or `clean` with `--gc`) is archive garbage collection - the only delete path. Removes archive docs that are *both* superseded *and* older than the retention window *and* unreferenced. Opt-in, `--dry-run` first, TTL configurable. Reference guard refuses with linker names; `--force` overrides.
 
-Lifecycle model: `bugs/` is an incident side-channel. The build pipeline flows `research -> plan -> worktree -> qa -> archive`. A bug is discovered against the live product at any time and enters from the side (`open -> fixed/wontfix -> archive`), touching the pipeline only at `qa/` (verification) and `archive/`.
+Lifecycle model: `bugs/` is an incident side-channel.
+The build pipeline flows `research -> plan -> worktree -> qa -> archive`.
+A bug is discovered against the live product at any time and enters from the side (`open -> fixed/wontfix -> archive`), touching the pipeline only at `qa/` (verification) and `archive/`.
 
-Provenance: an archive doc's source folder is recoverable from its `type` field (`bug` -> `bugs/`, `plan` -> `plans/`, etc.) and via `status --show-archive` / `report --show-archive`, which group archive rows by source folder. No filename prefixes.
+Provenance: an archive doc's source folder is recoverable from its filename prefix (`archive/bug-*.md` -> `bugs/`, `archive/plan-*.md` -> `plans/`, etc.) and via `status --show-archive` / `report --show-archive`, which group archive rows by source folder.
 
 ## 4. `docs.js` subcommand reference
 
@@ -193,6 +196,7 @@ Run with `bun .agents/skills/agents-docs/scripts/docs.js <command>`.
 | Subcommand | Does |
 |---|---|
 | `new <type> <title> [--area <a>]` | Create a doc from the type template; fail if the target exists. Registers in the index. |
+| `scaffold-worktrees <plan-doc>` | Parse the `## Worktree Strategy` section from a plan and generate `worktrees/<area>-<slug>.md` flight logs. |
 | `ensure [--dry-run] [--apply]` | Converge the tree to the 6-folder structure: folder moves, area-prefix renames, date-prefix drops, frontmatter conformance (adds missing, never overwrites), link normalization through the move map, empty-folder removal. Dry-run by default. Flags decisions it will not make. |
 | `lookup <artifact>` | Reverse-map a Lavish artifact path to its source doc(s) via the `visual:` key. |
 | `visual <doc> <artifact>` | Register/update the `visual:` frontmatter key. Warns if the artifact is not under `.lavish/` (not commit-safe). |
@@ -202,7 +206,8 @@ Run with `bun .agents/skills/agents-docs/scripts/docs.js <command>`.
 | `index` | Regenerate `index.md` from frontmatter (catalog grouped by folder x status). |
 | `clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]` | Auto-archive terminal/superseded docs and GC unreferenced archive docs (the sweep). Dry-run previews; default applies. `--stale-orphan` archives stale+unreferenced docs (dry-run by default, requires `--apply`). Also runs automatically at the end of lifecycle commands. |
 | `prune [--dry-run] [--apply] [--gc] [--ttl <days>] [--force]` | Explicit, batched version of `clean`. Propose archiving for terminal / superseded docs, or GC archive docs that are superseded AND past the TTL (default 180 days). Referenced archive docs refused with linker names; `--force` overrides. |
-| `archive <doc> [--status=<terminal>]` | Move to `archive/`, set terminal status, rewrite inbound + outbound links file-relative, append `log.md`, regen index. |
+| `archive <doc> [--status=<terminal>]` | Move to `archive/<type>-<basename>.md`, set terminal status, rewrite inbound + outbound links file-relative, append `log.md`, regen index. |
+| `revive <archive-doc>` | Move from `archive/<type>-<name>.md` back to active home folder with `status: active` (or `open`), reset staleness deadline, rewrite links, regen index. |
 | `abandon <doc> [--status=<terminal>] [--dry-run]` | One-step archive with the type's default terminal status. Use when a doc is left behind without a full review. |
 
 ### Health badges (`report`)
@@ -217,11 +222,14 @@ All computed from frontmatter + the link graph - never declared by the LLM, so t
 
 ## 5. Lavish integration protocol
 
-`.lavish/` is gitignored, so the HTML artifact is a throwaway mirror. The only durable record is the markdown doc. On every Lavish reply, **sync docs first, then edit the HTML**.
+Lavish review sessions use the [`lavish-axi`](https://github.com/kunchenguid/lavish-axi) CLI tool (run on demand with `npx -y lavish-axi <html-file>` or install globally via `npm install -g lavish-axi`).
+`.lavish/` is gitignored, so the HTML artifact is a throwaway mirror.
+The only durable record is the markdown doc.
+On every Lavish reply, **sync docs first, then edit the HTML**.
 
-1. **On open** - before `lavish-axi <artifact>`, ensure the artifact reflects the current doc state and register `visual:` if missing.
+1. **On open** - before `lavish-axi <artifact>` (or `npx -y lavish-axi <artifact>`), ensure the artifact reflects the current doc state and register `visual:` if missing.
 2. **On feedback** (poll returns) - parse the prompt, update the mirrored doc(s): status, criteria, decisions. Append `log.md` and bump `updated` (`sync` does the mechanical part). Then edit the HTML to match.
-3. **Re-poll** with `lavish-axi poll <file> --agent-reply "<message>"` - foreground, never kill.
+3. **Re-poll** with `lavish-axi poll <file> --agent-reply "<message>"` (or `npx -y lavish-axi poll ...`) - foreground, never kill.
 4. **`Send & End`** - final feedback is synced once, then the session stays closed. Deliver any remaining updates in-conversation; never reopen uninvited.
 
 Session keys are artifact file paths, so `lookup` reverse-maps an artifact to its doc in one step - docs stay self-describing.

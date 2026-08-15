@@ -6,7 +6,8 @@ user-invocable: false
 
 # review-gate
 
-Drive `no-mistakes axi run` for code-level review and pre-merge QA. Findings are captured in `.agents/docs/qa/` dossiers; parallel reviews delegate to `/worktrunk-orca-delegation`.
+Drive [`no-mistakes`](https://github.com/kunchenguid/no-mistakes) (`no-mistakes axi run`) for code-level review and pre-merge QA.
+Findings are captured in `.agents/docs/qa/` dossiers; parallel reviews delegate to `/worktrunk-orca-delegation`.
 
 > **Docs first.**
 > When `/agents-docs` is active, capture findings directly into a `.agents/docs/qa/` dossier.
@@ -17,10 +18,17 @@ Drive `no-mistakes axi run` for code-level review and pre-merge QA. Findings are
 1. **Resolve scope.**
    Pick a branch and an intent that names what to review.
    For whole-codebase coverage, use a small branch diff plus an intent that lists the areas to inspect.
-2. **Run the gate.**
-    ```bash
-    no-mistakes axi run --intent "Review <area>: check <concern A>, <concern B>, <concern C>"
-    ```
+2. **Run the gate according to environment:**
+   - **Local-Only Repository (No remote / no GitHub):**
+     ```bash
+     no-mistakes axi run --intent "Review <area>: ..." --yes --skip push,pr,ci
+     ```
+     Runs completely offline, executing local linters, typechecks, and tests within the worktree.
+   - **GitHub-Connected Repository (With remote PRs):**
+     ```bash
+     no-mistakes axi run --intent "Review <area>: ..." --yes --skip ci
+     ```
+     Pushes the validated branch and opens a GitHub PR.
 3. **Drive the findings.**
    Approve, fix, or escalate `ask-user` findings as the pipeline surfaces them.
 4. **Capture the result.**
@@ -43,45 +51,16 @@ A short `bash` timeout can kill the CLI while the daemon is still in `review: fi
 
 ### Polling wrapper for approval gates
 
-Use the bundled polling script to watch a run and unblock parked gates.
-It talks to the no-mistakes daemon over its Unix socket and reads JSON-RPC responses, so it is deterministic and not sensitive to CLI text-formatting changes.
-
-```bash
-bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh [poll-interval-seconds]
-```
-
-Run it from inside the target worktree:
+Use the bundled polling script to watch a run and unblock parked gates deterministically:
 
 ```bash
 cd /path/to/qa-worktree
-bash /path/to/.agents/skills/review-gate/scripts/poll-no-mistakes.sh 30
+bash /path/to/.agents/skills/review-gate/scripts/poll-no-mistakes.sh [poll-interval-seconds]
 ```
 
-The script:
-
-1. Resolves the main repo path from `git rev-parse --git-common-dir` (linked worktrees share one no-mistakes repo record).
-2. Looks up the `repo_id` in `~/.no-mistakes/state.sqlite`.
-3. Calls `get_active_run` over `~/.no-mistakes/socket` using JSON-RPC.
-4. Prints `RUNNING` while active, `BLOCKED` when `run.awaiting_agent` is true, and `FINISHED` when the run reaches an outcome.
-
-When blocked, it inspects each finding's `action`:
-
-- `auto-fix` -> asks no-mistakes to fix the identified ids.
-- `ask-user` -> prints the ids and exits, because these are intent-sensitive findings that should be reviewed.
-
-To also auto-approve `ask-user` findings unattended, set `AUTO_APPROVE_ASK_USER=1`:
-
-```bash
-AUTO_APPROVE_ASK_USER=1 bash .agents/skills/review-gate/scripts/poll-no-mistakes.sh 30
-```
-
-For fully unattended behavior, also enable repo-level auto-fix:
-
-```yaml
-# .no-mistakes/config.yaml
-auto_fix:
-  review: 3
-```
+- **Default:** auto-fixes mechanical issues and exits on `ask-user` findings for manual review.
+- **Unattended `ask-user` approval:** `AUTO_APPROVE_ASK_USER=1 bash .../poll-no-mistakes.sh 30`.
+- For daemon socket and JSON-RPC mechanics, see [REFERENCE.md](REFERENCE.md).
 
 ## Core workflow
 
@@ -158,42 +137,15 @@ For the exact commands and decision rules, see the user-level `/no-mistakes` ski
 
 ### Approval gates and unattended runs
 
-Use `--yes` for agent-driven reviews so approval gates auto-accept and actionable findings move into `review: fixing`:
+Use `--yes` for unattended agent runs so approval gates auto-accept and actionable findings move into `review: fixing`:
 
 ```bash
 no-mistakes axi run --intent "..." --yes
 ```
 
-However, the global no-mistakes config sets `auto_fix.review: 0` by default, so review findings that require a fix are parked for manual approval rather than silently self-fixed. `no-mistakes axi status` shows this as `awaiting_agent: parked` under a `gate:` block.
-
-**Fully unattended runs:** enable repo-level review auto-fix by committing `.no-mistakes/config.yaml`:
-
-```bash
-mkdir -p .no-mistakes
-cat > .no-mistakes/config.yaml <<'EOF'
-auto_fix:
-  review: 3
-EOF
-```
-
-This lets the pipeline fix up to 3 rounds of review findings without manual approval. Commit and push the file so CI and delegated agents use the same behavior.
-
-**Manual gate loop (when auto-fix is disabled):** poll `no-mistakes axi status` for a `gate:` block and respond:
-
-```bash
-# Detect a parked gate
-no-mistakes axi status | grep -q "awaiting_agent: parked"
-
-# Approve the current step and continue
-no-mistakes axi respond --action approve
-
-# Or ask the pipeline to fix specific findings by id
-no-mistakes axi respond --action fix --findings id-a,id-b
-```
-
-The pipeline may commit auto-fixes, so the branch head changes. Inspect progress with `no-mistakes axi status`. If `branch_sync.state` is `pipeline_owned`, do not make local commits until the run reaches an outcome.
-
-Read step logs with `no-mistakes axi logs --step <step>` (`intent`, `rebase`, `review`, `test`, `document`, `lint`, `push`, `pr`, `ci`).
+- **Unattended auto-fix:** enable up to 3 self-healing rounds by committing `.no-mistakes/config.yaml` (`auto_fix: { review: 3 }`).
+- **Parked gates:** when auto-fix is disabled, poll `no-mistakes axi status` for parked gates and respond via `no-mistakes axi respond --action approve` or `--action fix --findings <ids>`.
+- **Pipeline-owned head:** when `branch_sync.state` is `pipeline_owned`, the pipeline has rewritten the branch head with auto-fixes. Do not make local commits until outcome is reached.
 
 ### Controlling where the run stops
 
@@ -215,15 +167,27 @@ The `ci` step monitors GitHub checks until merge/close and can run indefinitely.
 - **Dependent branches or shared-contract touch:** dispatch a single merge-preview review task that creates a disposable worktree, merges the branches in order, and runs `/review-gate` on the combined state (Step 10).
 - **Standalone fallback:** create one worktree per branch, run `no-mistakes axi run` in each, poll to outcome, collect findings. See [REFERENCE.md](REFERENCE.md).
 
-### Findings output
+### Findings output & routing
 
-Write findings directly into `.agents/docs/qa/` via `/agents-docs`:
+Create or update the QA dossier directly in `.agents/docs/qa/` via `/agents-docs`:
 
 ```bash
-bun .agents/skills/agents-docs/scripts/docs.js new qa "<title>" [--area <area>]
+bun .agents/skills/agents-docs/scripts/docs.js new coverage "<title>" [--area <area>]
 ```
 
-Set `type: coverage` for single-branch reviews. The dossier is the source of truth; no intermediate report.
+Route findings according to their lifecycle to avoid polluting `bugs/`:
+
+| Finding Type | Where it Lands | Lifecycle & Mechanics |
+|---|---|---|
+| **Auto-Fixed by CLI** | `qa/<batch>.md` | Recorded in the QA dossier table under `## Auto-Fixed Findings` with commit hashes (verdict `pass-with-fixes`). No `bugs/` doc needed. |
+| **Resolved `ask-user`** | `qa/<batch>.md` | Recorded in `## Resolution intent` explaining the choice taken and why. |
+| **Deferred `ask-user`** | `bugs/<area>-<slug>.md` | Created via `docs.js new bug "<title>"` (`status: open`) linking back to `related: [../qa/<batch>.md]`. |
+| **Pre-Existing Flaws** | `bugs/<area>-<slug>.md` | Created with `pre-existing: true` and owning branch metadata so PR is not blocked. |
+
+> **Bug Resolution Archiving Protocol:**
+> When a bug recorded in `bugs/<area>-<slug>.md` is later fixed in a dedicated worktree, the fix verification is recorded in the new QA dossier (`qa/<fix-batch>.md`).
+> The bug doc is updated to `status: fixed` with `superseded_by: ../qa/<fix-batch>.md`, and archived to `archive/bug-<area>-<slug>.md` via `bun docs.js archive bugs/<slug>.md` (or `bun docs.js clean --apply`).
+> Resolved bugs never move into `qa/`; `qa/` holds the verification evidence, while `archive/` holds the closed ticket history.
 
 ## Step 10: local merge-preview QA
 
@@ -268,8 +232,9 @@ When none of A-F applies, skip Step 10. A clean single-branch review is enough.
 4. **Merge each PR branch into the QA worktree in declared order**, resolving conflicts as they appear:
     ```bash
     QA_PATH=$(wt list --format=json | jq -r --arg b "qa/<slug>" '.items[] | select(.branch == $b) | .worktree.path')
-    git -C "$QA_PATH" merge --no-ff <pr-branch>
+    wt merge <pr-branch> # or git -C "$QA_PATH" merge --no-ff <pr-branch>
     ```
+    Use `wt list --format=json` to resolve the path instead of hardcoding it; the table also exposes merge-conflict prediction and integration status. Record every conflict-resolution commit in the QA dossier.
     Use `wt list --format=json` to resolve the path instead of hardcoding it; the table also exposes merge-conflict prediction and integration status. Record every conflict-resolution commit in the QA dossier.
 5. **Run the verification suite** (typecheck, lint, tests, smoke flows) on the combined state.
 6. **Write or update a QA dossier** in `.agents/docs/qa/`:
@@ -309,26 +274,10 @@ When none of A-F applies, skip Step 10. A clean single-branch review is enough.
 - **Restrict auto-merge helpers to additive-only conflicts.** Union-of-lists, append-sections, and latest-of-N-dates are safe. Anything touching an import block, type definition, or function body should be hand-resolved or driven by `git merge-file --ours` / `--theirs` markers. Regex drivers collapse adjacent blocks (for example an `import { ... }` block followed by a function body), producing syntax errors that are invisible to `git diff` but immediate to `bun test` or `tsc`.
 - **For doc, comment, or README conflicts, validate factual claims against the source code.** Run `ls`, `grep`, or the equivalent against the actual codebase before trusting the incoming side. A plausible-looking paragraph can describe features, packages, or commands that do not exist; the merge tool will not catch this.
 
-### Relationship to `/visual-qa`
+### Visual QA hand-off
 
-Step 10 and `/visual-qa` are orthogonal. They run at different times, answer different questions, and produce different outputs. Do not merge them into one skill.
-
-|                 | Step 10 (local merge-preview QA)                                                             | `/visual-qa`                                                                                      |
-| --------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Question        | "Will this combined merge land cleanly on the target branch and keep tests passing?"         | "After the merge, does the running UI behave and look right?"                                     |
-| Runtime         | Disposable merge worktree; no app instance needed                                            | Running app + `orca-cli` headed browser pane                                                      |
-| Timing          | Before the GitHub merge                                                                      | After the merge is on `main` or a deployed preview                                                |
-| What it catches | Semantic conflicts, shared-contract drift, merge-order bugs, test failures on combined state | Visual regressions, broken flows, console/network errors, accessibility gaps                      |
-| Output          | QA dossier with conflict table + `## Resolution intent`                                      | Per-flow dossiers + Prodigy-style HTML report                                                     |
-| Auto-fix        | No. Step 10 documents resolutions; fixes flow back to source PR branches.                    | Yes, for high-confidence mechanical findings on a disposable `auto-fix/visual-qa-<batch>` branch. |
-
-**Hand-off pattern.** After Step 10 records a `pass` or `pass-with-fixes` verdict, the operator may run `/visual-qa` against the merged app to validate user-perceived behavior. The Step 10 dossier ends its `## Resolution intent` section with:
-
-```markdown
-For visual QA of the merged feature, see `/visual-qa`.
-```
-
-The `/visual-qa` dossier links back to the Step 10 dossier under `related:` in the frontmatter. Discovery is through the corpus index, not through a pipeline step.
+Step 10 validates code/contract integrity before merging.
+For user-perceived visual regression testing after merge, record a handoff in the dossier to `/visual-qa` with reciprocal `related:` frontmatter links.
 
 ## Integration with other skills
 

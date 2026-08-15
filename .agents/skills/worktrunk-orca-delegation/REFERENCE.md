@@ -1,6 +1,6 @@
 # Worktrunk + Orca Delegation Reference
 
-This document provides extended technical reference notes, sandbox configuration guidelines, cleanup workflows, and operational lessons learned.
+This document provides extended technical reference notes, sandbox configuration guidelines, cleanup workflows, and operational lessons learned for [`worktrunk`](https://github.com/max-sixty/worktrunk) (`wt`) and [`orca`](https://github.com/stablyai/orca).
 
 ## Sandbox setup for linked worktrees
 
@@ -107,6 +107,12 @@ orca terminal close --terminal <handle> --json
 ```
 
 The acknowledgment is stored per worktree, so this only needs doing the first time, and only when the trust prompt is enabled.
+
+#### Skill overlaying and hook timing
+
+After creating a worktree, overlay skills from the orchestrator's checkout with `rsync -au --ignore-existing`.
+Do not use a Worktrunk `post-start` hook for skill overlaying: hooks execute before source-branch merges, leaving synced files untracked and blocking subsequent `git merge` operations.
+Sync skills after the initial merge pass completes.
 
 ### 4. Launch agent terminals in the worktrees
 

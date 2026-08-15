@@ -651,7 +651,7 @@ function regenIndex(docs) {
 
 const TEMPLATES = {
   research: (t) => `# ${t}\n\n## Question\n\n## Findings\n\n## Open questions\n`,
-  plan: (t) => `# ${t}\n\n## Goal capsule\n\n## Current state\n\n## Target state\n\n## Key technical decisions\n\n## Deliverables\n\n## Build steps\n\n## Risks\n`,
+  plan: (t) => `# ${t}\n\n## Goal capsule\n\n## Current state\n\n## Target state\n\n## Key technical decisions\n\n## Deliverables\n\n## Worktree Strategy\n\n## Risks\n`,
   worktree: (t) => `# ${t}\n\n## Objective\n\n## Scope\n\n## Verification\n\n## Status\n`,
   bug: (t) => `# ${t}\n\n## Repro\n\n## Root cause\n\n## Fix\n\n## Verification\n`,
   coverage: (t) => `# ${t}\n\n## Surface covered\n\n## Resolution intent\n\n## Matrix\n\n## Retirement criteria\n`,
@@ -1038,12 +1038,18 @@ function cmdPrune(args) {
   regenIndex(scanDocs());
 }
 
+function archiveBasename(type, rel) {
+  const base = path.basename(rel);
+  const prefix = type ? `${type}-` : "";
+  return base.startsWith(prefix) ? base : `${prefix}${base}`;
+}
+
 function performArchive(doc, docs, opts) {
   const type = doc.fm.type;
   const defaults = TERMINAL_STATUS[type] ? TERMINAL_STATUS[type][0] : null;
   let status = opts.status;
   if (!status) status = opts.reason === "superseded_by" ? "complete" : defaults || "complete";
-  const newRel = `archive/${path.basename(doc.rel)}`;
+  const newRel = `archive/${archiveBasename(type, doc.rel)}`;
   const newAbs = path.join(docRoot(), newRel);
   if (fs.existsSync(newAbs)) fail(`target exists - ${newRel}`);
   fs.mkdirSync(path.join(docRoot(), "archive"), { recursive: true });
@@ -1091,12 +1097,299 @@ function cmdAbandon(args) {
   if (!status) fail(`cannot abandon doc of type "${type || "(missing)"}" - set --status explicitly`);
   const terminal = TERMINAL_STATUS[type] || [];
   if (!terminal.includes(status)) fail(`status "${status}" is not terminal for type "${type}"`);
+  const archiveName = archiveBasename(type, doc.rel);
   if (dryRun) {
-    console.log(`would abandon ${doc.rel} -> archive/${path.basename(doc.rel)} (status: ${status})`);
+    console.log(`would abandon ${doc.rel} -> archive/${archiveName} (status: ${status})`);
     return;
   }
   performArchive(doc, docs, { status });
   regenIndex(scanDocs());
+  maybeSweep();
+}
+
+function cmdRevive(args) {
+  if (args.length < 1) die("usage: revive <archive-doc>");
+  const docs = scanDocs();
+  let ref = args[0];
+  if (!ref.startsWith("archive/")) {
+    const candidate = docs.find((d) => d.rel === `archive/${ref}` || d.rel.endsWith(`/archive/${ref}`));
+    if (candidate) ref = candidate.rel;
+    else ref = `archive/${ref}`;
+  }
+  const doc = findDoc(docs, ref);
+  if (!doc.rel.startsWith("archive/")) {
+    fail(`"${doc.rel}" is not an archived doc (only archive/ docs can be revived)`);
+  }
+
+  // Infer type: from frontmatter, or from filename prefix (research-, plan-, worktree-, bug-, coverage-, dossier-)
+  let type = doc.fm.type;
+  const baseName = path.basename(doc.rel);
+  if (!type || !TYPE_FOLDER[type]) {
+    for (const t of Object.keys(TYPE_FOLDER)) {
+      if (baseName.startsWith(`${t}-`)) {
+        type = t;
+        break;
+      }
+    }
+  }
+  if (!type || !TYPE_FOLDER[type]) {
+    fail(`cannot infer active folder for "${doc.rel}" - type is missing or unknown`);
+  }
+
+  const folder = TYPE_FOLDER[type];
+  // Strip <type>- prefix from filename if present
+  let activeFilename = baseName;
+  if (activeFilename.startsWith(`${type}-`)) {
+    activeFilename = activeFilename.slice(type.length + 1);
+  }
+
+  const targetRel = `${folder}/${activeFilename}`;
+  const targetAbs = path.join(docRoot(), targetRel);
+  if (fs.existsSync(targetAbs)) {
+    fail(`target exists - ${targetRel}`);
+  }
+
+  fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+  fs.renameSync(doc.abs, targetAbs);
+
+  // 1. Rewrite outbound links relative to new location
+  const moves = { [doc.abs]: targetAbs };
+  let text = rewriteOutbound(doc.text, doc.abs, moves);
+
+  // 2. Rewrite inbound links in other docs
+  for (const other of docs) {
+    if (other.rel === doc.rel) continue;
+    const outboundHrefs = new Set(extractOutbound(other.text).filter((h) => resolveTarget(h, other.abs) === doc.abs));
+    if (outboundHrefs.size === 0) continue;
+    let t = other.text;
+    for (const href of outboundHrefs) t = t.split(href).join(renderHref(targetAbs, other.abs, href));
+    writeDoc(other, t);
+  }
+
+  // 3. Reset frontmatter
+  const status = DEFAULT_STATUS[type] || "active";
+  const fm = { ...doc.fm, type, status, updated: today() };
+  if (fm.superseded_by) delete fm.superseded_by;
+  const staleDays = STALE_DAYS_BY_TYPE[type];
+  if (staleDays) {
+    const deadline = new Date(Date.now() + staleDays * 24 * 3600 * 1000);
+    fm.stale_after = deadline.toISOString().slice(0, 10);
+  }
+
+  fs.writeFileSync(targetAbs, withFrontmatter(text, fm));
+  appendLog(`- ${today()}: revive ${doc.rel} -> ${targetRel}`);
+  console.log(`revived ${doc.rel} -> ${targetRel} (status: ${status})`);
+  regenIndex(scanDocs());
+  maybeSweep();
+}
+
+function parseWorktreeTracks(planDoc) {
+  const text = planDoc.text;
+  const tracks = [];
+  const lines = text.split("\n");
+  let inTrackSection = false;
+  let currentTrack = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (/^##\s+(Worktree Strategy|Worktree Tracks|Worktrees)/i.test(line)) {
+      inTrackSection = true;
+      continue;
+    }
+    if (inTrackSection && /^##\s+/.test(line)) {
+      if (currentTrack) tracks.push(currentTrack);
+      currentTrack = null;
+      inTrackSection = false;
+      continue;
+    }
+
+    if (inTrackSection) {
+      const trackHeader = /^###\s+(.*)/.exec(line);
+      if (trackHeader) {
+        if (currentTrack) tracks.push(currentTrack);
+        const headerContent = trackHeader[1].trim();
+        let branch = "";
+        let title = "";
+        const branchMatch = /`([^`]+)`/.exec(headerContent);
+        if (branchMatch) {
+          branch = branchMatch[1];
+          title = headerContent.replace(/`[^`]+`/, "").replace(/^Track\s*\d+[:\-]?\s*/i, "").replace(/^[:\-]\s*/, "").trim();
+        } else {
+          title = headerContent.replace(/^Track\s*\d+[:\-]?\s*/i, "").trim();
+        }
+        if (!title && branch) title = branch.split("/").pop().replace(/^[a-z]+-/, "");
+        if (!title) title = "Worktree Track";
+        if (!branch) branch = `feat/${kebab(title)}`;
+
+        currentTrack = {
+          branch,
+          title,
+          area: planDoc.fm.area || "fullstack",
+          objective: "",
+          scope: "",
+          tasks: [],
+          verification: "npm test",
+          dependsOn: []
+        };
+        continue;
+      }
+
+      if (currentTrack) {
+        if (/^-\s+\*\*Area\*\*:\s*(.*)/i.test(line)) {
+          const a = line.replace(/^-\s+\*\*Area\*\*:\s*/i, "").trim().toLowerCase();
+          if (AREAS.includes(a)) currentTrack.area = a;
+        } else if (/^-\s+\*\*Branch\*\*:\s*`?([a-zA-Z0-9_\-\/]+)`?/i.test(line)) {
+          const b = line.replace(/^-\s+\*\*Branch\*\*:\s*/i, "").replace(/[`*]/g, "").trim();
+          if (b) currentTrack.branch = b;
+        } else if (/^-\s+\*\*Objective\*\*:\s*(.*)/i.test(line)) {
+          currentTrack.objective = line.replace(/^-\s+\*\*Objective\*\*:\s*/i, "").trim();
+        } else if (/^-\s+\*\*Scope(?:\s*&\s*Files)?\*\*:\s*(.*)/i.test(line)) {
+          currentTrack.scope = line.replace(/^-\s+\*\*Scope(?:\s*&\s*Files)?\*\*:\s*/i, "").trim();
+        } else if (/^-\s+\*\*Verification(?:\s*Criteria)?\*\*:\s*(.*)/i.test(line)) {
+          currentTrack.verification = line.replace(/^-\s+\*\*Verification(?:\s*Criteria)?\*\*:\s*/i, "").trim();
+        } else if (/^-\s+\*\*Depends\s*On\*\*:\s*(.*)/i.test(line)) {
+          const d = line.replace(/^-\s+\*\*Depends\s*On\*\*:\s*/i, "").trim();
+          if (d && !/none/i.test(d)) currentTrack.dependsOn.push(d);
+        } else if (/^-\s+\[\s*\]\s+(.*)/.test(line)) {
+          currentTrack.tasks.push(line.replace(/^-\s+\[\s*\]\s+/, "").trim());
+        }
+      }
+    }
+  }
+  if (currentTrack) tracks.push(currentTrack);
+
+  // Strategy 2: If no tracks from ## Worktree Strategy, check Deliverables table
+  if (tracks.length === 0) {
+    let inDeliverables = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (/^##\s+Deliverables/i.test(line)) {
+        inDeliverables = true;
+        continue;
+      }
+      if (inDeliverables && /^##\s+/.test(line)) {
+        inDeliverables = false;
+        break;
+      }
+      if (inDeliverables && line.startsWith("|") && !line.includes("---")) {
+        const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
+        if (cols.length >= 2 && !/^(#|Deliverable|Track)/i.test(cols[0]) && !/^(Deliverable|Name)/i.test(cols[1])) {
+          const delivTitle = cols.length >= 3 && /^\d+$/.test(cols[0]) ? cols[1] : cols[0];
+          const delivFiles = cols.length >= 3 ? cols[2] : cols[1];
+          if (delivTitle) {
+            tracks.push({
+              branch: `feat/${kebab(delivTitle)}`,
+              title: delivTitle,
+              area: planDoc.fm.area || "fullstack",
+              objective: `Implement ${delivTitle}`,
+              scope: delivFiles || "See plan deliverables.",
+              tasks: [`Implement ${delivTitle}`, `Add unit tests for ${delivTitle}`],
+              verification: "npm test",
+              dependsOn: []
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Strategy 3: Fallback to 1 track matching the plan itself
+  if (tracks.length === 0) {
+    tracks.push({
+      branch: `feat/${kebab(planDoc.fm.title || path.basename(planDoc.rel, ".md"))}`,
+      title: planDoc.fm.title || "Implementation",
+      area: planDoc.fm.area || "fullstack",
+      objective: planDoc.fm.description || `Implement ${planDoc.fm.title}`,
+      scope: "See plan deliverables.",
+      tasks: [`Implement ${planDoc.fm.title} per plan`],
+      verification: "npm test",
+      dependsOn: []
+    });
+  }
+
+  return tracks;
+}
+
+function cmdScaffoldWorktrees(args) {
+  if (args.length < 1) die("usage: scaffold-worktrees <plan-doc>");
+  const docs = scanDocs();
+  const planDoc = findDoc(docs, args[0]);
+  if (planDoc.fm.type !== "plan") {
+    fail(`"${planDoc.rel}" is not a plan (type is "${planDoc.fm.type}")`);
+  }
+
+  const tracks = parseWorktreeTracks(planDoc);
+  const created = [];
+  const skipped = [];
+
+  for (const track of tracks) {
+    const rawSlug = track.branch.includes("/") ? track.branch.split("/").pop() : kebab(track.title);
+    const slug = kebab(rawSlug.replace(/^(frontend|backend|fullstack)-/, ""));
+    const filename = `${track.area}-${slug}.md`;
+    const rel = `worktrees/${filename}`;
+    const abs = path.join(docRoot(), rel);
+
+    if (fs.existsSync(abs)) {
+      skipped.push(rel);
+      continue;
+    }
+
+    const fm = {
+      type: "worktree",
+      title: track.title,
+      description: track.objective || `${track.title} - implementation track for ${planDoc.fm.title}.`,
+      area: track.area,
+      tags: planDoc.fm.tags || [],
+      status: "active",
+      created: today(),
+      updated: today(),
+      stale_after: new Date(Date.now() + (STALE_DAYS_BY_TYPE.worktree || 14) * 24 * 3600 * 1000).toISOString().slice(0, 10),
+      related: [`../plans/${path.basename(planDoc.rel)}`],
+    };
+    if (track.dependsOn && track.dependsOn.length) {
+      fm.depends_on = track.dependsOn;
+    }
+
+    const taskList = track.tasks.length
+      ? track.tasks.map((t) => `- [ ] ${t}`).join("\n")
+      : "- [ ] Implementation complete";
+
+    const body = `# ${track.title}
+
+## Objective
+
+${track.objective || track.title}
+
+## Scope
+
+${track.scope || "See plan deliverables."}
+
+## Tasks
+
+${taskList}
+
+## Verification
+
+${track.verification || "npm test"}
+
+## Status
+
+- [ ] Worktree created
+- [ ] Implementation complete
+- [ ] Tests pass
+- [ ] Merged into integration branch
+`;
+
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, withFrontmatter(body, fm));
+    appendLog(`- ${today()}: scaffold-worktrees ${planDoc.rel} -> ${rel}`);
+    created.push(rel);
+  }
+
+  for (const c of created) console.log(`created ${c}`);
+  for (const s of skipped) console.log(`skipped ${s} (target exists)`);
+  if (created.length === 0 && skipped.length === 0) console.log("no worktrees to scaffold");
+  if (created.length) regenIndex(scanDocs());
   maybeSweep();
 }
 
@@ -1498,7 +1791,9 @@ Usage: bun docs.js <command> [args] [flags]
   index                                regenerate index.md from frontmatter
   clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]  auto-archive terminal/superseded docs and GC unreferenced archive docs
   prune [--dry-run|--apply] [--gc] [--ttl <days>] [--force]  propose archive moves; --gc lists archive deletions
-  archive <doc> [--status=<v>]         move to archive/, set terminal status, rewrite links, append log
+  archive <doc> [--status=<v>]         move to archive/<type>-*.md, set terminal status, rewrite links, append log
+  revive <archive-doc>                 restore an archived doc to its active folder with status: active
+  scaffold-worktrees <plan-doc>        parse ## Worktree Strategy tracks from plan and create worktrees/*.md
   abandon <doc> [--status=<v>] [--dry-run]  one-step archive with the default terminal status for the doc's type
   ensure [--dry-run|--apply]           converge the 8-folder corpus onto the 6-folder structure (idempotent)
 
@@ -1521,6 +1816,8 @@ async function main() {
     case "clean": return cmdClean(rest);
     case "prune": return cmdPrune(rest);
     case "archive": return cmdArchive(rest);
+    case "revive": return cmdRevive(rest);
+    case "scaffold-worktrees": return cmdScaffoldWorktrees(rest);
     case "abandon": return cmdAbandon(rest);
     case "ensure": return cmdEnsure(rest);
     case "--help":

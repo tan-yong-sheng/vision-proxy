@@ -1,6 +1,6 @@
 # review-gate reference
 
-Detailed commands, templates, and integration examples for `/review-gate`.
+Detailed commands, templates, and integration examples for `/review-gate` powered by [`no-mistakes`](https://github.com/kunchenguid/no-mistakes).
 
 ## Single-branch review
 
@@ -66,7 +66,7 @@ Path: `.agents/docs/qa/<title>.md`
 Use `/agents-docs` to create the dossier so frontmatter and index stay consistent:
 
 ```bash
-bun .agents/skills/agents-docs/scripts/docs.js new qa "<title>" --area <area>
+bun .agents/skills/agents-docs/scripts/docs.js new coverage "<title>" --area <area>
 ```
 
 Then paste the findings into the dossier body:
@@ -90,9 +90,16 @@ Then paste the findings into the dossier body:
 - Ask-user findings: M
 - Skipped findings: K
 
-## Ask-user findings (verbatim)
+## Auto-Fixed Findings
 
-<paste each finding here>
+| Finding ID | Rule / Concern | Fix Applied | Commit Hash |
+|---|---|---|---|
+| `<id>` | `<rule>` | `<fix description>` | `<hash>` |
+
+## Resolution Intent
+
+- Ask-user findings resolved: `<rationale of choices taken>`
+- Pre-existing codebase bugs filed: `bugs/<area>-<slug>.md`
 
 ## Next actions
 
@@ -107,6 +114,29 @@ Regenerate the index:
 
 ```bash
 bun .agents/skills/agents-docs/scripts/docs.js index
+```
+
+## Daemon polling & JSON-RPC socket architecture
+
+The `poll-no-mistakes.sh` script monitors active runs by communicating directly with the daemon:
+
+1. **Repo lookup:** Resolves main repo root via `git rev-parse --git-common-dir` and reads `repo_id` from `~/.no-mistakes/state.sqlite`.
+2. **Socket RPC:** Sends `get_active_run` over Unix domain socket `~/.no-mistakes/socket` via JSON-RPC.
+3. **State evaluation:**
+   - Prints `RUNNING` while active.
+   - When `run.awaiting_agent` is true, parses findings list.
+   - Auto-fixes `action: auto-fix` finding IDs via socket command.
+   - Halts on `action: ask-user` findings unless `AUTO_APPROVE_ASK_USER=1` is exported.
+   - Prints `FINISHED` when the run completes with an outcome.
+
+### Repo-level auto-fix configuration
+
+To allow up to 3 rounds of automated review fixes without manual gate intervention:
+
+```yaml
+# .no-mistakes/config.yaml
+auto_fix:
+  review: 3
 ```
 
 ## Standalone parallel review fallback
@@ -154,7 +184,7 @@ No master local report is needed - the dossiers are the source of truth.
 After each per-branch run finishes, create or update its QA dossier:
 
 ```bash
-bun .agents/skills/agents-docs/scripts/docs.js new qa "<title>" --area <area>
+bun .agents/skills/agents-docs/scripts/docs.js new coverage "<title>" --area <area>
 ```
 
 Then:

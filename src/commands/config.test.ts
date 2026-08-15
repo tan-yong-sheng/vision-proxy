@@ -2,8 +2,8 @@
  * Unit tests for `vp config` subcommands.
  *
  * Uses an isolated temp cwd so the project .vision-proxy.json is isolated from
- * the user config dir. Provider/user config writes are exercised via `providerAdd`
- * in provider.test.ts with HOME overridden.
+ * the user config dir. Provider configuration is exercised via `configSet`
+ * (writing `provider` into the project file) and `configValidate`.
  */
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -83,6 +83,27 @@ describe("configSet", () => {
 		const r = await configSet("notAKey", "x", cwd);
 		assert.equal(r.ok, false);
 		assert.equal(r.code, 1);
+	});
+
+	it("accepts a JSON object for baseURLs", async () => {
+		const r = await configSet("baseURLs", '{"openai":"http://localhost:8000/v1"}', cwd);
+		assert.equal(r.ok, true);
+		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
+		assert.deepEqual(JSON.parse(raw).baseURLs, { openai: "http://localhost:8000/v1" });
+	});
+
+	it("accepts a JSON array for fallbackModels", async () => {
+		const r = await configSet("fallbackModels", '["openai/gpt-4o"]', cwd);
+		assert.equal(r.ok, true);
+		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
+		assert.deepEqual(JSON.parse(raw).fallbackModels, ["openai/gpt-4o"]);
+	});
+
+	it("falls back to the default for malformed JSON values", async () => {
+		const r = await configSet("baseURLs", "not-json", cwd);
+		assert.equal(r.ok, true);
+		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
+		assert.deepEqual(JSON.parse(raw).baseURLs, {});
 	});
 });
 

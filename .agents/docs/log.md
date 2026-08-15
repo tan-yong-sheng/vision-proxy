@@ -35,3 +35,40 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
 - 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
 - 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
+- 2026-08-15: new plan plans/fullstack-add-help-output-for-every-cli-subcommand.md
+- 2026-08-15: new research research/fullstack-vercel-ai-sdk-provider-compatibility-for-openai-gemini-anthropic-compatible-endp.md
+- 2026-08-15: archive worktrees/backend-pi-extension-installer.md -> archive/worktree-backend-pi-extension-installer.md (merged)
+- 2026-08-15: archive worktrees/backend-lazy-cache-pruning.md -> archive/worktree-backend-lazy-cache-pruning.md (merged)
+- 2026-08-15: archive worktrees/backend-keyring-credential-storage.md -> archive/worktree-backend-keyring-credential-storage.md (merged)
+- 2026-08-15: archive research/fullstack-vercel-ai-sdk-provider-compatibility-for-openai-gemini-anthropic-compatible-endp.md -> archive/research-fullstack-vercel-ai-sdk-provider-compatibility-for-openai-gemini-anthropic-compatible-endp.md (complete)
+- 2026-08-15: archive research/backend-vision-proxy-review-run-lessons.md -> archive/research-backend-vision-proxy-review-run-lessons.md (complete)
+- 2026-08-15: archive plans/backend-vision-proxy-post-migration-feature-set.md -> archive/plan-backend-vision-proxy-post-migration-feature-set.md (complete)
+- 2026-08-15: new plan plans/backend-add-provider-specific-baseurl-config-keys-to-vp-config-set-so-users-can-persist-.md
+- 2026-08-15: new plan plans/backend-add-fallbackmodels-config-key-with-comma-separated-parser-for-vp-config-set.md
+- 2026-08-15: new research research/backend-pi-hook-versus-integration-support.md
+- 2026-08-15: new plan plans/backend-unify-hook-and-integration-commands.md
+- 2026-08-15: new research research/backend-removing-vp-allow-home-path-restriction.md
+- 2026-08-15: new plan plans/backend-remove-vp-allow-home-path-restriction.md
+- 2026-08-15: archive research/backend-removing-vp-allow-home-path-restriction.md -> archive/research-backend-removing-vp-allow-home-path-restriction.md (complete)
+- 2026-08-15: new plan plans/backend-add-config-keys-for-fallback-models-and-provider-baseurl.md
+- 2026-08-15: archive plans/backend-add-fallbackmodels-config-key-with-comma-separated-parser-for-vp-config-set.md -> archive/plan-backend-add-fallbackmodels-config-key-with-comma-separated-parser-for-vp-config-set.md (complete)
+- 2026-08-15: archive plans/backend-add-provider-specific-baseurl-config-keys-to-vp-config-set-so-users-can-persist-.md -> archive/plan-backend-add-provider-specific-baseurl-config-keys-to-vp-config-set-so-users-can-persist-.md (complete)
+- 2026-08-15: new plan plans/backend-simplify-cli-surface-drop-vp-provider-add-and-unify-vp-hook-into-vp-integration.md
+- 2026-08-15: archive plans/backend-simplify-provider-setup-workflow-remove-redundant-vp-provider-add-make-config-se.md -> archive/plan-backend-simplify-provider-setup-workflow-remove-redundant-vp-provider-add-make-config-se.md (complete)
+- 2026-08-15: archive plans/backend-unify-hook-and-integration-commands.md -> archive/plan-backend-unify-hook-and-integration-commands.md (complete)
+- 2026-08-15: scaffold-worktrees plans/backend-add-config-keys-for-fallback-models-and-provider-baseurl.md -> worktrees/backend-config-keys.md
+- 2026-08-15: scaffold-worktrees plans/backend-simplify-cli-surface-drop-vp-provider-add-and-unify-vp-hook-into-vp-integration.md -> worktrees/backend-vp-cli-simplify.md
+- 2026-08-15: scaffold-worktrees plans/fullstack-add-help-output-for-every-cli-subcommand.md -> worktrees/fullstack-vp-help-output.md
+- 2026-08-15: scaffold-worktrees plans/backend-remove-vp-allow-home-path-restriction.md -> worktrees/backend-vp-remove-allow-home.md
+- 2026-08-15: new research research/backend-integration-status-command.md
+- 2026-08-15: archive worktrees/fullstack-vp-help-output.md -> archive/worktree-fullstack-vp-help-output.md (merged)
+- 2026-08-15: archive worktrees/backend-vp-remove-allow-home.md -> archive/worktree-backend-vp-remove-allow-home.md (merged)
+- 2026-08-15: archive worktrees/backend-config-keys.md -> archive/worktree-backend-config-keys.md (merged)
+- 2026-08-15: archive worktrees/backend-vp-cli-simplify.md -> archive/worktree-backend-vp-cli-simplify.md (merged)
+- 2026-08-15: new plan plans/backend-integration-status-command.md
+- 2026-08-15: scaffold-worktrees plans/backend-integration-status-command.md -> worktrees/backend-integration-status.md
+- 2026-08-15: revive archive/worktree-backend-vp-cli-simplify.md -> worktrees/backend-vp-cli-simplify.md
+- 2026-08-15: archive worktrees/backend-integration-status.md -> archive/worktree-backend-integration-status.md (abandoned)
+- 2026-08-15: new coverage qa/backend-vp-cli-cleanup-merge-preview.md
+- 2026-08-15: archive worktrees/backend-vp-cli-simplify.md -> archive/worktree-backend-vp-cli-simplify.md (merged)
+- 2026-08-15: archive qa/backend-vp-cli-cleanup-merge-preview.md -> archive/coverage-backend-vp-cli-cleanup-merge-preview.md (retired)

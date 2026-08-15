@@ -1,16 +1,17 @@
 /**
  * Unit tests for `vp provider` subcommands.
  *
- * `providerAdd` writes to ~/.vision-proxy/config.json, so we override HOME to a
- * temp dir. `providerList` / `providerCheck` only read env + the registry, so
- * they run with an isolated env map.
+ * `providerList` / `providerCheck` only read env + the registry, so they run
+ * with an isolated env map. `providerStoreKey` / `providerDeleteKey` /
+ * `providerListKeys` exercise the keyring backend, swapped for a fake in
+ * beforeEach.
  */
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { providerAdd, providerCheck, providerList, providerDeleteKey, providerListKeys, providerStoreKey } from "./provider.ts";
+import { providerCheck, providerList, providerDeleteKey, providerListKeys, providerStoreKey } from "./provider.ts";
 import { resolveModel } from "../provider.ts";
 import { setKeyringBackend } from "../keyring.ts";
 import type { KeyringBackend } from "../keyring.ts";
@@ -41,10 +42,6 @@ afterEach(async () => {
 	setKeyringBackend(savedBackend);
 });
 
-function userConfigPath(): string {
-	return path.join(home, ".vision-proxy", "config.json");
-}
-
 describe("providerList", () => {
 	it("lists all known providers and key presence from env", () => {
 		const r = providerList({ OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "", GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv);
@@ -61,21 +58,6 @@ describe("providerList", () => {
 		const r = providerList({ OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv);
 		assert.equal(r.ok, true);
 		assert.match(r.message, /openai.*present/);
-	});
-});
-
-describe("providerAdd", () => {
-	it("registers a known provider into the user config", async () => {
-		const r = await providerAdd("openai", env, home);
-		assert.equal(r.ok, true);
-		const raw = await readFile(userConfigPath(), "utf8");
-		assert.equal(JSON.parse(raw).provider, "openai");
-	});
-
-	it("rejects an unknown provider", async () => {
-		const r = await providerAdd("bogus", env);
-		assert.equal(r.ok, false);
-		assert.equal(r.code, 1);
 	});
 });
 
@@ -192,5 +174,29 @@ describe("resolveModel keyring fallback", () => {
 	it("still reports missing key when env and keyring are both empty", () => {
 		const r = resolveModel("openai", "gpt-4o", { OPENAI_API_KEY: "" } as NodeJS.ProcessEnv);
 		assert.equal(r.ok, false);
+	});
+
+	it("prefers the provider env var base URL over an explicit one", () => {
+		const r = resolveModel(
+			"openai",
+			"gpt-4o",
+			{ OPENAI_API_KEY: "sk-x", OPENAI_BASE_URL: "http://env/v1" } as NodeJS.ProcessEnv,
+			undefined,
+			"http://explicit/v1",
+		);
+		assert.equal(r.ok, true);
+		if (r.ok) assert.equal(r.model.baseURL, "http://env/v1");
+	});
+
+	it("uses an explicit base URL when no env var is set", () => {
+		const r = resolveModel(
+			"openai",
+			"gpt-4o",
+			{ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv,
+			undefined,
+			"http://explicit/v1",
+		);
+		assert.equal(r.ok, true);
+		if (r.ok) assert.equal(r.model.baseURL, "http://explicit/v1");
 	});
 });

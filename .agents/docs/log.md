@@ -28,3 +28,10 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: archive research/backend-pi-extension-installer-for-vision-proxy.md -> archive/research-backend-pi-extension-installer-for-vision-proxy.md (complete)
 - 2026-08-15: archive research/backend-keyring-credential-storage-for-vision-proxy.md -> archive/research-backend-keyring-credential-storage-for-vision-proxy.md (complete)
 - 2026-08-15: new coverage qa/backend-vision-proxy-post-migration-merge-review.md
+- 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
+- 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
+- 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
+- 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
+- 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
+- 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)
+- 2026-08-15: sync research/backend-vision-proxy-review-run-lessons.md from .lavish/vision-proxy-review-lessons.html (synced from lavish feedback)

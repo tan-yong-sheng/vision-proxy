@@ -8,13 +8,16 @@ status: active
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-11-13"
-related: []
+related:
+  - ../research/backend-vision-proxy-review-run-lessons.md
+  - ../bugs/backend-pi-extension-undeclared-typebox-dependency.md
+  - ../bugs/backend-core-dead-max-tool-calls-per-turn-surface.md
 ---
 # vision-proxy post-migration merge review
 
 ## Surface covered
 
-Combined state of three parallel feature branches merged into the disposable `int-merge` worktree:
+Combined state of three parallel feature branches merged into the disposable `preview-merge` (formerly `int-merge`) worktree:
 
 - `vp-lazy-cache-prune` — `cacheMaxAgeDays` config/env + lazy pruning on `cacheGet`
 - `vp-pi-extension` — `vp integration install pi` and Pi extension template
@@ -23,18 +26,25 @@ Combined state of three parallel feature branches merged into the disposable `in
 ## Resolution intent
 
 Run `/review-gate` (no-mistakes `axi run`) on the merge-preview worktree before merging into `configurable-analyze-image-limit`.
-This is a local-only review (`--skip push,pr,ci`) because `int-merge` is disposable.
+This is a local-only review (`--skip push,pr,ci`) because preview worktrees are disposable.
 
 ## Matrix
 
-| branch | merged into int-merge | commit | local checks |
+| branch | merged into preview-merge | commit | local checks |
 |---|---|---|---|
-| `vp-lazy-cache-prune` | yes | `f12ac2c` | pnpm install / build / test / typecheck / fallow audit pass |
-| `vp-pi-extension` | yes | `0cd7262` | pnpm install / build / test / typecheck / fallow audit pass |
-| `vp-keyring-storage` | yes | `e9c3b92` | pnpm install / build / test / typecheck / fallow audit pass |
+| `vp-lazy-cache-prune` | yes | `308885a` | pnpm install / build / test / typecheck / fallow audit pass |
+| `vp-pi-extension` | yes | `3a4424e` | pnpm install / build / test / typecheck / fallow audit pass |
+| `vp-keyring-storage` | yes | `01fed25` | pnpm install / build / test / typecheck / fallow audit pass |
+
+## Review Findings & Escalations
+
+- **W1 (Undeclared `typebox` runtime dependency):** Tracked in [../bugs/backend-pi-extension-undeclared-typebox-dependency.md](../bugs/backend-pi-extension-undeclared-typebox-dependency.md). Recommended resolution is Option A1 (inline JSON Schema).
+- **W2 (Dead `maxToolCallsPerTurn` surface):** Tracked in [../bugs/backend-core-dead-max-tool-calls-per-turn-surface.md](../bugs/backend-core-dead-max-tool-calls-per-turn-surface.md). Recommended resolution is Option B1 (prune dead configuration surface).
+- **Operational lessons & post-mortem:** Documented in [../research/backend-vision-proxy-review-run-lessons.md](../research/backend-vision-proxy-review-run-lessons.md).
 
 ## Retirement criteria
 
 - no-mistakes review reaches a terminal outcome
 - Findings are resolved or escalated
-- `int-merge` is merged into `configurable-analyze-image-limit` or the QA worktree is discarded and branches are fixed
+- `preview-merge` is merged into `configurable-analyze-image-limit` and stale worktrees (`int-merge`, `preview-merge`) are removed
+

@@ -10,6 +10,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { getStoredProviderKey } from "./keyring.ts";
 
 export interface ProviderSpec {
 	id: string;
@@ -119,7 +120,8 @@ export function resolveModel(
 			apiKeyEnv: `${providerId.toUpperCase()}_API_KEY`,
 		};
 	}
-	const apiKey = explicitApiKey ?? envValue(provider.apiKeyEnv, env);
+	const apiKey =
+		explicitApiKey ?? envValue(provider.apiKeyEnv, env) ?? getStoredProviderKey(providerId);
 	const baseURL = envValue(provider.baseUrlEnv, env);
 	if (!apiKey) {
 		return {

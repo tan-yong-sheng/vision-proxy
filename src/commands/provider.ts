@@ -12,6 +12,12 @@ import {
 	resolveModel,
 	type ProviderSpec,
 } from "../provider.ts";
+import {
+	deleteProviderKey,
+	getStoredProviderKey,
+	listStoredProviderKeys,
+	storeProviderKey,
+} from "../keyring.ts";
 import { readJsonFile } from "../config.ts";
 import os from "node:os";
 import path from "node:path";
@@ -93,4 +99,88 @@ export function providerCheck(
 		message: lines.join("\n"),
 		code: allOk ? 0 : 1,
 	};
+}
+
+function requireProvider(providerId: string): ProviderSpec | undefined {
+	return getProvider(providerId);
+}
+
+function unknownProviderResult(providerId: string): ProviderResult {
+	return {
+		ok: false,
+		message: `unknown provider "${providerId}". Known: ${listProviders().map((p) => p.id).join(", ")}`,
+		code: 1,
+	};
+}
+
+/**
+ * Store a provider's API key in the OS keyring. The key is read from stdin so
+ * it never appears in shell history or process listings.
+ */
+export async function providerStoreKey(
+	providerId: string,
+	readStdin: () => Promise<string> = () => readStdinDefault(),
+): Promise<ProviderResult> {
+	const spec = requireProvider(providerId);
+	if (!spec) {
+		return unknownProviderResult(providerId);
+	}
+	let apiKey = "";
+	try {
+		apiKey = (await readStdin()).replace(/\r?\n/g, "");
+	} catch {
+		apiKey = "";
+	}
+	if (!apiKey) {
+		return { ok: false, message: "no key read from stdin", code: 1 };
+	}
+	const res = storeProviderKey(providerId, apiKey);
+	if (!res.ok) {
+		return { ok: false, message: res.error, code: 1 };
+	}
+	return {
+		ok: true,
+		message: `stored key for "${providerId}" in the system keyring.`,
+		code: 0,
+	};
+}
+
+/** Delete a provider's API key from the OS keyring. */
+export function providerDeleteKey(providerId: string): ProviderResult {
+	const spec = requireProvider(providerId);
+	if (!spec) {
+		return unknownProviderResult(providerId);
+	}
+	const res = deleteProviderKey(providerId);
+	if (!res.ok) {
+		return { ok: false, message: res.error, code: 1 };
+	}
+	return {
+		ok: true,
+		message: res.deleted
+			? `deleted key for "${providerId}" from the system keyring.`
+			: `no stored key for "${providerId}".`,
+		code: 0,
+	};
+}
+
+/** List providers that have a key stored in the OS keyring. */
+export function providerListKeys(): ProviderResult {
+	const stored = listStoredProviderKeys();
+	const lines = stored.map((s) => {
+		const hasKey = Boolean(getStoredProviderKey(s.providerId));
+		return `${s.providerId}  key: ${hasKey ? "present" : "missing"}`;
+	});
+	if (lines.length === 0) {
+		return { ok: true, message: "no keys stored in the keyring.", code: 0 };
+	}
+	return { ok: true, message: lines.join("\n"), code: 0 };
+}
+
+async function readStdinDefault(): Promise<string> {
+	const { stdin } = process;
+	if (!stdin || stdin.isTTY) return "";
+	const chunks: Buffer[] = [];
+	for await (const chunk of stdin) chunks.push(chunk as Buffer);
+	return Buffer.concat(chunks).toString("utf8");
 }

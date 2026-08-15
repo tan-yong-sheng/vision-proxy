@@ -6,7 +6,7 @@
  *   analyze <paths...> [--format] [--provider] [--model] [--joint] [--crop i:form]
  *                     [--no-fence] [--config] [--json] [--max-output-tokens] [--question] [--api-key]
  *   config   init | get | set <k> <v> | validate
- *   provider list | add <name> | check [<name>]
+ *   provider list | add <name> | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]
  *   integration install | show | uninstall <agent>
  *   version | help
@@ -19,7 +19,14 @@ import {
 	configSet,
 	configValidate,
 } from "./commands/config.ts";
-import { providerList, providerAdd, providerCheck } from "./commands/provider.ts";
+import {
+	providerList,
+	providerAdd,
+	providerCheck,
+	providerStoreKey,
+	providerDeleteKey,
+	providerListKeys,
+} from "./commands/provider.ts";
 import { cacheStatus, cacheClearCmd, cachePruneCmd } from "./commands/cache.ts";
 import { runIntegration } from "./commands/integration.ts";
 import { isKnownProvider } from "./provider.ts";
@@ -109,7 +116,7 @@ const HELP = `vision-proxy (vp) ${VERSION}
 Usage:
   vp analyze <paths...> [options]
   vp config <init|get|set|validate> ...
-  vp provider <list|add|check> ...
+  vp provider <list|add|check|store-key|delete-key|list-keys> ...
   vp cache <status|clear|prune> ...
 
 analyze options:
@@ -135,6 +142,9 @@ provider options:
   list                       list providers + key presence
   add <name>                 register provider + key/env
   check [<name>]             verify auth
+  store-key <name>           read key from stdin, store in system keyring
+  delete-key <name>          delete key from the system keyring
+  list-keys                  list providers with keyring-stored keys
 
 cache options:
   status                     hit rate + size
@@ -279,8 +289,29 @@ export async function main(argv: string[]): Promise<void> {
 				case "check":
 					handle(providerCheck(positionals[0], env));
 					return;
+				case "store-key": {
+					const name = positionals[0];
+					if (!name) {
+						fail("usage: vp provider store-key <name>");
+						return;
+					}
+					handle(await providerStoreKey(name));
+					return;
+				}
+				case "delete-key": {
+					const name = positionals[0];
+					if (!name) {
+						fail("usage: vp provider delete-key <name>");
+						return;
+					}
+					handle(providerDeleteKey(name));
+					return;
+				}
+				case "list-keys":
+					handle(providerListKeys());
+					return;
 				default:
-					fail(`unknown provider subcommand "${sub ?? ""}". Try: list, add, check`);
+					fail(`unknown provider subcommand "${sub ?? ""}". Try: list, add, check, store-key, delete-key, list-keys`);
 			}
 			return;
 		}

@@ -8,6 +8,7 @@
  *   config   init | get | set <k> <v> | validate
  *   provider list | add <name> | check [<name>]
  *   cache    status | clear | prune [--older <days>]
+ *   integration install | show | uninstall <agent>
  *   version | help
  */
 import { runAnalyze, parseCropFlags, AnalyzeError, type AnalyzeFlags } from "./commands/analyze.ts";
@@ -20,6 +21,7 @@ import {
 } from "./commands/config.ts";
 import { providerList, providerAdd, providerCheck } from "./commands/provider.ts";
 import { cacheStatus, cacheClearCmd, cachePruneCmd } from "./commands/cache.ts";
+import { runIntegration } from "./commands/integration.ts";
 import { isKnownProvider } from "./provider.ts";
 import type { GroundingFormat } from "./core.ts";
 import { basename } from "node:path";
@@ -138,6 +140,11 @@ cache options:
   status                     hit rate + size
   clear                      drop all entries
   prune [--older <days>]     evict entries older than N days (default 30)
+
+integration options:
+  install <agent>            install the vision-proxy integration for pi
+  show <agent>               print the generated extension source
+  uninstall <agent>          remove the integration
 
 hook options:
   install <agent>          install UserPromptSubmit shim for claude-code | codex
@@ -302,6 +309,14 @@ export async function main(argv: string[]): Promise<void> {
 			const { positionals } = parseFlags(subRest);
 			const agent = positionals[0];
 			handle(await runHook(sub ?? "", agent ?? ""));
+			return;
+		}
+
+		case "integration": {
+			const [sub, ...subRest] = rest;
+			const { positionals } = parseFlags(subRest);
+			const agent = positionals[0];
+			handle(await runIntegration(sub ?? "", agent ?? ""));
 			return;
 		}
 

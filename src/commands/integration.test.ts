@@ -50,21 +50,11 @@ async function assertValidPiExtension(source: string, home: string): Promise<voi
 	const dir = join(home, "ext-test");
 	mkdirSync(dir, { recursive: true });
 
-	const testSource = source
-		.replace(/"node:child_process"/g, '"./mock-child-process.ts"')
-		.replace(/"typebox"/g, '"./mock-typebox.ts"');
+	// Redirect imports to local stubs so the generated extension can be loaded
+	// and executed without real dependencies or subprocesses.
+	const testSource = source.replace(/"node:child_process"/g, '"./mock-child-process.ts"');
 
 	writeFileSync(join(dir, "vision-proxy.ts"), testSource);
-	writeFileSync(
-		join(dir, "mock-typebox.ts"),
-		`export const Type = {
-	Object: (props) => props,
-	Array: (item) => ({ type: "array", item }),
-	Optional: (schema) => ({ ...schema, optional: true }),
-	String: (opts) => ({ type: "string", opts }),
-};
-`,
-	);
 	writeFileSync(
 		join(dir, "mock-child-process.ts"),
 		`let nextResult;

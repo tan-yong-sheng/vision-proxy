@@ -64,6 +64,7 @@ The description placeholder must be replaced with a real one-line summary.
 When creating a `plan`, evaluate worktree granularity:
 - Default to a single worktree for small or tightly coupled changes.
 - Define structured parallel tracks in `## Worktree Strategy` for independent features.
+- For stacked or multi-phase plans, declare execution phases with `depends_on`, `stack_position` (the phase/wave number, where parallel worktrees in the same wave share the same position), and `stack_batch` in `## Worktree Strategy`.
 - Fill in the `## Tools / MCP / Skills` section with the native tools, MCP servers, and agent skills the plan depends on.
 - Conclude the planning turn by asking the user if they want to dispatch the planned worktree(s).
 

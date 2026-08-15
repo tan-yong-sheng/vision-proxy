@@ -1,5 +1,6 @@
 autoInstallPeers: false
 allowBuilds:
+  '@biomejs/biome': true
   lefthook: true
 minimumReleaseAgeExclude:
   - '@ai-sdk/google@4.0.44'

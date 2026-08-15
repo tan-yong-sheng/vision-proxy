@@ -111,8 +111,8 @@ Your job is to add `vp integration status` with version-marker based outdated de
 
 ### Context to read first
 
-1. Read `.agents/docs/archive/research-backend-integration-status-command.md` for the research.
-2. Read `.agents/docs/archive/plan-backend-integration-status-command.md` for the detailed plan.
+1. Read `./research-backend-integration-status-command.md` for the research.
+2. Read `./plan-backend-integration-status-command.md` for the detailed plan.
 3. Inspect the current branch code:
    - `src/commands/integration.ts` (unified install/show/list/uninstall logic)
    - `src/pi-extension.ts` (embedded Pi extension source)

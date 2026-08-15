@@ -7,7 +7,12 @@ tags: [cli, integration, bug, pi]
 status: active
 branch: fix/pi-uninstall-message
 base: main
-stack_position: 1
+stack_position: 2
+stack_batch: vp-qa-fixes
+depends_on:
+  - ../worktrees/backend-prune-max-tool-calls-per-turn.md
+  - ../worktrees/backend-fix-pi-extension-typebox-dependency.md
+  - ../worktrees/backend-tooling-biome-betterleaks.md
 created: "2026-08-15"
 updated: "2026-08-15"
 commits_verified: []
@@ -16,6 +21,12 @@ stale_after: "2026-08-29"
 related:
   - ../qa/backend-post-merge-qa-for-pr-5.md
   - ../plans/backend-cli-distribution-strategy.md
+  - ../plans/backend-fix-pi-uninstall-message.md
+  - ../worktrees/backend-fix-hook-shim-shared-mjs-copy.md
+  - ../worktrees/backend-prune-max-tool-calls-per-turn.md
+  - ../worktrees/backend-fix-pi-extension-typebox-dependency.md
+  - ../worktrees/backend-tooling-biome-betterleaks.md
+  - ../plans/backend-tooling-biome-betterleaks.md
 ---
 # fix pi uninstall message
 
@@ -38,11 +49,12 @@ Fix the bug where `vp integration uninstall pi` reports "pi integration was not 
 
 ## Tasks
 
-- [x] Set `removed = true` after successfully deleting the target file.
-- [x] Add regression test asserting the uninstall message confirms removal.
-- [x] Run `npm test`, `npm run typecheck`, and `fallow audit`.
-- [x] Push branch `fix/pi-uninstall-message` to origin.
-- [ ] Create PR and merge to `main`.
+- [ ] Re-apply the corrected `removed` logic in `integrationUninstall` (the prior attempt in `c8852cc` was reverted on `main` by `0031fd0`).
+- [ ] Add regression test asserting `uninstalled pi integration` after `pi` install + uninstall.
+- [ ] Run `npm test`, `npm run typecheck`, and `fallow audit`.
+- [ ] Open PR and merge to `main`.
+
+> NOTE: previously marked done, but the fix was reverted on `main` (`0031fd0` reverted `c8852cc`). The bug is still live. See parent plan `../plans/backend-fix-pi-uninstall-message.md`.
 
 ## Verification
 
@@ -54,5 +66,6 @@ Fix the bug where `vp integration uninstall pi` reports "pi integration was not 
 
 ## Notes
 
+- The bug is still live on `main`: a prior fix (`c8852cc`) was reverted (`0031fd0`). Re-do per `../plans/backend-fix-pi-uninstall-message.md`.
 - Do not merge until post-merge QA is complete and any related fixes are batched.
-- Related: the hook agents (claude-code, codex) have a separate `shared.mjs` copy bug recorded in `../qa/backend-post-merge-qa-for-pr-5.md`.
+- Related: the hook agents (claude-code, codex) have a separate `shared.mjs` copy bug recorded in `../qa/backend-post-merge-qa-for-pr-5.md` and tracked in `../plans/backend-fix-hook-shim-shared-mjs-copy.md`.

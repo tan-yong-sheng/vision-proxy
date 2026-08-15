@@ -1,15 +1,15 @@
 ---
 type: coverage
 title: "Post-merge QA for PR #5"
-description: "Manual validation findings for the merged vision-proxy CLI cleanup branches."
+description: Manual validation findings for the merged vision-proxy CLI cleanup branches.
 area: backend
 tags: [cli, integration, config, qa, pr-5, post-merge]
 status: active
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-11-13"
-related:
-  - ../archive/coverage-backend-vp-cli-cleanup-merge-preview.md
+related: [../archive/coverage-backend-vp-cli-cleanup-merge-preview.md]
+visual: .lavish/worktree-plan.html
 ---
 # Post-merge QA for PR #5
 

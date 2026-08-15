@@ -84,3 +84,17 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: archive research/backend-integration-status-command.md -> archive/research-backend-integration-status-command.md (complete)
 - 2026-08-15: archive research/backend-pi-hook-versus-integration-support.md -> archive/research-backend-pi-hook-versus-integration-support.md (complete)
 - 2026-08-15: archive research/backend-hook-based-tool-interception-for-vision-proxy.md -> archive/research-backend-hook-based-tool-interception-for-vision-proxy.md (complete)
+- 2026-08-15: new plan plans/backend-fix-pi-uninstall-message.md
+- 2026-08-15: new plan plans/backend-fix-hook-shim-shared-mjs-copy.md
+- 2026-08-15: new worktree worktrees/backend-fix-hook-shim-shared-mjs-copy.md
+- 2026-08-15: ensure structure applied (2 change(s))
+- 2026-08-15: new worktree worktrees/backend-vp-distribution.md
+- 2026-08-15: new worktree worktrees/backend-prune-max-tool-calls-per-turn.md
+- 2026-08-15: new worktree worktrees/backend-fix-pi-extension-typebox-dependency.md
+- 2026-08-15: new plan plans/backend-tooling-biome-betterleaks.md
+- 2026-08-15: new worktree worktrees/backend-tooling-biome-betterleaks.md
+- 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)
+- 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)
+- 2026-08-15: new plan plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md
+- 2026-08-15: sync plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md from .lavish/worktree-plan.html (synced from lavish feedback)
+- 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)

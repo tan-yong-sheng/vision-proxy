@@ -3,7 +3,7 @@ type: plan
 title: "CLI distribution strategy"
 description: "Decide how users install the vision-proxy CLI globally and how the hook shims find the binary."
 area: backend
-tags: [cli, distribution, packaging, npm, homebrew, install]
+tags: [cli, distribution, packaging, homebrew, github-releases, curl, bun, install]
 status: active
 created: "2026-08-15"
 updated: "2026-08-15"
@@ -52,37 +52,56 @@ Current pain points observed during QA:
 - **Pros:** Best integration for system administrators.
 - **Cons:** High maintenance overhead; probably overkill at current scale.
 
-## Open questions
+## Decision (2026-08-15)
 
-1. Is publishing to npm acceptable, or do we want a curl-based route to avoid registry dependency?
-2. Should we bundle Node with the CLI, or require Node 22+ to be pre-installed?
-3. How do hook shims locate `vp` reliably?
-   - Option 1: rely on `PATH`.
-   - Option 2: embed the absolute path to `vp` at install time.
-   - Option 3: support `$VP_BIN` / `$VISION_PROXY_PATH` env override (already partially supported via `VP_BIN`).
-4. Should `vp config set` support a `vpPath` / `binPath` key that records where the binary lives, so hooks can read it from config?
+Avoid npm. Ship from **GitHub Releases** as the artifact source of truth, then offer two install paths - a **Homebrew tap** and a **curl installer** - that both pull the same release tarballs. This matches the "just download it" goal without a registry dependency.
+
+Two tracks for what the release actually contains:
+
+- **Track A - JS dist + Node dependency (recommended now):** publish the existing `tsc` build (`dist/`) as per-OS/arch tarballs. Users need Node 22+ (Homebrew `depends_on "node@22"`; curl installer documents `node >= 22`). Reuses `npm run build` with no new tooling.
+- **Track B - standalone binary (optional fast-follow):** `bun build ./src/cli.ts --compile --outfile vp` produces a true single binary with the runtime embedded (no Node needed), cross-compiled for `bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-arm64/x64`, `bun-windows-x64`. Caveat: `@napi-rs/keyring` is a native `.node` addon loaded lazily and degrades to `null` when missing - bun compile may not bundle it, so keep keyring optional/guarded (already is) or mark it external.
+
+Homebrew formula (same repo): keep the formula in this repo under `Formula/vision-proxy.rb`. Users tap with the explicit URL: `brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy`, then `brew install tan-yong-sheng/vision-proxy/vision-proxy`. The formula `url` points at the release tarball + `sha256` + `version`; `bin.install "vp"`; `depends_on "node@22"` for Track A.
+
+Curl installer (`scripts/install.sh`): query `api.github.com/repos/<owner>/<repo>/releases/latest`, pick the asset by `uname`/`arch`, download, verify `sha256sum` against a published checksum, extract to `~/.local/share/vision-proxy`, symlink `vp` into `~/.local/bin`.
+
+Hook shim `vp` discovery: at install time, `vp integration install` captures its own invocation path (`process.argv[1]`) and writes it into the generated shim. The shim uses that embedded absolute path, falling back to `vp` via PATH if the embedded path disappears. No env var is required for the common case.
+
+## Open questions (remaining)
+
+1. ~~Hook shim `vp` discovery~~ - **Decided:** embed absolute path at install time, fallback to PATH.
+2. ~~`vp config set binPath` / `VISION_PROXY_PATH`~~ - **Decided:** skip for now; embedded path + PATH fallback is sufficient.
+3. ~~Distribution Track~~ - **Decided:** commit to Track A now; defer Track B to a later worktree.
 
 ## Proposed next step
 
-- **Short term:** document the existing `npm install -g .` / `npm link` flow and make the hook shims use `VP_BIN` if set.
-- **Medium term:** publish to npm so `npm install -g vision-proxy` works, then add a Homebrew tap.
-- **Decision needed:** whether to add `vp config set binPath <path>` (or `VISION_PROXY_PATH` env) so hooks can resolve `vp` even when it is not on `PATH`.
+- **Short term (Track A):** add a GitHub Actions release workflow that builds `dist/` per OS/arch and uploads tarballs + checksums; add `scripts/install.sh` (curl route) and the Homebrew formula in `Formula/vision-proxy.rb`; update README install section.
+- **Fast-follow (Track B):** evaluate `bun build --compile`, resolve the `@napi-rs/keyring` native-addon caveat, then add prebuilt binaries to the same releases.
+- Apply the binary-discovery decision in `backend-fix-hook-shim-shared-mjs-copy.md`.
 
 ## Worktree strategy
 
 - Single worktree: `vp-distribution` off `main`.
-- Depends on: none (can be done in parallel with post-merge QA fixes).
+- **Batch:** `vp-distribution` (phase 2, stack_position 2).
+- **Depends on:** phase 1 worktrees - bug fixes (`backend-prune-max-tool-calls-per-turn.md`, `backend-fix-pi-extension-typebox-dependency.md`) and tooling (`backend-tooling-biome-betterleaks.md`). Runs in parallel with the phase 2 `vp-qa-fixes` batch (bug fixes #1/#4); that batch edits `src/commands/integration.ts` while this touches release/Homebrew/install/README files only.
+- **Worktree doc:** `../worktrees/backend-vp-distribution.md`.
+
+## Coupling to active bug fixes
+
+- The packaged layout must keep `dist/shims/*.mjs` (hook shims + `shared.mjs`) together with the binary, or finding #4's missing-`shared.mjs` failure resurfaces in the distributed artifact. Tracked in `../plans/backend-fix-hook-shim-shared-mjs-copy.md`.
+- Finding #1 (`uninstall pi` message) is independent of packaging.
 
 ## Tools / MCP / Skills
 
-- `npm publish` for registry publishing.
-- GitHub Releases for curl-install tarballs.
-- Homebrew tap repo under `tan-yong-sheng/homebrew-tap`.
+- GitHub Releases (tarballs + checksums) as the artifact source.
+- Homebrew formula kept in this repo under `Formula/vision-proxy.rb`.
+- `bun build --compile` for Track B standalone binaries.
+- `curl` + `jq` + `sha256sum` for the installer.
 
 ## Deliverables
 
-1. Updated README install section.
-2. npm publish workflow (if chosen).
-3. Install shell script and GitHub release artifacts (if curl route chosen).
-4. Homebrew formula (if chosen).
-5. Optional: `vp config set binPath` and hook shim lookup using config/env.
+1. GitHub Actions release workflow building per-OS/arch tarballs of `dist/` + checksum files.
+2. Homebrew formula in `Formula/vision-proxy.rb` (`url` = release tarball, name `vision-proxy`).
+3. `scripts/install.sh` curl installer with checksum verification.
+4. README install section covering Homebrew + curl (no npm publish).
+5. Optional (Track B): `bun build --compile` standalone binaries.

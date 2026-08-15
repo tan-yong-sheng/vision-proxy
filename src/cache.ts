@@ -30,6 +30,7 @@ interface CacheRecord {
 let _cache: LRUCache<string, CacheRecord> | null = null;
 let _path: string | null = null;
 let _explicitPath: string | null = null;
+let _maxAgeDays = 30;
 
 function cachePath(): string {
 	if (_explicitPath) return _explicitPath;
@@ -37,9 +38,14 @@ function cachePath(): string {
 	return path.join(dir, "cache.json");
 }
 
-export function configureCache(maxEntries: number, cacheFile?: string): void {
+export function configureCache(
+	maxEntries: number,
+	cacheFile?: string,
+	maxAgeDays = 30,
+): void {
 	_explicitPath = cacheFile ?? null;
 	_path = cacheFile ?? cachePath();
+	_maxAgeDays = maxAgeDays;
 	_cache = new LRUCache<string, CacheRecord>(Math.max(1, maxEntries));
 }
 
@@ -79,6 +85,7 @@ let _misses = 0;
 
 export async function cacheGet(key: string): Promise<string | undefined> {
 	await load();
+	await pruneStale();
 	const hit = cache().get(key);
 	if (hit) {
 		_hits++;
@@ -108,9 +115,8 @@ export async function cacheClear(): Promise<void> {
 	}
 }
 
-/** Evict entries older than `maxAgeMs`. Returns number of entries removed. */
-export async function cachePrune(maxAgeMs: number): Promise<number> {
-	await load();
+/** Remove entries older than `maxAgeMs`; persist if anything was removed. */
+async function evictOlderThan(maxAgeMs: number): Promise<number> {
 	const c = cache();
 	const now = Date.now();
 	let removed = 0;
@@ -122,6 +128,19 @@ export async function cachePrune(maxAgeMs: number): Promise<number> {
 	}
 	if (removed > 0) await persist();
 	return removed;
+}
+
+/** Evict entries older than `maxAgeMs`. Returns number of entries removed. */
+export async function cachePrune(maxAgeMs: number): Promise<number> {
+	await load();
+	return evictOlderThan(maxAgeMs);
+}
+
+/** Evict entries older than the configured max age (lazy prune on access). */
+async function pruneStale(): Promise<void> {
+	if (_maxAgeDays <= 0) return;
+	await load();
+	await evictOlderThan(_maxAgeDays * 24 * 60 * 60 * 1000);
 }
 
 export async function cacheStats(): Promise<CacheStats> {

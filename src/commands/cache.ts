@@ -41,10 +41,10 @@ export async function cacheClearCmd(): Promise<CacheResult> {
 }
 
 export async function cachePruneCmd(
-	olderDays: number = 30,
+	olderDays: number = DEFAULT_CONFIG.cacheMaxAgeDays,
 	maxEntries: number = DEFAULT_CONFIG.cacheSize,
 ): Promise<CacheResult> {
-	configureCache(maxEntries);
+	configureCache(maxEntries, undefined, olderDays);
 	const removed = await cachePrune(olderDays * 24 * 60 * 60 * 1000);
 	return { ok: true, message: `pruned ${removed} entr${removed === 1 ? "y" : "ies"}`, code: 0 };
 }

@@ -86,3 +86,29 @@ describe("cachePrune", () => {
 		assert.equal(await cacheGet("fresh"), "v");
 	});
 });
+
+describe("lazy prune on cacheGet", () => {
+	it("evicts stale entries older than cacheMaxAgeDays", async () => {
+		// 1-day max age; the stale entry is 2 days old and should be dropped on access.
+		configureCache(10, cacheFile, 1);
+		await cacheSet("fresh", "v");
+		const raw = JSON.parse(await readFile(cacheFile, "utf8"));
+		raw.stale = { value: "v", createdAt: Date.now() - 1000 * 60 * 60 * 48 };
+		await writeFile(cacheFile, JSON.stringify(raw), "utf8");
+		resetCacheState(false);
+		// A fresh get should trigger lazy pruning of the 2-day-old entry.
+		assert.equal(await cacheGet("fresh"), "v");
+		assert.equal(await cacheGet("stale"), undefined);
+		assert.equal(await cacheGet("fresh"), "v");
+	});
+
+	it("keeps entries within the max age window", async () => {
+		configureCache(10, cacheFile, 30);
+		await cacheSet("fresh", "v");
+		const raw = JSON.parse(await readFile(cacheFile, "utf8"));
+		raw.recent = { value: "v", createdAt: Date.now() - 1000 * 60 * 60 * 24 };
+		await writeFile(cacheFile, JSON.stringify(raw), "utf8");
+		resetCacheState(false);
+		assert.equal(await cacheGet("recent"), "v");
+	});
+});

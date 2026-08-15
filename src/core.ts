@@ -46,7 +46,6 @@ export interface VisionConfig {
 	cacheMaxAgeDays: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
-	maxToolCallsPerTurn: number;
 	/** Per-provider base URL overrides, e.g. { "openai": "http://localhost:8000/v1" }. */
 	baseURLs: Record<string, string>;
 	/** Alternate `provider/model-id` strings to try when the primary model fails. */
@@ -360,7 +359,6 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-2.5-pro": { format: "gemini_normalized_1000" },
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
-	maxToolCallsPerTurn: -1,
 	baseURLs: {},
 	fallbackModels: [],
 };
@@ -385,7 +383,6 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"cacheMaxAgeDays",
 	"pHashSimilarityThreshold",
 	"groundingModels",
-	"maxToolCallsPerTurn",
 	"baseURLs",
 	"fallbackModels",
 ]);
@@ -510,15 +507,6 @@ function parseFloatOverride(
 	return n;
 }
 
-function parseToolCallsOverride(
-	value: string | undefined,
-): number | undefined {
-	if (value === undefined) return undefined;
-	const n = Number(value);
-	if (Number.isFinite(n) && n > 0) return Math.floor(n);
-	return -1;
-}
-
 /**
  * Parse `VP_BASE_URLS` — a comma-separated list of `provider=url` pairs into a
  * per-provider base URL map. Invalid entries are skipped.
@@ -603,11 +591,6 @@ export function readEnvOverrides(
 	);
 	assignIfDefined(
 		overrides,
-		"maxToolCallsPerTurn",
-		parseToolCallsOverride(env.VP_MAX_TOOL_CALLS_PER_TURN),
-	);
-	assignIfDefined(
-		overrides,
 		"baseURLs",
 		parseBaseUrlsOverride(env.VP_BASE_URLS),
 	);
@@ -629,7 +612,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxBatch: boolean;
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
-	maxToolCallsPerTurn: boolean;
 	baseURLs: boolean;
 	fallbackModels: boolean;
 } {
@@ -642,7 +624,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		maxBatch: env.VP_MAX_BATCH !== undefined,
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
-		maxToolCallsPerTurn: env.VP_MAX_TOOL_CALLS_PER_TURN !== undefined,
 		baseURLs: env.VP_BASE_URLS !== undefined,
 		fallbackModels: env.VP_FALLBACK_MODELS !== undefined,
 	};
@@ -720,13 +701,6 @@ function fallbackGroundingModels(
 	return validated;
 }
 
-function fallbackToolCallsCap(value: unknown): number {
-	if (value === -1) return -1;
-	const n = Number(value);
-	if (Number.isFinite(n) && n > 0) return Math.floor(n);
-	return DEFAULT_CONFIG.maxToolCallsPerTurn;
-}
-
 function fallbackBaseUrls(value: unknown): Record<string, string> {
 	if (!isRecord(value)) return { ...DEFAULT_CONFIG.baseURLs };
 	const out: Record<string, string> = {};
@@ -787,7 +761,6 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		DEFAULT_CONFIG.pHashSimilarityThreshold,
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
-	safe.maxToolCallsPerTurn = fallbackToolCallsCap(safe.maxToolCallsPerTurn);
 	safe.baseURLs = fallbackBaseUrls(safe.baseURLs);
 	safe.fallbackModels = fallbackFallbackModels(safe.fallbackModels);
 	return safe;
@@ -913,12 +886,6 @@ function maxImageFileBytes(): number {
 		if (Number.isFinite(n) && n > 0) return n;
 	}
 	return 10 * 1024 * 1024;
-}
-
-export function maxToolCallsPerTurn(configured?: number): number {
-	const n = Number(configured ?? process.env.VP_MAX_TOOL_CALLS_PER_TURN);
-	if (Number.isFinite(n) && n > 0) return Math.floor(n);
-	return Infinity;
 }
 
 export type ReadImageReason =

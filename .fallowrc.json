@@ -1,0 +1,28 @@
+{
+	"entry": [
+		"src/cli.ts",
+		"src/**/*.test.ts",
+		"src/shims/claude-code-hook.e2e.mjs",
+		"src/shims/claude-code-user-prompt-submit.mjs",
+		"src/shims/codex-user-prompt-submit.mjs"
+	],
+	"rules": {
+		"unused-exports": "off",
+		"unused-types": "off",
+		"unused-class-members": "off"
+	},
+	"duplicates": {
+		"threshold": 1000
+	},
+	"health": {
+		"thresholdOverrides": [
+			{
+				"files": ["src/**"],
+				"maxCyclomatic": 100,
+				"maxCognitive": 100,
+				"maxCrap": 10000,
+				"reason": "Initial CLI migration; refactor deferred"
+			}
+		]
+	}
+}

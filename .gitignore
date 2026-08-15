@@ -1,4 +1,10 @@
+dist/
 node_modules/
-*.tgz
-.DS_Store
-Thumbs.db
+package-lock.json
+.pnpm-store/
+.npm-cache/
+.pi/
+.lavish/
+.worktrees/
+.agents/rules/
+*.log

@@ -1,0 +1,36 @@
+# Worktrunk project hooks for ai-vision-mcp
+# Team-wide automation for the worktree lifecycle. Checked into git.
+# First run requires approval via `wt config approvals add` (per-project, stored
+# in ~/.config/worktrunk/approvals.toml). Run `wt hook <type> --dry-run` to preview.
+
+# --- New worktree setup (runs once on `wt switch --create`) -------------------
+# Copy gitignored files (node_modules, .env, dist caches) from the primary
+# worktree so a fresh worktree doesn't pay a cold install/build.
+[[post-start]]
+copy = "wt step copy-ignored"
+
+# Install any new deps, then build the TypeScript sources the e2e/test harness
+# needs (tests spawn dist/index.js). Sequenced after the copy so an existing
+# node_modules is reused. pnpm shares one content-addressable store across
+# worktrees, so the install here is cheap after the first.
+[[post-start]]
+install = "pnpm install"
+
+# Build only after install finishes. Keys inside one [[post-start]] block run
+# concurrently, so a separate block enforces the install -> build ordering.
+[[post-start]]
+build = "pnpm run build"
+
+# --- Pre-commit validation (runs during `wt merge`, before the squash commit) -
+# Fast feedback: lint + typecheck must pass before a commit is recorded.
+[[pre-commit]]
+lint = "pnpm run lint"
+typecheck = "pnpm exec tsc --noEmit"
+# AGENTS.md gate: fallow audit on touched files before commit. Treat
+# `{ "error": true, ... }` JSON as non-blocking per project conventions.
+fallow = "fallow audit --format json --quiet --explain --gate-marker agent"
+
+# --- Pre-merge validation (runs after rebase, before merge to target) ---------
+# Expensive suite: full test run must pass before the branch merges.
+[[pre-merge]]
+test = "pnpm test"

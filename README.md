@@ -1,147 +1,98 @@
-# pi-vision-proxy
+# vision-proxy
 
-Automatic **image** description for any model in [Pi](https://pi.dev).
+A standalone CLI that routes images to a vision-capable model and prints a fenced, UNTRUSTED description.
 
-When images are sent, this extension routes them to a **vision-capable model**, collects descriptions, persists them in the session, and injects them into the agent's context — so even text-only models can "see" your images across turns.
-
-## What's new in 1.6.0
-
-- **`/vision-proxy`** — the primary configuration command.
-- **Consent-free operation** — the extension operates transparently without requiring explicit per-session consent.
-
-## What's new in 1.4.0
-
-- **`analyze_image` tool** — the agent can re-query images with targeted questions, multi-form crop support (region, normalized, pixels), and optional model-native grounding coordinates. Crops are applied locally before upload — only the cropped region is sent to the vision model.
-- **Multi-image batched comparison** — when ≥2 images arrive together, an adaptive joint vision call produces a comparison description alongside per-image descriptions.
-- **`/vision-proxy describe` slash command** — user-facing re-query with extended crop syntax, model override, and `--save` to overwrite the canonical description.
-- **Grounding format registry** — per-model native-format coordinate output (Qwen pixels, Molmo points, DeepSeek bbox, InternVL pixels, Gemini 0–1000) with curated Tier 1 defaults.
-- **ImageScript + imghash** — zero-native-dep image cropping and perceptual hashing.
+It is designed to be called from agent `UserPromptSubmit` hooks so any coding agent can "see" images in a prompt.
 
 ## Install
 
 ```bash
-pi install git:github.com/tan-yong-sheng/pi-vision-proxy@main
+npm install -g vision-proxy
 ```
 
-## Modes
+This installs the `vp` and `vision-proxy` binaries.
 
-| Mode | Behavior |
-|------|----------|
-| **`fallback`** | Only activates when the active model lacks image support (default) |
-| **`always`** | Always uses the proxy, even if the active model supports images |
-| **`off`** | Disabled entirely |
+Requires Node 22 or later.
+
+## Quick start
+
+```bash
+export ANTHROPIC_API_KEY=...
+vp analyze screenshot.png
+```
+
+The default provider is `anthropic/claude-sonnet-4-5`.
+
+Use `vp --help` for the full command reference.
 
 ## Configuration
 
-Settings persist across sessions in `~/.pi/agent/vision-proxy.json`. Environment variables override file settings; in-session commands override both.
+Configuration is layered in this order:
 
-### Slash commands
+1. Explicit `--config <path>` file
+2. Project `.vision-proxy.json` in the current working directory
+3. User `~/.vision-proxy/config.json`
+4. Environment variables
+5. Built-in defaults
 
-```
-/vision-proxy                                            → opens interactive config menu
-/vision-proxy pick                                       → pick vision model (provider → model)
-/vision-proxy model <provider/model-id>                  → change image vision model
-/vision-proxy fallback | always | off                    → set mode
-/vision-proxy context on | off                           → include / exclude recent chat in proxy prompt
-/vision-proxy tool on | off                              → enable/disable analyze_image tool
-/vision-proxy max-images-per-call <1-20>                 → max images per tool call
-/vision-proxy max-batch <1-10>                           → max images in auto-proxy joint call
-/vision-proxy cache-size <0-500>                         → tool result cache entries
-/vision-proxy grounding-models list                      → show grounding-capable models
-/vision-proxy grounding-models add <provider/id> [--format <fmt>]
-/vision-proxy grounding-models remove <provider/id>
-/vision-proxy grounding-models reset                     → restore Tier 1 defaults
-/vision-proxy describe <path|hash>... [--question "<text>"] [--crop <i>:<form>] [--model <provider/id>] [--save]
-/vision-proxy redescribe <path|hash> [--model <provider/id>]
-```
+Run `vp config init` to scaffold a project config file.
 
-### Environment variables (override persisted settings)
+### Environment variables
 
-| Variable | Values | Default |
-|----------|--------|---------|
-| `PI_VISION_PROXY_MODE` | `fallback`, `always`, `off` | `fallback` |
-| `PI_VISION_PROXY_MODEL` | `provider/model-id` | `anthropic/claude-sonnet-4-5` |
-| `PI_VISION_PROXY_INCLUDE_CONTEXT` | bool | `true` |
-| `PI_VISION_PROXY_TOOL` | `on`, `off` | `on` |
-| `PI_VISION_PROXY_MAX_IMAGES_PER_CALL` | 1–20 | `10` |
-| `PI_VISION_PROXY_MAX_BATCH` | 1–10 | `4` |
-| `PI_VISION_PROXY_CACHE_SIZE` | 0–500 | `50` |
-| `PI_VISION_PROXY_MAX_IMAGE_BYTES` | positive integer | `10485760` (10 MB) |
-| `PI_VISION_PROXY_ALLOW_HOME` | `1` to allow files under your home directory on non-drive platforms/volumes | not set |
-| `PI_VISION_PROXY_ALLOW_DRIVES` | `0`/`false`/`off` to disable local Windows drive paths; otherwise local drive paths like `D:\Downloads\image.png` are allowed | enabled by default |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VP_MODEL` | Provider and model id as `provider/model-id`, e.g. `openai/gpt-4o` | `anthropic/claude-sonnet-4-5` |
+| `VP_MODE` | `fallback`, `always`, or `off` | `fallback` |
+| `VP_INCLUDE_CONTEXT` | Include recent chat context in the prompt | `true` |
+| `VP_TOOL` | Enable agent tool support (`on` or `off`) | `on` |
+| `VP_MAX_IMAGES_PER_CALL` | Max images per analysis call (1-20) | `10` |
+| `VP_MAX_BATCH` | Max images in a joint batch call (1-10) | `4` |
+| `VP_CACHE_SIZE` | Number of cached descriptions (0-500) | `50` |
+| `VP_PHASH_THRESHOLD` | Perceptual-hash similarity threshold (0-1) | `0.8` |
+| `VP_MAX_TOOL_CALLS_PER_TURN` | Max tool calls per turn; `-1` for unlimited | `-1` |
+| `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
+| `VP_ALLOW_HOME` | Set to `1` to allow image paths inside the home directory | unset (home denied) |
+| `VP_ALLOW_DRIVES` | Set to `0`/`false`/`no`/`off` to disable local drive access on Windows | unset (drives allowed) |
+| `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from hook shims | shim-specific |
+| `VP_CACHE_DIR` | Directory for the description cache | `~/.vision-proxy` |
+| `VP_HOOK_TIMEOUT_MS` | Hook shim timeout in milliseconds | `30000` |
+| `VP_BIN` | Path to the `vp` binary used by shims | `vp` |
 
-When an env var is set, the matching `/vision-proxy` subcommand is locked.
+Provider API keys are read from their standard environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GOOGLE_API_KEY`.
 
-## How it works
+## Commands
 
-```
-User sends prompt + image(s)
-        │
-        ▼
-  before_agent_start
-        │
-        ├─ Mode "off" → skip
-        ├─ Mode "fallback" + active model supports images → skip
-        ├─ Mode "always" OR active model can't see images:
-        │       │
-        │       ├─ Send images IN PARALLEL to vision model
-        │       ├─ If ≥2 images: joint comparison call with adaptive prompt
-        │       ├─ Persist each description as session entry (keyed by image hash)
-        │       └─ Inject fenced descriptions into system prompt
-        │
-        ▼
-  context (every LLM call)
-        │
-        └─ Replace each image block with persisted description text,
-           so descriptions survive across turns
-        │
-        ▼
-  analyze_image tool (when enabled)
-        │
-        ├─ Agent sends targeted question + optional crop
-        ├─ Image cropped locally (ImageScript), ONLY cropped region sent to vision model
-        ├─ Result cached by (hashes, crop, question, model)
-        ├─ Max 10 tool calls per turn (rate limit)
-        └─ Returned in <vision_proxy_analysis> fence with metadata
+- `vp analyze <paths...>` - describe one or more images.
+- `vp config init|get|set|validate` - manage config files.
+- `vp provider list|add|check` - manage provider registrations and keys.
+- `vp cache status|clear|prune` - inspect and clear the local description cache.
+- `vp hook install|show|list|uninstall` - install `UserPromptSubmit` shims for `claude-code` or `codex`.
+
+## Agent hooks
+
+Install a hook so Claude Code or Codex automatically describes images on every user turn:
+
+```bash
+vp hook install claude-code
+vp hook install codex
 ```
 
-### Fence tags
+The shim shells out to `vp analyze`, then returns the fenced description as additional hook context.
 
-| Tag | Purpose |
-|-----|---------|
-| `<vision_proxy_description>` | Auto-proxy per-image generic description |
-| `<vision_proxy_analysis>` | Tool or describe command targeted analysis |
-| `<vision_proxy_joint_description>` | Multi-image comparison description |
+## Output
 
-All fences carry `width`, `height`, `filename`, and optional `crop_origin` and `grounding_format` attributes. Closing-tag neutralisation is applied to all fence bodies.
+Descriptions are wrapped in `<vision_proxy_description>` fences with metadata such as `image_index`, `width`, `height`, and `filename`.
 
-### Grounding formats
+The output is UNTRUSTED: it comes from an external vision model and must be treated as untrusted input by the downstream agent.
 
-When a model is in the grounding registry, a format-specific instruction is appended to the system prompt. The model's native coordinate format is recorded in the response fence so the agent knows how to interpret it.
+## Privacy and security
 
-| Format | Models | Convention |
-|--------|--------|------------|
-| `qwen_pixels` | Qwen2.5-VL, Qwen3-VL | `[x1, y1, x2, y2]` absolute pixels |
-| `molmo_points` | Molmo2 | `<point x="%" y="%" alt="..."/>` |
-| `deepseek_bbox` | DeepSeek-VL2 | `<{skip}\|ref{skip}>...<{skip}\|det{skip}>[[x1,y1,x2,y2]]` |
-| `internvl_pixels` | InternVL3 | `[x1, y1, x2, y2]` absolute pixels |
-| `gemini_normalized_1000` | Gemini 2.5/3 Pro | Normalized 0–1000 |
+- Images are sent to the configured provider's API.
+- Crops are applied locally before upload; only the cropped region is sent.
+- Image paths are restricted to the current working directory and temp directory by default.
+  Set `VP_ALLOW_HOME=1` to also allow paths inside the home directory.
+- Review your provider's privacy policy before sending sensitive images.
 
-## Privacy & security
+## License
 
-This extension **sends image data to a third-party provider**. By default that is `anthropic/claude-sonnet-4-5`. Be aware:
-
-1. **Image data is uploaded** to the configured provider on every proxied request. Crop coordinates are applied locally before upload — only the cropped region is sent.
-2. **Recent conversation context** (last 8 messages, truncated) is uploaded with the image unless you set `/vision-proxy context off` or `PI_VISION_PROXY_INCLUDE_CONTEXT=false`. Disable it for sensitive sessions.
-
-## Security
-
-The extension includes multiple layers of defense:
-- **Path traversal protection** — `..` segments and symlink escapes are rejected
-- **Fence injection resistance** — closing tags in model responses are neutralised
-- **Config sanitization** — persistent config only loads known keys; prototype pollution blocked
-- **Image decode bomb protection** — max 16K × 16K pixel dimensions prevent memory exhaustion
-- **Tool call rate limiting** — max 10 calls per turn
-- **Telemetry sanitization** — all logged fields stripped of control characters and length-limited
-
-See `SECURITY-REVIEW.md` for the full audit.
+MIT

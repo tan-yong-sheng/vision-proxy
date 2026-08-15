@@ -4,7 +4,7 @@ title: Pi extension installer
 description: Add vp integration install pi that writes a Pi extension file registering an analyze_image tool.
 area: backend
 tags: [post-migration, pi, extension]
-status: active
+status: merged
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-08-29"

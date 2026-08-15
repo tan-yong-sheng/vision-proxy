@@ -1,10 +1,10 @@
 ---
 type: plan
 title: Vision proxy post-migration feature set
-description: Implement lazy cache pruning, Pi extension installer, and optional keyring credential storage after the CLI migration.
+description: "Implement lazy cache pruning, Pi extension installer, and optional keyring credential storage after the CLI migration."
 area: backend
 tags: [post-migration, cache, pi, keyring, parallel-worktrees]
-status: active
+status: complete
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-10-13"

@@ -58,14 +58,16 @@ Run `vp config init` to scaffold a project config file.
 | `VP_CACHE_DIR` | Directory for the description cache | `~/.vision-proxy` |
 | `VP_HOOK_TIMEOUT_MS` | Hook shim timeout in milliseconds | `30000` |
 | `VP_BIN` | Path to the `vp` binary used by shims | `vp` |
+| `VP_KEYRING` | Set to `0`, `false`, or `off` to disable OS keyring credential storage | unset (keyring enabled) |
 
 Provider API keys are read from their standard environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GOOGLE_API_KEY`.
+When a key is absent from the environment, `vp` checks the OS keyring as a fallback via `@napi-rs/keyring`.
 
 ## Commands
 
 - `vp analyze <paths...>` - describe one or more images.
 - `vp config init|get|set|validate` - manage config files.
-- `vp provider list|add|check` - manage provider registrations and keys.
+- `vp provider list|add|check|store-key|delete-key|list-keys` - manage provider registrations and keys.
 - `vp cache status|clear|prune` - inspect and clear the local description cache.
 - `vp hook install|show|list|uninstall` - install `UserPromptSubmit` shims for `claude-code` or `codex`.
 - `vp integration install|show|uninstall <agent>` - install the vision-proxy integration for `pi` (Pi coding agent).

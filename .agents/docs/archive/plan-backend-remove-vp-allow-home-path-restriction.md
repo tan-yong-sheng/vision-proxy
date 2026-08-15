@@ -1,10 +1,10 @@
 ---
 type: plan
 title: Remove VP_ALLOW_HOME path restriction
-description: Remove the VP_ALLOW_HOME opt-in and allow vp analyze to read image paths anywhere on the filesystem, relying on the OS sandbox for permission enforcement.
+description: "Remove the VP_ALLOW_HOME opt-in and allow vp analyze to read image paths anywhere on the filesystem, relying on the OS sandbox for permission enforcement."
 area: backend
 tags: [security, cli, path-restriction]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

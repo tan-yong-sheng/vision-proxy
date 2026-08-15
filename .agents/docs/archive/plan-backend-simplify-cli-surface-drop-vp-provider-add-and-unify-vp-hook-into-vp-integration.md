@@ -1,10 +1,10 @@
 ---
 type: plan
 title: Simplify CLI surface - drop vp provider add and unify vp hook into vp integration
-description: Remove the redundant `vp provider add` command, merge `vp hook` into `vp integration`, and add `vp integration status` with version markers so users can see whether their coding-agent integrations are installed and up to date.
+description: "Remove the redundant `vp provider add` command, merge `vp hook` into `vp integration`, and add `vp integration status` with version markers so users can see whether their coding-agent integrations are installed and up to date."
 area: backend
 tags: [cli, hook, integration, provider, refactor, status, version]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

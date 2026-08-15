@@ -1,15 +1,15 @@
 ---
 type: coverage
 title: vp-cli-cleanup merge preview
-description: "Local merge-preview QA for the four parallel vision-proxy CLI cleanup branches."
+description: Local merge-preview QA for the four parallel vision-proxy CLI cleanup branches.
 area: backend
 tags: [cli, integration, provider, config, merge-preview, qa]
-status: active
+status: retired
+merged_commit: b097e3c
 created: "2026-08-15"
 updated: "2026-08-16"
 stale_after: "2026-11-13"
-related:
-  - ../worktrees/backend-vp-cli-simplify.md
+related: [../worktrees/backend-vp-cli-simplify.md]
 ---
 # vp-cli-cleanup merge preview
 

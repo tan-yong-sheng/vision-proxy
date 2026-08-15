@@ -70,3 +70,5 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: revive archive/worktree-backend-vp-cli-simplify.md -> worktrees/backend-vp-cli-simplify.md
 - 2026-08-15: archive worktrees/backend-integration-status.md -> archive/worktree-backend-integration-status.md (abandoned)
 - 2026-08-15: new coverage qa/backend-vp-cli-cleanup-merge-preview.md
+- 2026-08-15: archive worktrees/backend-vp-cli-simplify.md -> archive/worktree-backend-vp-cli-simplify.md (merged)
+- 2026-08-15: archive qa/backend-vp-cli-cleanup-merge-preview.md -> archive/coverage-backend-vp-cli-cleanup-merge-preview.md (retired)

@@ -145,6 +145,8 @@ Archive docs never gate: an anomaly (archived doc reading as non-terminal) surfa
 The corpus is the contract behind parallel work.
 Plans hand off to `/worktrunk-orca-delegation`; worktrees track `active -> merged`; bugs enter `bugs/` mid-flight; `/review-gate` writes findings into `qa/` dossiers.
 
+> **Commit docs before delegating.** Worker agents run in linked git worktrees that inherit the committed state of their base branch. Any plan, worktree flight log, or decision updated in the orchestrator's checkout must be committed to the default branch before `wt switch --create` or `orca orchestration worker-start`, or the worker will see stale or missing docs.
+
 ### Failure triage & bug resolution lifecycle
 
 When a test/build failure is discovered during a worktree/QA pass, classify it before recording it:

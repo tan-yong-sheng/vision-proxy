@@ -54,6 +54,8 @@ Run `vp config init` to scaffold a project config file.
 | `VP_CACHE_SIZE` | Number of cached descriptions (0-500) | `50` |
 | `VP_CACHE_MAX_AGE_DAYS` | Stale entries older than this are lazily evicted on cache access (0-3650) | `30` |
 | `VP_PHASH_THRESHOLD` | Perceptual-hash similarity threshold (0-1) | `0.8` |
+| `VP_BASE_URLS` | Per-provider base URL overrides as `provider=url` pairs, comma-separated (e.g. `openai=http://localhost:8000/v1`) | unset |
+| `VP_FALLBACK_MODELS` | Comma-separated `provider/model-id` list tried when the primary model fails (e.g. `openai/gpt-4o,google/gemini-2.5-flash`) | unset |
 | `VP_MAX_TOOL_CALLS_PER_TURN` | Max tool calls per turn; `-1` for unlimited | `-1` |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
 | `VP_ALLOW_HOME` | Set to `1` to allow image paths inside the home directory | unset (home denied) |
@@ -66,6 +68,17 @@ Run `vp config init` to scaffold a project config file.
 
 Provider API keys are read from their standard environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GOOGLE_API_KEY`.
 When a key is absent from the environment, `vp` checks the OS keyring as a fallback via `@napi-rs/keyring`.
+
+### Configuration keys
+
+Most settings are set with `vp config set <key> <value>` (written to `.vision-proxy.json` or `~/.vision-proxy/config.json`). Two keys take structured values:
+
+- `baseURLs` - a JSON object mapping a provider id to a base URL override, e.g. `vp config set baseURLs '{"openai":"http://localhost:8000/v1"}'`.
+  The `provider=url` form of `VP_BASE_URLS` is the equivalent environment override.
+- `fallbackModels` - a JSON array of `provider/model-id` strings tried in order when the primary model fails at runtime, e.g. `vp config set fallbackModels '["openai/gpt-4o","google/gemini-2.5-flash"]'`.
+  The comma-separated `VP_FALLBACK_MODELS` is the equivalent environment override.
+
+A missing API key on the primary provider is always a fatal error; fallbacks are only attempted after a model call fails (rate limit, server error, etc.).
 
 ## Commands
 

@@ -6,13 +6,30 @@ It is designed to be called from agent `UserPromptSubmit` hooks so any coding ag
 
 ## Install
 
+vision-proxy ships prebuilt per-OS/arch tarballs from [GitHub Releases](https://github.com/tan-yong-sheng/vision-proxy/releases). Pick either install path below; both pull the same artifacts.
+
+### Homebrew (macOS / Linux)
+
 ```bash
-npm install -g vision-proxy
+brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy
+brew install tan-yong-sheng/vision-proxy/vision-proxy
 ```
 
-This installs the `vp` and `vision-proxy` binaries.
+This installs the `vp` binary and pulls in Node 22 as a dependency.
 
-Requires Node 22 or later.
+### curl installer (no Homebrew)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh
+```
+
+The installer detects your OS/arch, downloads the matching release tarball, verifies its SHA-256 against the published `sha256sum.txt`, extracts into `~/.local/share/vision-proxy`, and symlinks `vp` into `~/.local/bin`.
+
+### Requirements
+
+Requires Node 22 or later on `PATH` (the Homebrew formula satisfies this automatically; the curl installer prints a warning if your system Node is older).
+
+> Prefer a single static binary with no Node dependency? Standalone `bun build --compile` binaries (Track B) are planned as a fast-follow and will land in the same releases.
 
 ## Quick start
 

@@ -279,7 +279,6 @@ Manage the provider registry and credentials.
 
 Usage:
   vp provider list                       list providers + key presence
-  vp provider add <name>                 register a provider as active
   vp provider check [<name>]             verify provider auth
   vp provider store-key <name>           read key from stdin -> keyring
   vp provider delete-key <name>          delete key from keyring
@@ -287,7 +286,6 @@ Usage:
 
 Subcommands:
   list                list configured providers and key presence
-  add <name>          register <name> as the active provider
   check [<name>]      verify API key is configured (all if omitted)
   store-key <name>    read a key from stdin, store in the system keyring
   delete-key <name>   delete a provider's keyring-stored key
@@ -295,8 +293,8 @@ Subcommands:
 
 Notes:
   Credentials come from an env var (e.g. ANTHROPIC_API_KEY) or the system
-  keyring. \`add\` only sets the active provider; supply the key via the env
-  var or \`vp provider store-key <name>\` afterward.`,
+  keyring. Supply the key via the env var or \`vp provider store-key <name>\`.
+  Set the active provider with \`vp config set provider <name>\`.`,
 
 	"provider list": `vp provider list
 
@@ -307,20 +305,6 @@ Usage:
 
 For each known provider, shows its id, label, image support, and whether
 a key is present (env var or keyring).`,
-
-	"provider add": `vp provider add <name>
-
-Register <name> as the active provider.
-
-Usage:
-  vp provider add <name>
-
-Arguments:
-  <name>              a known provider id (e.g. anthropic, openai, google)
-
-Notes:
-  Writes ~/.vision-proxy/config.json. The API key must be supplied
-  separately via its env var or \`vp provider store-key <name>\`.`,
 
 	"provider check": `vp provider check [<name>]
 

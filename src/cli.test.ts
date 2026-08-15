@@ -78,9 +78,6 @@ describe("cli help", () => {
 		const parent = await run(["provider", "--help"]);
 		assert.match(parent, /vp provider <subcommand> \[options\]/);
 
-		const addHelp = await run(["provider", "add", "--help"]);
-		assert.match(addHelp, /Register <name> as the active provider/);
-
 		const storeKeyHelp = await run(["provider", "store-key", "--help"]);
 		assert.match(storeKeyHelp, /Read a provider API key from stdin/);
 

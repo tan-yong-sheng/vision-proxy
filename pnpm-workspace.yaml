@@ -1,5 +1,5 @@
 autoInstallPeers: false
-onlyBuiltDependencies:
-  - lefthook
+allowBuilds:
+  lefthook: true
 minimumReleaseAgeExclude:
   - '@ai-sdk/google@4.0.44'

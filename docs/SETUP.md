@@ -43,6 +43,21 @@ vp config get
 vp analyze screenshot.png
 ```
 
+### Override the API endpoint
+
+Each provider accepts a `*_BASE_URL` env var to point at any compatible endpoint:
+
+| Provider | Base URL env var | Use case |
+|----------|-----------------|---------|
+| OpenAI   | `OPENAI_BASE_URL` | local proxy, ollama, vllm |
+| Anthropic | `ANTHROPIC_BASE_URL` | self-hosted Anthropic API |
+| Google   | `GOOGLE_BASE_URL` | Vertex AI endpoint |
+
+```bash
+export OPENAI_BASE_URL="http://localhost:8000/v1"
+vp analyze screenshot.png --provider openai --model gpt-4o
+```
+
 For Google models:
 
 ```bash

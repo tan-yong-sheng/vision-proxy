@@ -48,6 +48,7 @@ Run `vp config init` to scaffold a project config file.
 | `VP_MAX_IMAGES_PER_CALL` | Max images per analysis call (1-20) | `10` |
 | `VP_MAX_BATCH` | Max images in a joint batch call (1-10) | `4` |
 | `VP_CACHE_SIZE` | Number of cached descriptions (0-500) | `50` |
+| `VP_CACHE_MAX_AGE_DAYS` | Stale entries older than this are lazily evicted on cache access (0-3650) | `30` |
 | `VP_PHASH_THRESHOLD` | Perceptual-hash similarity threshold (0-1) | `0.8` |
 | `VP_MAX_TOOL_CALLS_PER_TURN` | Max tool calls per turn; `-1` for unlimited | `-1` |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |

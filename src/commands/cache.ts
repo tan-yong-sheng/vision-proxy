@@ -12,7 +12,7 @@ import {
 	cacheStats,
 	configureCache,
 } from "../cache.ts";
-import { DEFAULT_CONFIG } from "../core.ts";
+import { loadConfig } from "../config.ts";
 
 export interface CacheResult {
 	ok: boolean;
@@ -21,6 +21,8 @@ export interface CacheResult {
 }
 
 export async function cacheStatus(): Promise<CacheResult> {
+	const { config } = await loadConfig();
+	configureCache(config.cacheSize, undefined, config.cacheMaxAgeDays);
 	const stats = await cacheStats();
 	const pct = (stats.hitRate * 100).toFixed(1);
 	return {
@@ -41,10 +43,15 @@ export async function cacheClearCmd(): Promise<CacheResult> {
 }
 
 export async function cachePruneCmd(
-	olderDays: number = 30,
-	maxEntries: number = DEFAULT_CONFIG.cacheSize,
+	olderDays?: number,
+	maxEntries?: number,
 ): Promise<CacheResult> {
-	configureCache(maxEntries);
-	const removed = await cachePrune(olderDays * 24 * 60 * 60 * 1000);
+	const { config } = await loadConfig();
+	configureCache(maxEntries ?? config.cacheSize, undefined, config.cacheMaxAgeDays);
+	const effectiveDays = olderDays ?? config.cacheMaxAgeDays;
+	if (effectiveDays <= 0) {
+		return { ok: true, message: "pruned 0 entries", code: 0 };
+	}
+	const removed = await cachePrune(effectiveDays * 24 * 60 * 60 * 1000);
 	return { ok: true, message: `pruned ${removed} entr${removed === 1 ? "y" : "ies"}`, code: 0 };
 }

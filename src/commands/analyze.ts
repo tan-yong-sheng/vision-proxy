@@ -123,7 +123,7 @@ export async function runAnalyze(
 	const cwd = flags.cwd ?? process.cwd();
 
 	const { config } = await loadConfig({ explicitConfigPath: flags.configPath, cwd, env });
-	configureCache(config.cacheSize);
+	configureCache(config.cacheSize, undefined, config.cacheMaxAgeDays);
 
 	if (imagePaths.length > config.maxImagesPerCall) {
 		throw new AnalyzeError(

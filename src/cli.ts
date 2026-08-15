@@ -289,7 +289,7 @@ export async function main(argv: string[]): Promise<void> {
 					handle(await cacheClearCmd());
 					return;
 				case "prune":
-					handle(await cachePruneCmd(str(flags, "older") ? Number(str(flags, "older")) : 30));
+					handle(await cachePruneCmd(str(flags, "older") ? Number(str(flags, "older")) : undefined));
 					return;
 				default:
 					fail(`unknown cache subcommand "${sub ?? ""}". Try: status, clear, prune`);

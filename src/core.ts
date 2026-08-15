@@ -43,6 +43,7 @@ export interface VisionConfig {
 	maxImagesPerCall: number;
 	maxBatch: number;
 	cacheSize: number;
+	cacheMaxAgeDays: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
 	maxToolCallsPerTurn: number;
@@ -338,6 +339,7 @@ export const DEFAULT_CONFIG: VisionConfig = {
 	maxImagesPerCall: 10,
 	maxBatch: 4,
 	cacheSize: 50,
+	cacheMaxAgeDays: 30,
 	pHashSimilarityThreshold: 0.8,
 	groundingModels: {
 		"Qwen/Qwen2.5-VL-3B-Instruct": { format: "qwen_pixels" },
@@ -374,6 +376,7 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"maxImagesPerCall",
 	"maxBatch",
 	"cacheSize",
+	"cacheMaxAgeDays",
 	"pHashSimilarityThreshold",
 	"groundingModels",
 	"maxToolCallsPerTurn",
@@ -546,6 +549,11 @@ export function readEnvOverrides(
 	);
 	assignIfDefined(
 		overrides,
+		"cacheMaxAgeDays",
+		parseIntOverride(env.VP_CACHE_MAX_AGE_DAYS, 0, 3650),
+	);
+	assignIfDefined(
+		overrides,
 		"pHashSimilarityThreshold",
 		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
@@ -566,6 +574,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxImagesPerCall: boolean;
 	maxBatch: boolean;
 	cacheSize: boolean;
+	cacheMaxAgeDays: boolean;
 	maxToolCallsPerTurn: boolean;
 } {
 	return {
@@ -576,6 +585,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		maxImagesPerCall: env.VP_MAX_IMAGES_PER_CALL !== undefined,
 		maxBatch: env.VP_MAX_BATCH !== undefined,
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
+		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
 		maxToolCallsPerTurn: env.VP_MAX_TOOL_CALLS_PER_TURN !== undefined,
 	};
 }
@@ -679,6 +689,12 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		0,
 		500,
 		DEFAULT_CONFIG.cacheSize,
+	);
+	safe.cacheMaxAgeDays = fallbackRange(
+		safe.cacheMaxAgeDays,
+		0,
+		3650,
+		DEFAULT_CONFIG.cacheMaxAgeDays,
 	);
 	safe.pHashSimilarityThreshold = fallbackRange(
 		safe.pHashSimilarityThreshold,

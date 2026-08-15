@@ -55,6 +55,13 @@ describe("providerList", () => {
 		assert.match(r.message, /present/);
 		assert.match(r.message, /missing/);
 	});
+
+	it("reports keyring-stored keys as present", async () => {
+		await providerStoreKey("openai", async () => "sk-keyring\n");
+		const r = providerList({ OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv);
+		assert.equal(r.ok, true);
+		assert.match(r.message, /openai.*present/);
+	});
 });
 
 describe("providerAdd", () => {

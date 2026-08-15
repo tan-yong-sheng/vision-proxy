@@ -3,8 +3,8 @@
  *
  * Subcommands:
  *   list                 list configured providers + key presence
- *   add <name>           register a provider + key/env (writes ~/.vision-proxy/config.json)
- *   check [<name>]       verify auth for a provider (or all)
+ *   add <name>           register provider as active (writes ~/.vision-proxy/config.json; key/env must be set separately)
+ *   check [<name>]       verify an API key is configured for a provider (or all)
  */
 import {
 	getProvider,
@@ -36,7 +36,7 @@ function userConfigPath(baseDir: string = os.homedir()): string {
 export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResult {
 	const lines: string[] = [];
 	for (const p of listProviders()) {
-		const hasKey = Boolean(env[p.apiKeyEnv]);
+		const hasKey = Boolean(env[p.apiKeyEnv]) || Boolean(getStoredProviderKey(p.id));
 		lines.push(
 			`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : "missing (" + p.apiKeyEnv + ")"}`,
 		);

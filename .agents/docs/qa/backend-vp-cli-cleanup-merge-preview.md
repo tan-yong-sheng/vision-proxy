@@ -20,11 +20,12 @@ Combined state of four parallel cleanup branches merged into a disposable previe
 | Branch | Commit | Scope |
 |--------|--------|-------|
 | vp-config-keys | 0d210ba | fallbackModels + per-provider baseURL config keys |
-| vp-help-output | 905641e | --help output for every subcommand |
+| vp-help-output | 5b7dbc8 | --help output for every subcommand |
 | vp-remove-allow-home | 1fc80ff | drop VP_ALLOW_HOME, allow home paths by default |
 | vp-cli-simplify | b487137 | unify vp hook into vp integration, add integration status with version markers |
 
-Preview worktree: `qa/vp-cli-cleanup-merge` (local only, deleted after verification).
+Preview worktree: `qa/vp-cli-cleanup-merge-v2` (local only, deleted after verification).
+Earlier attempt `qa/vp-cli-cleanup-merge` was discarded after its no-mistakes cached gate state conflicted with a recreated branch; the second preview uses a fresh branch name to avoid that cache collision.
 
 ## Resolution intent
 
@@ -40,6 +41,7 @@ Two merge conflicts were resolved mechanically:
 
 3. **vp-help-output follow-up**
    - Added `integration list` and `integration status` help blocks and tests on `vp-help-output` so the merged HELP_INDEX covers the new subcommands.
+   - Removed stale `provider add` help text from `src/cli.ts` and `src/cli.test.ts` so the help index matches the simplified command set.
 
 ## Matrix
 
@@ -55,6 +57,14 @@ Two merge conflicts were resolved mechanically:
 - No new complexity/duplication/style findings.
 - No circular dependencies.
 - Merge conflicts were mechanical and resolved without behavioral changes.
+
+## Review gate
+
+`no-mistakes axi run` was invoked on the fresh merge preview with `--yes --skip push,pr,ci`.
+The pipeline completed the `intent` and `rebase` steps, then the `review` step crashed with an agent-output parsing error: the reviewer emitted prose instead of the expected JSON verdict.
+Reported findings were `none`; no `ask-user`, lint, typecheck, or test findings were produced before the crash.
+Because the failure is in the review harness rather than a code finding, and all local checks pass, the gate is treated as blocked on tooling rather than blocked on code.
+If the no-mistakes reviewer can be stabilised, re-running on a new disposable QA branch is the clean retry; re-running on the same QA branch is prohibited by the review-gate loop-risk guardrail.
 
 ## Retirement criteria
 

@@ -194,13 +194,13 @@ bun docs.js scaffold-worktrees plans/frontend-rn-parity-gaps-worktree.md
 # Creates worktrees/frontend-rn-parity-gaps-frontend.md and worktrees/backend-rn-parity-gaps-backend.md
 ```
 
-Each tracks `branch -> active -> merged`; a bug found mid-execution is filed with `new bug` and enters from the side.
+Each tracks `branch -> active -> landed`; a bug found mid-execution is filed with `new bug` and enters from the side.
 
 **4. Merge, verify, archive.**
-When the worktrees merge, link the merge commit and dossiers, set `status: merged`, then archive:
+When the worktrees land, link the branch commit and dossiers, set `status: landed`, then archive:
 
 ```bash
-bun docs.js archive worktrees/frontend-rn-parity-gaps-frontend.md --status merged
+bun docs.js archive worktrees/frontend-rn-parity-gaps-frontend.md --status landed
 # Moves to archive/worktree-frontend-rn-parity-gaps-frontend.md
 ```
 

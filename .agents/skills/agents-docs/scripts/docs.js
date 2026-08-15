@@ -47,7 +47,7 @@ const TYPE_FOLDER = {
 const TERMINAL_STATUS = {
   research: ["complete", "dead-end"],
   plan: ["complete", "dropped"],
-  worktree: ["merged", "abandoned"],
+  worktree: ["landed", "abandoned"],
   bug: ["fixed", "wontfix"],
   coverage: ["retired"],
 };
@@ -426,7 +426,7 @@ function isArchiveAnomaly(d) {
   const s = statusOf(d);
   if (s === "deprecated") return false;
   if (d.fm.type && isTerminalStatus(d.fm.type, s)) return false;
-  const TERMINISH = ["complete", "merged", "fixed", "dead-end", "dropped", "abandoned", "wontfix", "retired", "done"];
+  const TERMINISH = ["complete", "landed", "fixed", "dead-end", "dropped", "abandoned", "wontfix", "retired", "done"];
   return !TERMINISH.includes(s);
 }
 
@@ -1377,7 +1377,7 @@ ${track.verification || "npm test"}
 - [ ] Worktree created
 - [ ] Implementation complete
 - [ ] Tests pass
-- [ ] Merged into integration branch
+- [ ] Landed on feature branch (ready for PR/merge)
 `;
 
     fs.mkdirSync(path.dirname(abs), { recursive: true });

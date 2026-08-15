@@ -36,7 +36,7 @@ Describe the intent, affected docs, and expected outcome before running any stat
 | `worktrees/` | flight logs for active branch worktrees | worktree |
 | `bugs/` | active incident side-channel: open -> fixed/wontfix | bug |
 | `qa/` | verification dossiers, coverage matrices, and review records | coverage / dossier |
-| `archive/` | terminal docs (complete, dropped, merged, fixed) | historical |
+| `archive/` | terminal docs (complete, dropped, landed, fixed) | historical |
 
 `area` (frontend | backend | fullstack) is a field and filename prefix (`<area>-<kebab-title>.md`), not a directory.
 For the complete frontmatter schema and stale windows, see [REFERENCE.md](REFERENCE.md).
@@ -45,7 +45,7 @@ For the complete frontmatter schema and stale windows, see [REFERENCE.md](REFERE
 > Plans specify execution tracks in `## Worktree Strategy`.
 > Running `scaffold-worktrees <plan-doc>` generates isolated `worktrees/<area>-<slug>.md` flight logs.
 > These flight logs serve as the unambiguous dispatch contracts for `/worktrunk-orca-delegation`.
-> Workers transition flight logs from `active` to `merged`, and verification findings flow into `qa/` dossiers.
+> Workers transition flight logs from `active` to `landed`, and verification findings flow into `qa/` dossiers.
 
 ## Core workflows
 
@@ -85,7 +85,7 @@ The plan moves to `archive/plan-<name>.md` and can be revived when research or d
 
 ### complete / archive / abandon - move a done doc to archive/
 
-Set the terminal status (`plan: complete|dropped`, `worktree: merged|abandoned`, `bug: fixed|wontfix`, `research: complete|dead-end`, `coverage: retired`), then `archive <doc>`.
+Set the terminal status (`plan: complete|dropped`, `worktree: landed|abandoned`, `bug: fixed|wontfix`, `research: complete|dead-end`, `coverage: retired`), then `archive <doc>`.
 The script moves it to `archive/<type>-<basename>.md`, rewrites inbound + outbound links to file-relative, and appends `log.md`.
 
 `abandon <doc>` is a one-step shortcut: it archives with the default terminal status for the doc's type (`plan` -> `dropped`, `worktree` -> `abandoned`, `bug` -> `wontfix`, `research` -> `dead-end`, `coverage` -> `retired`).
@@ -143,7 +143,7 @@ Archive docs never gate: an anomaly (archived doc reading as non-terminal) surfa
 ## Checkpoints & reply scaling
 
 The corpus is the contract behind parallel work.
-Plans hand off to `/worktrunk-orca-delegation`; worktrees track `active -> merged`; bugs enter `bugs/` mid-flight; `/review-gate` writes findings into `qa/` dossiers.
+Plans hand off to `/worktrunk-orca-delegation`; worktrees track `active -> landed`; bugs enter `bugs/` mid-flight; `/review-gate` writes findings into `qa/` dossiers.
 
 > **Commit docs before delegating.** Worker agents run in linked git worktrees that inherit the committed state of their base branch. Any plan, worktree flight log, or decision updated in the orchestrator's checkout must be committed to the default branch before `wt switch --create` or `orca orchestration worker-start`, or the worker will see stale or missing docs.
 
@@ -206,7 +206,7 @@ bun .agents/skills/agents-docs/scripts/docs.js prune --gc --dry-run
 - **`new` says "already exists"** - the target filename exists; pick a distinct title or reuse the existing doc.
 - **`archive` says "target exists"** - the type-prefixed filename already lives in `archive/`; decide which copy is canonical and remove the other before retrying.
 - **`clean` reports `auto-archive-skip: target exists`** - collision surfaced during auto sweep; the live copy was left in place, fix the collision manually. The sweep continues.
-- **`clean` reports `!not-terminal archive/<doc>`** - an archived doc reads with an unknown/active status. Add a terminal status (`complete`/`merged`/`fixed`/etc.) so the archive health reads `ok` instead of `not-terminal`.
+- **`clean` reports `!not-terminal archive/<doc>`** - an archived doc reads with an unknown/active status. Add a terminal status (`complete`/`landed`/`fixed`/etc.) so the archive health reads `ok` instead of `not-terminal`.
 - **`clean` reports `gc-refused <doc> (still referenced by <linker>)`** - the archive doc is still evidence for a live doc. Either update the linker to point elsewhere first, or pass `--force` to override (leaves the live doc with a dangling link).
 - **`sync` says "no doc maps to artifact"** - run `visual <doc> <artifact>` first so the `visual:` frontmatter key links the artifact to its doc.
 - **`ensure` flags "cannot infer type - manual"** - the doc is in an unexpected folder; set `type` by hand.

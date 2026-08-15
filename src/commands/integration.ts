@@ -387,7 +387,6 @@ export async function integrationUninstall(
 	if (existsSync(target)) {
 		try {
 			rmSync(target);
-			removed = true;
 		} catch {
 			return {
 				ok: false,

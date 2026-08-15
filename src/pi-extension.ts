@@ -9,8 +9,8 @@
  * standalone `vp` CLI. It is intentionally Pi-free at runtime: the only coupling
  * to Pi is the extension entry point and the tool-registration API.
  *
- * Fail-open: if `vp` is missing or exits non-zero, the tool returns a clear
- * error string rather than throwing, so the agent can proceed unchanged.
+ * Fail-open: if `vp` is missing or exits non-zero, the tool throws a clear
+ * error so Pi marks the call failed and the agent can proceed unchanged.
  */
 export const PI_EXTENSION_SOURCE = `/**
  * vision-proxy Pi extension.
@@ -23,21 +23,22 @@ export const PI_EXTENSION_SOURCE = `/**
  * external vision model), so it is forwarded verbatim and the consumer must
  * treat it as untrusted input.
  */
-import { tool, type Agent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { spawnSync } from "node:child_process";
 
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TIMEOUT_MS = Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000);
 
-export default async function setup(agent: Agent): Promise<void> {
-  agent.tool({
+export default function setup(pi: ExtensionAPI): void {
+  pi.registerTool({
     name: "analyze_image",
+    label: "Analyze image",
     description:
       "Describe one or more images using the vision-proxy CLI. Returns a fenced, UNTRUSTED " +
       "description for each image. Use this to extract information from screenshots, diagrams, " +
       "or photos the user references by path.",
-    schema: Type.Object({
+    parameters: Type.Object({
       paths: Type.Array(Type.String(), {
         description: "Absolute or project-relative paths to image files.",
       }),
@@ -48,9 +49,14 @@ export default async function setup(agent: Agent): Promise<void> {
         Type.String({ description: "Optional grounding format override (e.g. qwen_pixels)." }),
       ),
     }),
-    async run({ paths, question, format }: { paths: string[]; question?: string; format?: string }) {
+    async execute(_toolCallId, params, _signal) {
+      const { paths, question, format } = params as {
+        paths: string[];
+        question?: string;
+        format?: string;
+      };
       if (!paths || paths.length === 0) {
-        return { error: "analyze_image requires at least one image path." };
+        throw new Error("analyze_image requires at least one image path.");
       }
       const vp = process.env.VP_BIN || "vp";
       const args = ["analyze", "--json", ...paths];
@@ -66,20 +72,30 @@ export default async function setup(agent: Agent): Promise<void> {
           result.error.code === "ENOENT"
             ? \`vp binary not found: \${vp} (set VP_BIN or add vp to PATH)\`
             : "vp analyze failed or timed out";
-        return { error: reason };
+        throw new Error(reason);
       }
       if (result.status !== 0) {
-        return { error: \`vp analyze exited with status \${result.status ?? "?"}: \${result.stderr.trim()}\` };
+        throw new Error(
+          \`vp analyze exited with status \${result.status ?? "?"}: \${result.stderr.trim()}\`,
+        );
       }
+      let parsed: {
+        cacheHit?: boolean;
+        records?: Array<{ hash: string; description: string; error?: string }>;
+      };
       try {
-        const parsed = JSON.parse(result.stdout);
-        return {
-          cacheHit: parsed.cacheHit,
-          records: parsed.records,
-        };
+        parsed = JSON.parse(result.stdout);
       } catch {
-        return { error: "vp analyze returned output that was not valid JSON." };
+        throw new Error("vp analyze returned output that was not valid JSON.");
       }
+      const records = parsed.records ?? [];
+      const text = records
+        .map((r) => r.description ?? r.error ?? "")
+        .join("\\n\\n");
+      return {
+        content: [{ type: "text", text }],
+        details: { cacheHit: parsed.cacheHit, records },
+      };
     },
   });
 }

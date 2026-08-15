@@ -3,7 +3,7 @@
  *
  * Exercises the Pi extension file generation against an isolated temp HOME so we
  * never touch a real ~/.pi directory. Validates:
- *   - install writes the Pi extension file with the embedded source
+ *   - install writes the Pi extension file with valid extension source
  *   - show prints the extension source without touching disk
  *   - uninstall removes the file and cleans up an empty extensions directory
  *   - unknown agent is rejected
@@ -14,7 +14,6 @@ import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runIntegration } from "../commands/integration.ts";
-import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
 
 const ORIG_HOME = process.env.HOME;
 
@@ -33,14 +32,91 @@ function installDir(home: string): string {
 	return join(home, "ext");
 }
 
-test("install pi writes the vision-proxy extension file with embedded source", async () => {
+/**
+ * Execute the generated Pi extension with stubbed dependencies to verify it
+ * conforms to the Pi extension public interface contract: a default export
+ * function that registers an `analyze_image` tool whose `execute` handler
+ * returns the standard AgentToolResult shape.
+ */
+async function assertValidPiExtension(source: string, home: string): Promise<void> {
+	const dir = join(home, "ext-test");
+	mkdirSync(dir, { recursive: true });
+
+	// Redirect imports to local stubs so the generated extension can be loaded
+	// and executed without real dependencies or subprocesses.
+	const testSource = source
+		.replace(/"node:child_process"/g, '"./mock-child-process.ts"')
+		.replace(/"typebox"/g, '"./mock-typebox.ts"');
+
+	writeFileSync(join(dir, "vision-proxy.ts"), testSource);
+	writeFileSync(
+		join(dir, "mock-typebox.ts"),
+		`export const Type = {
+\tObject: (props) => props,
+\tArray: (item) => ({ type: "array", item }),
+\tOptional: (schema) => ({ ...schema, optional: true }),
+\tString: (opts) => ({ type: "string", opts }),
+};
+`,
+	);
+	writeFileSync(
+		join(dir, "mock-child-process.ts"),
+		`let nextResult;
+export function setNextResult(r) { nextResult = r; }
+export function spawnSync(..._args) { return nextResult; }
+`,
+	);
+
+	const mod = await import(join(dir, "vision-proxy.ts"));
+	const registered: Array<{ name: string; execute: Function }> = [];
+	const mockPi = {
+		registerTool: (tool: { name: string; execute: Function }) => registered.push(tool),
+	};
+
+	assert.equal(typeof mod.default, "function", "generated extension must export a default setup function");
+	mod.default(mockPi);
+
+	assert.equal(registered.length, 1, "setup must register exactly one tool");
+	assert.equal(registered[0]!.name, "analyze_image", "registered tool name must be analyze_image");
+
+	const mockCp = await import(join(dir, "mock-child-process.ts"));
+
+	// Successful execution returns the expected AgentToolResult shape.
+	mockCp.setNextResult({
+		status: 0,
+		stdout: JSON.stringify({
+			cacheHit: true,
+			records: [{ hash: "abc", description: "an image description" }],
+		}),
+		stderr: "",
+		error: undefined,
+	});
+	const result = await registered[0]!.execute("call-1", { paths: ["/tmp/img.png"] }, undefined);
+	assert.ok(result, "execute must return a result");
+	assert.ok(Array.isArray(result.content), "result.content must be an array");
+	assert.equal(result.content.length, 1);
+	assert.equal(result.content[0]!.type, "text");
+	assert.equal(result.content[0]!.text, "an image description");
+	assert.ok(result.details, "result.details must be defined");
+	assert.equal(result.details.cacheHit, true);
+	assert.ok(Array.isArray(result.details.records));
+
+	// Empty paths are rejected with a clear error before any subprocess call.
+	await assert.rejects(
+		async () => registered[0]!.execute("call-2", { paths: [] }, undefined),
+		/requires at least one image path/,
+	);
+}
+
+test("install pi writes the vision-proxy extension file with valid source", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	const r = await runIntegration("install", "pi", dir);
 	assert.equal(r.ok, true);
 	const target = join(dir, "vision-proxy.ts");
 	assert.equal(existsSync(target), true);
-	assert.equal(readFileSync(target, "utf8"), PI_EXTENSION_SOURCE);
+	const written = readFileSync(target, "utf8");
+	await assertValidPiExtension(written, home);
 	reset();
 });
 

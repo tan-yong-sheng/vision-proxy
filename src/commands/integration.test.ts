@@ -169,6 +169,40 @@ test("install codex writes the shim and appends a [[UserPromptSubmit]] block", a
 	reset();
 });
 
+test("codex status reports not installed when marker is outside a UserPromptSubmit block", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	mkdirSync(join(home, ".codex"), { recursive: true });
+	// Stale config: "vision-proxy" appears in a comment but not inside a block.
+	writeFileSync(
+		join(home, ".codex", "config.toml"),
+		'# old vision-proxy hook\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node /some/other/hook.mjs"\n',
+	);
+	const status = await runIntegration("status", "");
+	assert.equal(status.ok, true);
+	assert.match(status.message, /✗ codex\s+not installed/);
+	const uninstall = await runIntegration("uninstall", "codex", dir);
+	assert.equal(uninstall.ok, true);
+	assert.match(uninstall.message, /nothing to uninstall|was not installed/);
+	reset();
+});
+
+test("codex uninstall removes a valid block when the shim file is missing", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	mkdirSync(join(home, ".codex"), { recursive: true });
+	const target = join(dir, "codex-vision-proxy-user-prompt-submit.mjs");
+	const toml = `\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node ${target.replace(/\\/g, "/")}"\ntimeout = 30\nadditionalContextLimit = 4096\n`;
+	writeFileSync(join(home, ".codex", "config.toml"), toml);
+	const status = await runIntegration("status", "");
+	assert.equal(status.ok, true);
+	assert.match(status.message, /✓ codex\s+installed \(version unknown\)/);
+	const uninstall = await runIntegration("uninstall", "codex", dir);
+	assert.equal(uninstall.ok, true);
+	assert.match(uninstall.message, /uninstalled codex/);
+	reset();
+});
+
 test("install claude-code ships shared.mjs next to the shim and the import resolves", async () => {
 	const home = isolate();
 	const dir = installDir(home);

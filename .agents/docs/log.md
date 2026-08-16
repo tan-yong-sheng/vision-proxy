@@ -113,3 +113,6 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: archive worktrees/backend-vp-distribution.md -> archive/worktree-backend-vp-distribution.md (landed)
 - 2026-08-16: archive qa/backend-vision-proxy-post-migration-merge-review.md -> archive/coverage-backend-vision-proxy-post-migration-merge-review.md (retired)
 - 2026-08-16: archive qa/backend-post-merge-qa-for-pr-5.md -> archive/coverage-backend-post-merge-qa-for-pr-5.md (retired)
+- 2026-08-16: new bug bugs/backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md
+- 2026-08-16: new coverage qa/backend-codex-status-and-uninstall-consistency-fix.md
+- 2026-08-16: archive bugs/backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md -> archive/bug-backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md (fixed)

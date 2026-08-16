@@ -256,7 +256,12 @@ const codex: AgentSpec = {
 		};
 	},
 	isInstalled(raw) {
-		return raw.includes(HOOK_MARKER);
+		if (!raw.includes(HOOK_MARKER)) return false;
+		const blocks = raw.split(/^\[\[UserPromptSubmit\]\]/m);
+		for (let i = 1; i < blocks.length; i++) {
+			if (blocks[i]!.includes(HOOK_MARKER)) return true;
+		}
+		return false;
 	},
 	sharedShim: true,
 	installedVersion: ({ installDir }) => {

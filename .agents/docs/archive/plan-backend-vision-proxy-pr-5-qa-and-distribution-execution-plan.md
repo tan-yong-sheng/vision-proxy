@@ -12,7 +12,7 @@ tags:
   - biome
   - betterleaks
   - worktree
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"
@@ -28,7 +28,7 @@ related:
   - ../worktrees/backend-prune-max-tool-calls-per-turn.md
   - ../worktrees/backend-fix-pi-extension-typebox-dependency.md
   - ../worktrees/backend-tooling-biome-betterleaks.md
-  - ../worktrees/backend-vp-distribution.md
+  - ../archive/worktree-backend-vp-distribution.md
 visual: .lavish/worktree-plan.html
 ---
 # vision-proxy PR-5 QA and distribution execution plan
@@ -92,7 +92,7 @@ Land the PR-5 QA fixes, clean up two active pre-existing bugs, add Biome + Bette
 |----------|--------|------|-------|------------|
 | [fix pi uninstall message](../worktrees/backend-fix-pi-uninstall-message.md) | `fix/pi-uninstall-message` | `main` | `vp-qa-fixes` | Phase 1 |
 | [fix hook shared.mjs copy](../worktrees/backend-fix-hook-shim-shared-mjs-copy.md) | `fix/hook-shim-shared-mjs` | `fix/pi-uninstall-message` | `vp-qa-fixes` | #1 + Phase 1 |
-| [vp distribution](../worktrees/backend-vp-distribution.md) | `vp-distribution` | `main` | `vp-distribution` | Phase 1 |
+| [vp distribution](../archive/worktree-backend-vp-distribution.md) | `vp-distribution` | `main` | `vp-distribution` | Phase 1 |
 
 ## Risks
 

@@ -1,15 +1,22 @@
 ---
 type: plan
-title: "CLI distribution strategy"
-description: "Decide how users install the vision-proxy CLI globally and how the hook shims find the binary."
+title: CLI distribution strategy
+description: Decide how users install the vision-proxy CLI globally and how the hook shims find the binary.
 area: backend
-tags: [cli, distribution, packaging, homebrew, github-releases, curl, bun, install]
-status: active
+tags:
+  - cli
+  - distribution
+  - packaging
+  - homebrew
+  - github-releases
+  - curl
+  - bun
+  - install
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-11-13"
-related:
-  - ../qa/backend-post-merge-qa-for-pr-5.md
+related: [../qa/backend-post-merge-qa-for-pr-5.md]
 ---
 # CLI distribution strategy
 

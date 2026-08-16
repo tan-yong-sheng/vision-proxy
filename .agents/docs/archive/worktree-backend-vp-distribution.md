@@ -4,7 +4,7 @@ title: vp distribution
 description: "Implement npm-free distribution for vision-proxy: GitHub Releases tarballs + Homebrew tap + curl installer."
 area: backend
 tags: [cli, distribution, homebrew, github-releases, curl, install]
-status: active
+status: landed
 branch: vp-distribution
 base: main
 stack_position: 2

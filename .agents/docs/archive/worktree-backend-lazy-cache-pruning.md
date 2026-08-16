@@ -4,7 +4,7 @@ title: Lazy cache pruning
 description: Add cacheMaxAgeDays config and lazy age-based pruning to the vision-proxy cache.
 area: backend
 tags: [post-migration, cache, lazy-pruning]
-status: active
+status: abandoned
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-08-29"

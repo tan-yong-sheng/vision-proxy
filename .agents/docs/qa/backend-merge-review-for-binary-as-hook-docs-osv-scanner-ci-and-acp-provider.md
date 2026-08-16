@@ -43,8 +43,22 @@ The three source branches diverged from an older `main` that still held active P
 | Secrets scan | `pnpm secrets` | PASS |
 | Lint / format | `pnpm lint` | PASS |
 | Fallow audit | `fallow audit --format json --quiet` | PASS |
-| no-mistakes review | `no-mistakes axi run ...` | PENDING |
+| no-mistakes review | `no-mistakes axi run ...` | PASS |
+| PR opened | - | [#7](https://github.com/tan-yong-sheng/vision-proxy/pull/7) |
+
+## Findings
+
+### Pre-existing: codex uninstall reports "was not installed" while status reports installed
+
+- **Observation:** `vp integration status` reports `✓ codex installed (version unknown)`, but `vp integration uninstall codex` replies `codex integration was not installed`.
+- **Root cause:** `isInstalled()` checks `raw.includes("vision-proxy")` anywhere in `~/.codex/config.toml`, while `remove()` only removes `[[UserPromptSubmit]]` blocks that contain the marker. If the marker appears outside a block (stale path, comment, or malformed block), status and uninstall disagree.
+- **Status:** pre-existing, not introduced by this merge. No-mistakes did not flag it; existing tests cover happy-path install/uninstall but not the stale-config edge case.
+
+### Auto-fixed by no-mistakes
+
+- `no-mistakes(review): Use pre-resolved ACP model directly in analyze fallback path`
+- ACP provider now bypasses `generateWithFallback` and calls the model directly, avoiding re-resolution of an already-resolved ACP model in the fallback loop.
 
 ## Retirement criteria
 
-Retire when `no-mistakes axi run` reports `outcome: pass` and the branch is merged to `main`.
+Retire when PR #7 is merged to `main`.

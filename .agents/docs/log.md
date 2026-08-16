@@ -129,3 +129,4 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-tests.md
 - 2026-08-16: scaffold-worktrees plans/backend-osv-scanner-ci-integration.md -> worktrees/backend-osv-scanner-ci-integration.md
 - 2026-08-16: new coverage qa/backend-merge-review-for-binary-as-hook-docs-osv-scanner-ci-and-acp-provider.md
+- 2026-08-16: new bug bugs/backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md

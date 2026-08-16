@@ -562,9 +562,17 @@ function performArchive(doc, docs, opts) {
 
 function parseStatusFlag(args) {
   const eqIdx = args.findIndex((a) => a.startsWith("--status="));
-  if (eqIdx !== -1) return args[eqIdx].slice("--status=".length);
+  if (eqIdx !== -1) {
+    const value = args[eqIdx].slice("--status=".length);
+    if (value === "") die("usage: --status=<value> requires a non-empty value");
+    return value;
+  }
   const spaceIdx = args.indexOf("--status");
-  if (spaceIdx !== -1 && args[spaceIdx + 1]) return args[spaceIdx + 1];
+  if (spaceIdx !== -1) {
+    const value = args[spaceIdx + 1];
+    if (!value || value.startsWith("--")) die("usage: --status <value> requires a non-empty value");
+    return value;
+  }
   return null;
 }
 

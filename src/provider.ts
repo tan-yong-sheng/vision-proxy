@@ -184,9 +184,9 @@ export async function resolveAcpModel(
 			env: process.env as Record<string, string>,
 			session: {
 				cwd: config.cwd ?? process.cwd(),
-				// mcpServers shape varies; pass through as opaque
+				// mcpServers is Array<McpServer> per ACP SDK; pass through as opaque
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				mcpServers: config.mcpServers ?? ({} as any[]),
+				mcpServers: (config.mcpServers ?? []) as any[],
 			},
 		});
 		const model = provider.languageModel();

@@ -72,3 +72,59 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: new coverage qa/backend-vp-cli-cleanup-merge-preview.md
 - 2026-08-15: archive worktrees/backend-vp-cli-simplify.md -> archive/worktree-backend-vp-cli-simplify.md (merged)
 - 2026-08-15: archive qa/backend-vp-cli-cleanup-merge-preview.md -> archive/coverage-backend-vp-cli-cleanup-merge-preview.md (retired)
+- 2026-08-15: new coverage qa/backend-post-merge-qa-for-pr-5.md
+- 2026-08-15: new plan plans/backend-cli-distribution-strategy.md
+- 2026-08-15: new research research/backend-hook-based-tool-interception-for-vision-proxy.md
+- 2026-08-15: new worktree worktrees/backend-fix-pi-uninstall-message.md
+- 2026-08-15: archive plans/backend-add-config-keys-for-fallback-models-and-provider-baseurl.md -> archive/plan-backend-add-config-keys-for-fallback-models-and-provider-baseurl.md (complete)
+- 2026-08-15: archive plans/backend-integration-status-command.md -> archive/plan-backend-integration-status-command.md (complete)
+- 2026-08-15: archive plans/backend-remove-vp-allow-home-path-restriction.md -> archive/plan-backend-remove-vp-allow-home-path-restriction.md (complete)
+- 2026-08-15: archive plans/backend-simplify-cli-surface-drop-vp-provider-add-and-unify-vp-hook-into-vp-integration.md -> archive/plan-backend-simplify-cli-surface-drop-vp-provider-add-and-unify-vp-hook-into-vp-integration.md (complete)
+- 2026-08-15: archive plans/fullstack-add-help-output-for-every-cli-subcommand.md -> archive/plan-fullstack-add-help-output-for-every-cli-subcommand.md (complete)
+- 2026-08-15: archive research/backend-integration-status-command.md -> archive/research-backend-integration-status-command.md (complete)
+- 2026-08-15: archive research/backend-pi-hook-versus-integration-support.md -> archive/research-backend-pi-hook-versus-integration-support.md (complete)
+- 2026-08-15: archive research/backend-hook-based-tool-interception-for-vision-proxy.md -> archive/research-backend-hook-based-tool-interception-for-vision-proxy.md (complete)
+- 2026-08-15: new plan plans/backend-fix-pi-uninstall-message.md
+- 2026-08-15: new plan plans/backend-fix-hook-shim-shared-mjs-copy.md
+- 2026-08-15: new worktree worktrees/backend-fix-hook-shim-shared-mjs-copy.md
+- 2026-08-15: ensure structure applied (2 change(s))
+- 2026-08-15: new worktree worktrees/backend-vp-distribution.md
+- 2026-08-15: new worktree worktrees/backend-prune-max-tool-calls-per-turn.md
+- 2026-08-15: new worktree worktrees/backend-fix-pi-extension-typebox-dependency.md
+- 2026-08-15: new plan plans/backend-tooling-biome-betterleaks.md
+- 2026-08-15: new worktree worktrees/backend-tooling-biome-betterleaks.md
+- 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)
+- 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)
+- 2026-08-15: new plan plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md
+- 2026-08-15: sync plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md from .lavish/worktree-plan.html (synced from lavish feedback)
+- 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)
+- 2026-08-15: new plan plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md
+- 2026-08-16: new research research/backend-binary-as-hook-vision-proxy-integration.md
+- 2026-08-16: new plan plans/backend-binary-as-hook-vision-proxy-integration.md
+- 2026-08-16: archive research/backend-binary-as-hook-vision-proxy-integration.md -> archive/research-backend-binary-as-hook-vision-proxy-integration.md (complete)
+- 2026-08-16: new research research/backend-osv-scanner-adoption-for-vision-proxy-ci.md
+- 2026-08-16: new plan plans/backend-osv-scanner-ci-integration.md
+- 2026-08-16: archive worktrees/backend-fix-hook-shim-shared-mjs-copy.md -> archive/worktree-backend-fix-hook-shim-shared-mjs-copy.md (landed)
+- 2026-08-16: archive plans/backend-cli-distribution-strategy.md -> archive/plan-backend-cli-distribution-strategy.md (complete)
+- 2026-08-16: archive plans/backend-fix-pi-uninstall-message.md -> archive/plan-backend-fix-pi-uninstall-message.md (complete)
+- 2026-08-16: archive plans/backend-tooling-biome-betterleaks.md -> archive/plan-backend-tooling-biome-betterleaks.md (complete)
+- 2026-08-16: archive plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md -> archive/plan-backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md (complete)
+- 2026-08-16: archive plans/backend-fix-hook-shim-shared-mjs-copy.md -> archive/plan-backend-fix-hook-shim-shared-mjs-copy.md (complete)
+- 2026-08-16: archive worktrees/backend-fix-pi-uninstall-message.md -> archive/worktree-backend-fix-pi-uninstall-message.md (landed)
+- 2026-08-16: archive worktrees/backend-tooling-biome-betterleaks.md -> archive/worktree-backend-tooling-biome-betterleaks.md (landed)
+- 2026-08-16: archive worktrees/backend-prune-max-tool-calls-per-turn.md -> archive/worktree-backend-prune-max-tool-calls-per-turn.md (landed)
+- 2026-08-16: archive worktrees/backend-fix-pi-extension-typebox-dependency.md -> archive/worktree-backend-fix-pi-extension-typebox-dependency.md (landed)
+- 2026-08-16: archive worktrees/backend-vp-distribution.md -> archive/worktree-backend-vp-distribution.md (landed)
+- 2026-08-16: archive bugs/backend-pi-extension-undeclared-typebox-dependency.md -> archive/bug-backend-pi-extension-undeclared-typebox-dependency.md (fixed)
+- 2026-08-16: archive bugs/backend-core-dead-max-tool-calls-per-turn-surface.md -> archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md (fixed)
+- 2026-08-16: new research research/backend-userpromptsubmit-inject-description-versus-vp-analyze-instruction.md
+- 2026-08-16: scaffold-worktrees plans/backend-binary-as-hook-vision-proxy-integration.md -> worktrees/backend-worktree.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-add-mcpc-tech-acp-ai-provider-dependency.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-extend-provider-registry-with-acp.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-persist-acp-config-keys.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-validate-acp-config-in-cli.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-adapter-remains-provider-agnostic.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-update-help-and-provider-list.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-documentation.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-tests.md
+- 2026-08-16: scaffold-worktrees plans/backend-osv-scanner-ci-integration.md -> worktrees/backend-osv-scanner-ci-integration.md

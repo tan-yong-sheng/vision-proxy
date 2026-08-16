@@ -4,7 +4,7 @@ title: vp-cli-simplify
 description: "Drop `vp provider add` and `vp hook`, unify `vp integration install/show/list/uninstall`, and add `vp integration status` with version markers."
 area: backend
 tags: [cli, hook, integration, provider, refactor, status, version]
-status: merged
+status: landed
 merged_commit: b097e3c
 branch: vp-cli-simplify
 base: main
@@ -111,8 +111,8 @@ Your job is to add `vp integration status` with version-marker based outdated de
 
 ### Context to read first
 
-1. Read `.agents/docs/research/backend-integration-status-command.md` for the research.
-2. Read `.agents/docs/plans/backend-integration-status-command.md` for the detailed plan.
+1. Read `./research-backend-integration-status-command.md` for the research.
+2. Read `./plan-backend-integration-status-command.md` for the detailed plan.
 3. Inspect the current branch code:
    - `src/commands/integration.ts` (unified install/show/list/uninstall logic)
    - `src/pi-extension.ts` (embedded Pi extension source)

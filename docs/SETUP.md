@@ -15,7 +15,10 @@ How to get a vision-capable model working with `vp`.
 - [OpenAI](./providers/openai.md)
 - [Anthropic](./providers/anthropic.md)
 - [Google](./providers/google.md)
-- [ACP](./providers/acp.md) (Claude Code, Gemini CLI, Codex CLI)
+- ACP:
+  - [Claude Code](./providers/acp-claude-code.md)
+  - [Codex](./providers/acp-codex.md)
+  - [Gemini](./providers/acp-gemini.md)
 
 ## Agent integrations
 

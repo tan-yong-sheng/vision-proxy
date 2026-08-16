@@ -100,15 +100,17 @@ interface VisionConfig {
 }
 ```
 
-### ACP
+### ACP (example: Gemini CLI)
 
 ```json
 {
   "provider": "acp",
   "acpCommand": "gemini",
-  "acpArgs": ["--experimental-acp"]
+  "acpArgs": ["--acp"]
 }
 ```
+
+See `docs/providers/acp-*.md` for Claude Code and Codex setup.
 
 ## Environment variables
 

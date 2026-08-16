@@ -74,7 +74,9 @@ docs/
     openai.md
     anthropic.md
     google.md
-    acp.md
+    acp-claude-code.md
+    acp-codex.md
+    acp-gemini.md
 ```
 
 ### Recommendations

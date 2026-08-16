@@ -4,6 +4,10 @@ How to get a vision-capable model working with `vp`.
 
 ## 1. Pick a provider
 
+`vp` supports API-key-backed providers and the Agent Client Protocol (ACP).
+
+### API-key providers
+
 | Provider       | API key env var       | Models                               |
 |----------------|----------------------|--------------------------------------|
 | OpenAI         | `OPENAI_API_KEY`     | `gpt-4o`                             |
@@ -15,6 +19,39 @@ Set the env var:
 ```bash
 export OPENAI_API_KEY="sk-..."
 ```
+
+### ACP provider
+
+The ACP (Agent Client Protocol) provider routes image analysis through an ACP-compatible
+agent process (Claude Code, Gemini CLI, Codex CLI) instead of an API key.
+ACP does not use an environment-variable API key; it spawns a local agent process.
+
+**Setup:**
+
+```bash
+vp config set provider acp
+vp config set acpCommand gemini
+vp config set acpArgs '["--experimental-acp"]'
+```
+
+**ACP configuration keys:**
+
+| Key | Description |
+|-----|-------------|
+| `acpCommand` | The agent executable (e.g. `gemini`, `claude-code-acp`) |
+| `acpArgs` | CLI arguments as a JSON array, e.g. `["--experimental-acp"]` |
+| `acpCwd` | Working directory for the spawned agent process |
+| `acpMcpServers` | MCP server configurations as a JSON array |
+
+> **Note:** When the provider is `acp`, the `model` config key is ignored because the
+> agent selects its own model. Also, ACP requires the ability to spawn child
+> processes; if your environment blocks subprocess execution, fall back to an
+> API-key provider.
+
+**Security note:**
+
+The ACP provider executes a user-supplied binary. Ensure you trust the command
+before configuring it.
 
 ## 2. Set the default provider and model
 
@@ -119,3 +156,4 @@ vp provider delete-key openai
 | `no API key for provider "openai"` | Set `OPENAI_API_KEY` or use `--api-key` |
 | `path outside allowed directories` | Use an absolute path inside tmp, cwd, or the home directory |
 | `model is currently experiencing high demand` | Try a different model or wait |
+| `ACP provider requires "acpCommand"` | Set `acpCommand` in config (see step 1) |

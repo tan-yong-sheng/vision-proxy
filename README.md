@@ -89,6 +89,31 @@ Run `vp config init` to scaffold a project config file.
 Provider API keys are read from their standard environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GOOGLE_API_KEY`.
 When a key is absent from the environment, `vp` checks the OS keyring as a fallback via `@napi-rs/keyring`.
 
+### ACP Provider
+
+`vp` also supports the Agent Client Protocol (ACP) to route image analysis through ACP-compatible agents such as Claude Code, Gemini CLI, or Codex CLI. ACP does not use an API key; instead it spawns a local agent process.
+
+**Setup:**
+```bash
+vp config set provider acp
+vp config set acpCommand gemini
+vp config set acpArgs '["--experimental-acp"]'
+```
+
+**Additional ACP configuration keys:**
+
+| Key | Description |
+|-----|-------------|
+| `acpCommand` | The agent executable (e.g. `gemini`, `claude-code-acp`) |
+| `acpArgs` | CLI arguments as a JSON array, e.g. `["--experimental-acp"]` |
+| `acpCwd` | Working directory for the spawned agent process |
+| `acpMcpServers` | MCP server configs as a JSON array |
+
+> **Note:** When using the ACP provider, the `model` config key is ignored because the agent selects its own model. Also, ACP requires the ability to spawn child processes; if your environment blocks subprocess execution, fall back to an API-key provider.
+
+### Security Note
+The ACP provider executes a user-supplied binary. Ensure you trust the command before configuring it.
+
 ### Configuration keys
 
 Most settings are set with `vp config set <key> <value>` (written to `.vision-proxy.json` or `~/.vision-proxy/config.json`). Two keys take structured values:

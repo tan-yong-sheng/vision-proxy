@@ -12,7 +12,7 @@ import {
 	listStoredProviderKeys,
 	storeProviderKey,
 } from "../keyring.ts";
-import { getProvider, listProviders, type ProviderSpec, resolveModel } from "../provider.ts";
+import { type ApiProviderSpec, getProvider, isAcpProvider, listProviders } from "../provider.ts";
 
 export interface ProviderResult {
 	ok: boolean;
@@ -23,10 +23,14 @@ export interface ProviderResult {
 export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResult {
 	const lines: string[] = [];
 	for (const p of listProviders()) {
-		const hasKey = Boolean(env[p.apiKeyEnv]) || Boolean(getStoredProviderKey(p.id));
-		lines.push(
-			`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : `missing (${p.apiKeyEnv})`}`,
-		);
+		if (isAcpProvider(p)) {
+			lines.push(`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: n/a`);
+		} else {
+			const hasKey = Boolean(env[p.apiKeyEnv]) || Boolean(getStoredProviderKey(p.id));
+			lines.push(
+				`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : `missing (${p.apiKeyEnv})`}`,
+			);
+		}
 	}
 	return { ok: true, message: lines.join("\n"), code: 0 };
 }
@@ -35,20 +39,26 @@ export function providerCheck(
 	name: string | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): ProviderResult {
-	const specs = name ? ([getProvider(name)].filter(Boolean) as ProviderSpec[]) : listProviders();
+	const allSpecs = listProviders();
+	const specs = name
+		? allSpecs.filter((p) => p.id === name)
+		: allSpecs.filter((p) => !isAcpProvider(p));
 	if (specs.length === 0) {
 		return { ok: false, message: `unknown provider "${name}"`, code: 1 };
 	}
 	const lines: string[] = [];
 	let allOk = true;
 	for (const spec of specs) {
-		// Check auth using the configured default model for that provider.
-		const probe = resolveModel(spec.id, spec.defaultModelId, env);
-		if (probe.ok) {
-			lines.push(`${spec.id}: OK (key present)`);
+		if (isAcpProvider(spec)) {
+			lines.push(`${spec.id}: OK (key: n/a — ACP does not use env var keys)`);
 		} else {
-			allOk = false;
-			lines.push(`${spec.id}: MISSING KEY (${spec.apiKeyEnv})`);
+			const hasKey = Boolean(env[spec.apiKeyEnv]) || Boolean(getStoredProviderKey(spec.id));
+			if (hasKey) {
+				lines.push(`${spec.id}: OK (key present)`);
+			} else {
+				allOk = false;
+				lines.push(`${spec.id}: MISSING KEY (${spec.apiKeyEnv})`);
+			}
 		}
 	}
 	return {
@@ -58,8 +68,8 @@ export function providerCheck(
 	};
 }
 
-function requireProvider(providerId: string): ProviderSpec | undefined {
-	return getProvider(providerId);
+function requireProvider(providerId: string): ApiProviderSpec | undefined {
+	return getProvider(providerId) as ApiProviderSpec | undefined;
 }
 
 function unknownProviderResult(providerId: string): ProviderResult {

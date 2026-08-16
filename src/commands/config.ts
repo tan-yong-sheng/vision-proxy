@@ -72,6 +72,21 @@ export async function configSet(key: string, value: string, cwd: string): Promis
 	const existing = (await readJsonFile(target)) ?? {};
 
 	const coerced = coerceValue(key, value);
+
+	// Validate ACP-specific constraints before writing.
+	// If provider is acp and acpCommand is not set, only allow setting acpCommand.
+	const before = resolveConfig(process.env, existing as Partial<VisionConfig>);
+	if (before.provider === "acp" && !before.acpCommand && key !== "acpCommand") {
+		return {
+			ok: false,
+			message:
+				'cannot set "' +
+				key +
+				'" while provider is "acp" without an "acpCommand". Set acpCommand first.',
+			code: 1,
+		};
+	}
+
 	(existing as Record<string, unknown>)[key] = coerced;
 	await fs.writeFile(target, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
 	return { ok: true, message: `set ${key} = ${JSON.stringify(coerced)} in ${target}`, code: 0 };
@@ -112,18 +127,28 @@ export async function configValidate(opts: {
 	const sanitized = resolveConfig(opts.env ?? process.env, config);
 
 	const problems: string[] = [];
-	if (!listProviders().some((p) => p.id === sanitized.provider)) {
+	if (!listProviders().some((p) => p.id === sanitized.provider) && sanitized.provider !== "acp") {
 		problems.push(`unknown provider "${sanitized.provider}"`);
 	}
 	if (sanitized.maxImagesPerCall < 1) {
 		problems.push("maxImagesPerCall must be >= 1");
 	}
+	if (sanitized.provider === "acp" && !sanitized.acpCommand) {
+		problems.push(
+			'ACP provider requires "acpCommand" (set with: vp config set acpCommand <command>)',
+		);
+	}
 
 	// Reachability: does the provider have a key?
-	const probe = resolveModel(sanitized.provider, sanitized.modelId, opts.env ?? process.env);
-	const authNote = probe.ok
-		? `provider "${sanitized.provider}" reachable (key present)`
-		: `provider "${probe.provider}" missing key ${probe.apiKeyEnv}`;
+	let authNote: string;
+	if (sanitized.provider === "acp") {
+		authNote = `provider "acp" (ACP) — key: n/a (ACP does not use env var keys)`;
+	} else {
+		const probe = resolveModel(sanitized.provider, sanitized.modelId, opts.env ?? process.env);
+		authNote = probe.ok
+			? `provider "${sanitized.provider}" reachable (key present)`
+			: `provider "${probe.provider}" missing key ${probe.apiKeyEnv}`;
+	}
 
 	if (problems.length > 0) {
 		return {

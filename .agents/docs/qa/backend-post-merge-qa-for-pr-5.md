@@ -54,7 +54,7 @@ Manual validation of the combined state that landed in PR #5 on `main`.
 |-------|--------|
 | `vp integration uninstall pi` after install | Bug found; fix on `fix/pi-uninstall-message` |
 | `vp config get` shows `mode` | Expected; `mode` is still a supported key |
-| `vp integration install claude-code|codex` writes `shared.mjs` next to the shim | Bug found: installed shim imports `./shared.mjs` which ESM-resolves only if the sidecar ships; Claude Code and Codex both hit this at hook runtime. Fix on `fix/hook-shim-shared-mjs` (always copy `shared.mjs`, fail loudly if missing). |
+| `vp integration install claude-code / codex` writes `shared.mjs` next to the shim | Bug found: installed shim imports `./shared.mjs` which ESM-resolves only if the sidecar ships; Claude Code and Codex both hit this at hook runtime. Fix on `fix/hook-shim-shared-mjs` (always copy `shared.mjs`, fail loudly if missing). |
 
 ## Retirement criteria
 

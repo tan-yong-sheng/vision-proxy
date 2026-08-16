@@ -42,7 +42,7 @@ Ensure `vp integration install claude-code|codex` always ships `shared.mjs` next
 
 | ID | Decision | Rationale |
 |----|----------|----------|
-| D1 | Resolve `shared.mjs` via a fallback chain: `shimDir()` result -> `src/shims` (repo source, source checkouts only) -> error. | For a source checkout the repo `src/shims` always has `shared.mjs`, so it removes the stale-build gap. Packaged builds (Homebrew/GitHub Release) ship no `src/shims`, so they must resolve `shared.mjs` from `dist/shims`. |
+| D1 | Resolve `shared.mjs` via a fallback chain: `shimDir()` result -> `src/shims` (repo source, source checkouts only) -> error. | Only source-checkout installations may fall back from `shimDir()` to `src/shims`; packaged builds (Homebrew/GitHub Release) ship no `src/shims`, so they must resolve `shared.mjs` from `dist/shims`. If `dist/shims/shared.mjs` is absent in a packaged build, the install fails loudly rather than falling back to source. |
 | D2 | Hard-fail install when no `shared.mjs` candidate exists, rather than skipping the copy. | Silent skip is the root cause of the runtime ESM error; failing fast surfaces the problem at install time. |
 | D3 | Keep `copy-shims.mjs` copying `shared.mjs` into `dist/shims`, and add a release/build check that fails the packaged artifact when `dist/shims/shared.mjs` is absent. | Build and release must never ship without it; fail the build/release rather than the user's hook. |
 | D4 | Embed the install-time `vp` path into the hook shim, with a runtime fallback to `vp` via PATH. | Removes the need for `VP_BIN`/`VISION_PROXY_PATH` env vars; works for both curl (`~/.local/bin/vp`) and Homebrew symlinks. |

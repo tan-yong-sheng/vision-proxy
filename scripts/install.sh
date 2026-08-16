@@ -5,7 +5,7 @@
 # its SHA-256 against the published checksum manifest, extracts it into
 # ~/.local/share/vision-proxy, and symlinks `vp` into ~/.local/bin.
 #
-# Requires: curl, jq, sha256sum, and node >= 22 on PATH.
+# Requires: curl, jq, a SHA-256 tool (sha256sum or shasum -a 256), and node >= 22 on PATH.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh
@@ -48,7 +48,21 @@ need() {
 }
 need curl
 need jq
-need sha256sum
+# macOS does not ship sha256sum by default; fall back to shasum -a 256 so the
+# checksum verification works on both Linux and macOS.
+if command -v sha256sum >/dev/null 2>&1; then
+	SHA256="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+	SHA256="shasum -a 256"
+else
+	echo "error: 'sha256sum' or 'shasum' is required but not found on PATH" >&2
+	exit 1
+fi
+
+# Compute the SHA-256 of a file using whichever tool resolved above.
+sha256_of() {
+	$SHA256 "$1" | awk '{print $1}'
+}
 
 # --- detect OS/arch -------------------------------------------------------
 os="$(uname -s)"
@@ -108,7 +122,7 @@ if [ -z "$expected" ]; then
 	exit 1
 fi
 
-actual="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
+actual="$(sha256_of "$tmp/$asset")"
 if [ "$expected" != "$actual" ]; then
 	echo "error: checksum mismatch for $asset" >&2
 	echo "  expected: $expected" >&2

@@ -26,6 +26,9 @@ pre-commit:
       run: biome check --write --no-errors-on-unmatched
       fail_text: "Biome reported issues it could not auto-fix - run `biome check --write` and review"
       glob: "*.{ts,js,mjs,json,jsonc,yml,yaml}"
+      # Stage Biome's in-place auto-fixes so the commit ships the fixed content
+      # rather than the pre-fix staged version.
+      stage_fixed: true
 
     # Fallow audit gate for AI-generated changes (per AGENTS.md convention).
     fallow:

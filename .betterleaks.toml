@@ -11,20 +11,17 @@
 
 title = "vision-proxy betterleaks config"
 
-# Allowlist files that intentionally contain non-secret placeholder values used
-# in tests and documentation.
+# Allowlist only known fixture/testdata paths. Real credentials committed to
+# ordinary project files (source, tests, docs, README, agent files) stay
+# subject to scanning so a leaked secret is not silently skipped. Placeholder
+# example secrets are handled by the `regexes` allowlist below.
 [allowlist]
 description = "Project allowlist for test fixtures and documentation"
 
 paths = [
-  '''.*\.test\.ts$''',
-  '''.*\.e2e\.mjs$''',
-  '''^docs/.*''',
-  '''^README\.md$''',
   '''^.*/fixtures/.*''',
   '''^.*/__fixtures__/.*''',
   '''^.*/testdata/.*''',
-  '''^.*/\.agents/.*''',
 ]
 
 # Common placeholder / example strings that are not real secrets.

@@ -4,6 +4,8 @@ The ACP (Agent Client Protocol) provider routes image analysis through an ACP-co
 
 Supported agents include Claude Code, Gemini CLI, and Codex CLI when run in ACP mode.
 
+See the [Vercel AI SDK ACP community provider docs](https://ai-sdk.dev/providers/community-providers/acp#acp-agent-client-protocol) for background on the protocol.
+
 ## Quick config
 
 ```bash

@@ -81,6 +81,23 @@ export async function configSet(
 	const coerced = coerceValue(key, value);
 	(existing as Record<string, unknown>)[key] = coerced;
 	await fs.writeFile(target, JSON.stringify(existing, null, 2) + "\n", "utf8");
+
+	// Validate ACP-specific constraints after writing.
+	const merged = resolveConfig(process.env, existing as Partial<VisionConfig>);
+	if (merged.provider === "acp") {
+		if (!merged.acpCommand) {
+			// Revert: remove acpCommand if it was just set to something invalid.
+			// Actually, if they set another key while provider=acp, warn them.
+			if (key !== "acpCommand") {
+				return {
+					ok: false,
+					message: 'cannot set "' + key + '" while provider is "acp" without an "acpCommand". Set acpCommand first.',
+					code: 1,
+				};
+			}
+		}
+	}
+
 	return { ok: true, message: `set ${key} = ${JSON.stringify(coerced)} in ${target}`, code: 0 };
 }
 
@@ -119,11 +136,14 @@ export async function configValidate(opts: {
 	const sanitized = resolveConfig(opts.env ?? process.env, config);
 
 	const problems: string[] = [];
-	if (!listProviders().some((p) => p.id === sanitized.provider)) {
+	if (!listProviders().some((p) => p.id === sanitized.provider) && sanitized.provider !== "acp") {
 		problems.push(`unknown provider "${sanitized.provider}"`);
 	}
 	if (sanitized.maxImagesPerCall < 1) {
 		problems.push("maxImagesPerCall must be >= 1");
+	}
+	if (sanitized.provider === "acp" && !sanitized.acpCommand) {
+		problems.push('ACP provider requires "acpCommand" (set with: vp config set acpCommand <command>)');
 	}
 
 	// Reachability: does the provider have a key?

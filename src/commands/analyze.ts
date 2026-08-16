@@ -33,7 +33,7 @@ import {
 	parseModelString,
 } from "../core.ts";
 import { analyzeImagesWithModel, type AnalyzeRequest } from "../adapter.ts";
-import { resolveModel, isKnownProvider } from "../provider.ts";
+import { resolveModel, resolveAcpModel, isKnownProvider } from "../provider.ts";
 import { loadConfig } from "../config.ts";
 import { cacheGet, cacheSet, configureCache } from "../cache.ts";
 
@@ -196,17 +196,38 @@ export async function runAnalyze(
 
 	// The primary model must be resolvable (have a key); fallbacks are only
 	// tried on a runtime failure later, so a missing key on the primary is fatal.
-	const resolved = resolveModel(
-		provider,
-		modelId,
-		env,
-		flags.apiKey,
-		config.baseURLs[provider],
-	);
-	if (!resolved.ok) {
-		throw new AnalyzeError(
-			`no API key for provider "${resolved.provider}". Set ${resolved.apiKeyEnv} (or pass --api-key).`,
+	let resolved:
+		| { ok: true; model: import("ai").LanguageModel }
+		| { ok: false; error: string };
+	if (provider === "acp") {
+		if (!config.acpCommand) {
+			throw new AnalyzeError(
+				'ACP provider requires "acpCommand" in config (e.g. vp config set acpCommand gemini)',
+			);
+		}
+		resolved = await resolveAcpModel({
+			command: config.acpCommand,
+			args: config.acpArgs,
+			cwd: config.acpCwd,
+			mcpServers: config.acpMcpServers,
+		});
+		if (!resolved.ok) {
+			throw new AnalyzeError(`ACP provider error: ${resolved.error}`);
+		}
+	} else {
+		const modelOutcome = resolveModel(
+			provider,
+			modelId,
+			env,
+			flags.apiKey,
+			config.baseURLs[provider],
 		);
+		if (!modelOutcome.ok) {
+			throw new AnalyzeError(
+				`no API key for provider "${modelOutcome.provider}". Set ${modelOutcome.apiKeyEnv} (or pass --api-key).`,
+			);
+		}
+		resolved = { ok: true, model: modelOutcome.model.model };
 	}
 
 	const grounding = getGroundingFormat(config, provider, modelId);

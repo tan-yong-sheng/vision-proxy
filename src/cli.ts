@@ -149,6 +149,11 @@ provider options:
   delete-key <name>          delete key from the system keyring
   list-keys                  list providers with keyring-stored keys
 
+Notes:
+  The \`acp\` provider uses the Agent Client Protocol to spawn an agent
+  process (e.g. Claude Code, Gemini CLI). Set \`acpCommand\`, optionally
+  \`acpArgs\`, \`acpCwd\`, and \`acpMcpServers\` in your config. See README.
+
 cache options:
   status                     hit rate + size
   clear                      drop all entries
@@ -183,7 +188,8 @@ Options:
   --format <name>      grounding format: plain (default) | qwen_pixels |
                        molmo_points | deepseek_bbox | internvl_pixels |
                        gemini_normalized_1000
-  --provider <name>    override the configured provider
+  --provider <name>    override the configured provider (openai, anthropic,
+                       google, or acp)
   --model <id>         override the configured model id
   --joint              force a joint multi-image batch
   --crop <i:form>      crop image <index> before analysis (repeatable),
@@ -287,7 +293,9 @@ Subcommands:
 Notes:
   Credentials come from an env var (e.g. ANTHROPIC_API_KEY) or the system
   keyring. Supply the key via the env var or \`vp provider store-key <name>\`.
-  Set the active provider with \`vp config set provider <name>\`.`,
+  Set the active provider with \`vp config set provider <name>\`.
+  The \`acp\` provider does not use an API key; instead it requires an
+  \`acpCommand\` config to spawn the agent process.`,
 
 	"provider list": `vp provider list
 

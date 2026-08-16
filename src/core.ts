@@ -51,6 +51,14 @@ export interface VisionConfig {
 	baseURLs: Record<string, string>;
 	/** Alternate `provider/model-id` strings to try when the primary model fails. */
 	fallbackModels: string[];
+	/** ACP: the agent executable command (e.g. `claude-code-acp`, `gemini`). Required when provider is `acp`. */
+	acpCommand?: string;
+	/** ACP: CLI arguments passed to the agent (e.g. `["--experimental-acp"]`). */
+	acpArgs?: string[];
+	/** ACP: working directory for the spawned agent process. */
+	acpCwd?: string;
+	/** ACP: MCP server configurations for the ACP session. */
+	acpMcpServers?: unknown[];
 }
 
 export interface ImageMeta {
@@ -363,6 +371,10 @@ export const DEFAULT_CONFIG: VisionConfig = {
 	maxToolCallsPerTurn: -1,
 	baseURLs: {},
 	fallbackModels: [],
+	acpCommand: undefined,
+	acpArgs: undefined,
+	acpCwd: undefined,
+	acpMcpServers: undefined,
 };
 
 // ── Persistent file storage ────────────────────────────────────────────────
@@ -388,6 +400,10 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"maxToolCallsPerTurn",
 	"baseURLs",
 	"fallbackModels",
+	"acpCommand",
+	"acpArgs",
+	"acpCwd",
+	"acpMcpServers",
 ]);
 
 function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
@@ -742,6 +758,15 @@ function fallbackBaseUrls(value: unknown): Record<string, string> {
 	return out;
 }
 
+function fallbackStringArray(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const out: string[] = [];
+	for (const entry of value) {
+		if (typeof entry === "string") out.push(entry);
+	}
+	return out.length > 0 ? out : undefined;
+}
+
 function fallbackFallbackModels(value: unknown): string[] {
 	if (!Array.isArray(value)) return [...DEFAULT_CONFIG.fallbackModels];
 	const out: string[] = [];
@@ -790,6 +815,10 @@ export function sanitize(config: VisionConfig): VisionConfig {
 	safe.maxToolCallsPerTurn = fallbackToolCallsCap(safe.maxToolCallsPerTurn);
 	safe.baseURLs = fallbackBaseUrls(safe.baseURLs);
 	safe.fallbackModels = fallbackFallbackModels(safe.fallbackModels);
+	safe.acpCommand = typeof safe.acpCommand === "string" && safe.acpCommand ? safe.acpCommand : undefined;
+	safe.acpArgs = fallbackStringArray(safe.acpArgs);
+	safe.acpCwd = typeof safe.acpCwd === "string" && safe.acpCwd ? safe.acpCwd : undefined;
+	safe.acpMcpServers = Array.isArray(safe.acpMcpServers) ? safe.acpMcpServers : undefined;
 	return safe;
 }
 

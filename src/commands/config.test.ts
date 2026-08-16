@@ -121,3 +121,30 @@ describe("configValidate", () => {
 		assert.match(r.message, /reachable/);
 	});
 });
+
+describe("ACP provider config", () => {
+	it("accepts acpCommand as a valid key", async () => {
+		const r = await configSet("acpCommand", "gemini", cwd);
+		assert.equal(r.ok, true);
+		assert.match(r.message, /gemini/);
+	});
+
+	it("rejects setting non-acp keys when acpCommand is missing", async () => {
+		await configSet("provider", "acp", cwd);
+		const r = await configSet("acpArgs", '["--test"]', cwd);
+		assert.equal(r.ok, false);
+		assert.match(r.message, /acpCommand/);
+	});
+
+	it("accepts acpArgs after acpCommand is set", async () => {
+		const r = await configSet("acpArgs", '["--test"]', cwd);
+		assert.equal(r.ok, true);
+	});
+
+	it("validates ACP config requires acpCommand", async () => {
+		await configSet("provider", "acp", cwd);
+		const r = await configValidate({ cwd, env: {} as NodeJS.ProcessEnv });
+		assert.equal(r.ok, false);
+		assert.match(r.message, /acpCommand/);
+	});
+});

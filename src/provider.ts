@@ -12,22 +12,27 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getStoredProviderKey } from "./keyring.ts";
 
-export interface ProviderSpec {
-	id: string;
+/** Discriminated union for API-key-backed providers (openai, anthropic, google). */
+export interface ApiProviderSpec {
+	id: "openai" | "anthropic" | "google";
 	label: string;
-	/** Environment variable that holds the API key. */
 	apiKeyEnv: string;
-	/** Optional base URL override env var. */
 	baseUrlEnv?: string;
-	/** Factory: build a LanguageModel from the resolved key + model id. */
 	make: (opts: { apiKey: string; modelId: string; baseURL?: string }) => LanguageModel;
-	/** Whether the provider supports image input by default. */
 	supportsImage: boolean;
-	/** Default model id used for probes and fallbacks. */
 	defaultModelId: string;
 }
 
-const openaiProvider: ProviderSpec = {
+interface AcpProviderSpec {
+	id: "acp";
+	label: string;
+	supportsImage: boolean;
+	defaultModelId: string;
+}
+
+export type ProviderSpec = ApiProviderSpec | AcpProviderSpec;
+
+const openaiProvider: ApiProviderSpec = {
 	id: "openai",
 	label: "OpenAI",
 	apiKeyEnv: "OPENAI_API_KEY",
@@ -38,7 +43,7 @@ const openaiProvider: ProviderSpec = {
 		createOpenAI({ apiKey, baseURL })(modelId),
 };
 
-const anthropicProvider: ProviderSpec = {
+const anthropicProvider: ApiProviderSpec = {
 	id: "anthropic",
 	label: "Anthropic",
 	apiKeyEnv: "ANTHROPIC_API_KEY",
@@ -49,7 +54,7 @@ const anthropicProvider: ProviderSpec = {
 		createAnthropic({ apiKey, baseURL })(modelId),
 };
 
-const googleProvider: ProviderSpec = {
+const googleProvider: ApiProviderSpec = {
 	id: "google",
 	label: "Google",
 	apiKeyEnv: "GOOGLE_API_KEY",
@@ -64,14 +69,24 @@ const PROVIDERS: Record<string, ProviderSpec> = {
 	[openaiProvider.id]: openaiProvider,
 	[anthropicProvider.id]: anthropicProvider,
 	[googleProvider.id]: googleProvider,
+	"acp": {
+		id: "acp",
+		label: "ACP (Agent Client Protocol)",
+		supportsImage: true,
+		defaultModelId: "",
+	} as unknown as ProviderSpec,
 };
 
 export function listProviders(): ProviderSpec[] {
 	return Object.values(PROVIDERS);
 }
 
-export function getProvider(id: string): ProviderSpec | undefined {
-	return PROVIDERS[id];
+export function getProvider(id: string): ApiProviderSpec | undefined {
+	return PROVIDERS[id] as ApiProviderSpec | undefined;
+}
+
+export function isAcpProvider(spec: ProviderSpec): spec is AcpProviderSpec {
+	return spec.id === "acp";
 }
 
 export interface ResolvedModel {
@@ -95,7 +110,14 @@ export interface ResolveModelMissingKey {
 	apiKeyEnv: string;
 }
 
-export type ResolveModelOutcome = ResolveModelResult | ResolveModelMissingKey;
+export interface ResolveModelAcp {
+	ok: true;
+	model: ResolvedModel;
+	missingKey: false;
+	provider: "acp";
+}
+
+export type ResolveModelOutcome = ResolveModelResult | ResolveModelMissingKey | ResolveModelAcp;
 
 function envValue(name: string | undefined, env: NodeJS.ProcessEnv): string | undefined {
 	if (!name) return undefined;
@@ -111,9 +133,8 @@ export function resolveModel(
 	explicitApiKey?: string,
 	explicitBaseURL?: string,
 ): ResolveModelOutcome {
-	const provider = PROVIDERS[providerId];
+	const provider = PROVIDERS[providerId] as ApiProviderSpec | undefined;
 	if (!provider) {
-		// Unknown provider: synthesize a missing-key outcome so callers can report it.
 		return {
 			ok: false,
 			missingKey: true,
@@ -145,7 +166,40 @@ export function resolveModel(
 	};
 }
 
+/** Resolve an ACP provider with its command/args/cwd/mcpServers config. */
+export async function resolveAcpModel(
+	config: {
+		command: string;
+		args?: string[];
+		cwd?: string;
+		mcpServers?: unknown[];
+	},
+): Promise<{ ok: true; model: LanguageModel } | { ok: false; error: string }> {
+	try {
+		const { createACPProvider } = await import("@mcpc-tech/acp-ai-provider");
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const provider = createACPProvider({
+			command: config.command,
+			args: config.args ?? [],
+			env: process.env as Record<string, string>,
+			session: {
+				cwd: config.cwd ?? process.cwd(),
+				// mcpServers shape varies; pass through as opaque
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				mcpServers: config.mcpServers ?? ({} as any[]),
+			},
+		});
+		const model = provider.languageModel();
+		return { ok: true, model };
+	} catch (err) {
+		return {
+			ok: false,
+			error: `failed to initialize ACP provider: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
+}
+
 /** Check whether a resolved provider list contains a given provider id. */
 export function isKnownProvider(id: string): boolean {
-	return id in PROVIDERS;
+	return id in PROVIDERS || id === "acp";
 }

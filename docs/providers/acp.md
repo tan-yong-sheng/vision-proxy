@@ -41,7 +41,7 @@ When the provider is `acp`, the `modelId` config key is ignored because the agen
 | `acpCwd` | Working directory for the spawned agent process. |
 | `acpMcpServers` | MCP server configurations as a JSON array. |
 
-## Security note
+## Notes
 
-The ACP provider executes a user-supplied binary.
-Ensure you trust the command before configuring it.
+- ACP does **not** support fallback models.
+- The ACP provider executes a user-supplied binary; ensure you trust the command before configuring it.

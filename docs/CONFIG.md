@@ -71,7 +71,7 @@ interface VisionConfig {
     "openai": "https://api.openai.com/v1"
   },
   "fallbackModels": [
-    "google/gemini-2.5-flash"
+    "openai/gpt-4o-mini"
   ]
 }
 ```
@@ -83,7 +83,7 @@ interface VisionConfig {
   "provider": "anthropic",
   "modelId": "claude-sonnet-4-5",
   "fallbackModels": [
-    "openai/gpt-4o"
+    "anthropic/claude-sonnet-4-opus"
   ]
 }
 ```
@@ -95,7 +95,7 @@ interface VisionConfig {
   "provider": "google",
   "modelId": "gemini-2.5-pro",
   "fallbackModels": [
-    "openai/gpt-4o"
+    "google/gemini-2.5-flash"
   ]
 }
 ```
@@ -132,7 +132,7 @@ Every config key can be overridden by an environment variable. Provider env vars
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
 | `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |
-| `VP_FALLBACK_MODELS` | `fallbackModels` | `VP_FALLBACK_MODELS="openai/gpt-4o,google/gemini-2.5-flash"` |
+| `VP_FALLBACK_MODELS` | `fallbackModels` | `VP_FALLBACK_MODELS="openai/gpt-4o,openai/gpt-4o-mini"` |
 | `VP_BASE_URLS` | `baseURLs` | `VP_BASE_URLS='openai=http://localhost:8000/v1'` |
 
 ### Example

@@ -11,4 +11,5 @@
 
 - [CONFIG.md](./CONFIG.md) — full config schema, JSON examples, and environment variables.
 - [providers/](./providers/) — provider-specific setup (OpenAI, Anthropic, Google, ACP).
+- [FALLBACK.md](./FALLBACK.md) — fallback model chain.
 - [INTEGRATIONS.md](./INTEGRATIONS.md) — install `vp` into Claude Code, Codex, or Pi.

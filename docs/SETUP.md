@@ -33,6 +33,13 @@ vp provider list-keys
 vp provider delete-key openai
 ```
 
+## Fallback models
+
+Configure backup models for when the primary model fails.
+See [FALLBACK.md](./FALLBACK.md).
+
+ACP does not support fallback models.
+
 ## Config precedence
 
 1. `--config <path>` flag

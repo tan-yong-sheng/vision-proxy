@@ -15,8 +15,7 @@ Or paste this into `~/.vision-proxy/config.json`:
 ```json
 {
   "provider": "google",
-  "modelId": "gemini-2.5-pro",
-  "fallbackModels": ["openai/gpt-4o"]
+  "modelId": "gemini-2.5-pro"
 }
 ```
 
@@ -30,4 +29,4 @@ vp analyze screenshot.png
 
 - **API key:** `GOOGLE_API_KEY` env var, `vp provider store-key google`, or `--api-key`.
 - **Custom endpoint:** `GOOGLE_BASE_URL` or `"baseURLs": { "google": "..." }`.
-- **Fallback models:** `VP_FALLBACK_MODELS` or `"fallbackModels": ["openai/gpt-4o", ...]`.
+- **Fallback models:** see [FALLBACK.md](../FALLBACK.md).

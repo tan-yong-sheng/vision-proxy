@@ -8,8 +8,8 @@ status: active
 branch: vp-tooling-biome-betterleaks
 base: main
 stack_position: 1
-created: "2026-08-16"
-updated: "2026-08-16"
+created: "2026-08-15"
+updated: "2026-08-15"
 commits_verified: []
 merge_preview_verified: ""
 stale_after: "2026-08-30"

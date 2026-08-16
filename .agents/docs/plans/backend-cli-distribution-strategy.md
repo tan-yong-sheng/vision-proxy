@@ -63,7 +63,7 @@ Two tracks for what the release actually contains:
 
 Homebrew formula (same repo): keep the formula in this repo under `Formula/vision-proxy.rb`. Users tap with the explicit URL: `brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy`, then `brew install tan-yong-sheng/vision-proxy/vision-proxy`. The formula `url` points at the release tarball + `sha256` + `version`; `bin.install "vp"`; `depends_on "node@22"` for Track A.
 
-Curl installer (`scripts/install.sh`): query `api.github.com/repos/<owner>/<repo>/releases/latest`, pick the asset by `uname`/`arch`, download, verify `sha256sum` against a published checksum, extract to `~/.local/share/vision-proxy`, symlink `vp` into `~/.local/bin`.
+Curl installer (`scripts/install.sh`): query `api.github.com/repos/<owner>/<repo>/releases/latest`, pick the asset by `uname`/`arch`, download, verify the checksum with `sha256sum` (falling back to `shasum -a 256` on macOS) against a published checksum, extract to `~/.local/share/vision-proxy`, symlink `vp` into `~/.local/bin`.
 
 Hook shim `vp` discovery: at install time, `vp integration install` captures its own invocation path (`process.argv[1]`) and writes it into the generated shim. The shim uses that embedded absolute path, falling back to `vp` via PATH if the embedded path disappears. No env var is required for the common case.
 
@@ -96,7 +96,7 @@ Hook shim `vp` discovery: at install time, `vp integration install` captures its
 - GitHub Releases (tarballs + checksums) as the artifact source.
 - Homebrew formula kept in this repo under `Formula/vision-proxy.rb`.
 - `bun build --compile` for Track B standalone binaries.
-- `curl` + `jq` + `sha256sum` for the installer.
+- `curl` + `jq` + a portable checksum check (`sha256sum`, falling back to `shasum -a 256` on macOS) for the installer.
 
 ## Deliverables
 

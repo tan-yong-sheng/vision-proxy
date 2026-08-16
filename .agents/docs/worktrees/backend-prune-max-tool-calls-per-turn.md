@@ -5,7 +5,7 @@ description: "Prune the dead maxToolCallsPerTurn config surface from core, confi
 area: backend
 tags: [cli, config, dead-code, core, limits]
 status: active
-branch: configurable-analyze-image-limit
+branch: qa/pr-5-qa-and-distribution-merge-preview
 base: main
 stack_position: 1
 stack_batch: vp-pre-existing-bugs

@@ -10,6 +10,11 @@ vision-proxy ships prebuilt per-OS/arch tarballs from [GitHub Releases](https://
 
 ### Homebrew (macOS / Linux)
 
+> Note: The Homebrew formula is not installable yet. Its per-arch `sha256`
+> hashes are placeholders that must be filled from a published release's
+> `sha256sum.txt` before `brew install` will succeed. Until then, use the
+> curl installer below.
+
 ```bash
 brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy
 brew install tan-yong-sheng/vision-proxy/vision-proxy

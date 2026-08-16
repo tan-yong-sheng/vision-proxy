@@ -37,7 +37,7 @@ Make `vp integration uninstall pi` print the correct success message on the firs
 |----|----------|----------|
 | D1 | Set `removed = true` once the target file is successfully `rmSync`'d (not only when a host config block is removed). | Pi has no host config, so the existing `removed` assignment never fires for it; file deletion is the real signal. |
 | D2 | Keep `pi` as a no-host-config agent (`configPath() = ""`) - do not invent a config file just to satisfy the flag. | Minimal change; the `removed` semantics should reflect file-or-config removal generically. |
-| D3 | Re-derive `removed` from both signals: `removed = fileDeleted || configRemoved`. | Makes the message correct for hook agents too and avoids future regressions. |
+| D3 | Re-derive `removed` from both signals: `removed = fileDeleted \|\| configRemoved`. | Makes the message correct for hook agents too and avoids future regressions. |
 
 ## Deliverables
 

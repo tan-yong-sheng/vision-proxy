@@ -28,7 +28,7 @@ Add Biome as the project's linter and formatter, and add BetterLeaks as a pre-co
 ## Target state
 
 - `biome.json` configures Biome for TypeScript, JavaScript, and JSON in this Node 22+ project.
-- `package.json` adds `lint`, `format`, and `lint:fix` scripts powered by Biome.
+- `package.json` adds `lint` and `format` scripts powered by Biome (`lint` runs `biome check`; `format` runs `biome check --write`).
 - `.betterleaks.toml` configures BetterLeaks with sensible rules and allowlists for the repo.
 - `lefthook.yml` runs `biome check` and `betterleaks git --pre-commit` against staged files before each commit.
 - `.github/workflows/ci.yml` runs `biome ci`, `npm test`, and `betterleaks git .` on PRs and pushes to `main`.

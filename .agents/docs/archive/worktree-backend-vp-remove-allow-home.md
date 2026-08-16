@@ -4,7 +4,7 @@ title: vp-remove-allow-home
 description: "Drop `VP_ALLOW_HOME` and let `vp analyze` read image paths anywhere on the local filesystem by default; delegate permission enforcement to the OS sandbox (for example nono)."
 area: backend
 tags: [security, cli, path-restriction]
-status: merged
+status: landed
 branch: vp-remove-allow-home
 base: main
 stack_position: 1

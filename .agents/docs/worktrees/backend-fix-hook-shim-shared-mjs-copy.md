@@ -67,4 +67,4 @@ Fix `vp integration install claude-code|codex` so it always ships `shared.mjs` n
 
 ## Open questions
 
-- Should `shared.mjs` travel with the binary in the chosen distribution layout (npm / Homebrew / GitHub release)? Tracked in `../plans/backend-cli-distribution-strategy.md`.
+- Verify GitHub Release artifacts package and ship `dist/shims/*.mjs` (including `shared.mjs`) alongside the `vp` binary; the release build check must fail when `dist/shims/shared.mjs` is absent. Tracked in `../plans/backend-cli-distribution-strategy.md` and `../plans/backend-fix-hook-shim-shared-mjs-copy.md`.

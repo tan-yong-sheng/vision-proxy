@@ -30,16 +30,17 @@ The current Claude Code / Codex shims use the `UserPromptSubmit` hook. They scan
 
 ## Claude Code hooks
 
-Claude Code exposes `UserPromptSubmit` hooks documented in the settings schema. There is no documented `PreToolUse` hook in the public Claude Code hook API. Hook events are limited to user-turn lifecycle hooks; tool execution is not externally interceptable via the `settings.json` hook configuration.
+Claude Code documents both `UserPromptSubmit` (fires at the start of a user turn, with access to the original prompt) and `PreToolUse` (fires before a specific tool call) hooks in `settings.json`. `PreToolUse` can intercept file-reading tools such as `Read`, so an image path the agent is about to read can be routed to `vp analyze` before the model sees the raw bytes, without relying on prompt text scanning.
 
-- **Feasibility:** Low for tool-level interception. The only reliable hook is `UserPromptSubmit`, which runs before the agent processes the turn.
-- **Alternative:** Keep scanning prompt text for image paths and injecting `additionalContext`. The agent may still call its own vision tool if available, but the context is present.
+- **Feasibility:** High for image interception on supported tools (`Read`) via `PreToolUse`. `UserPromptSubmit` remains the better fit for prompt-aware analysis because it sees the full original question.
+- **Recommendation:** Use `PreToolUse` for image interception and keep `UserPromptSubmit` for prompt-aware `additionalContext` injection.
 
 ## Codex hooks
 
-Codex uses a TOML `config.toml` with `[[UserPromptSubmit]]` blocks. The documented hook surface is the same user-turn hook. There is no documented `PreToolUse` or tool-interception hook.
+Codex uses a TOML `config.toml` with both `[[UserPromptSubmit]]` blocks (user-turn) and `PreToolUse`-style hooks that run before tool calls such as `read_file`. This lets Codex intercept an image file read and route it to `vp analyze`, mirroring Claude Code's `PreToolUse` path.
 
-- **Feasibility:** Low for tool-level interception. Same constraint as Claude Code.
+- **Feasibility:** High for image interception on `read_file` via `PreToolUse`. Same prompt-aware fallback as Claude Code for other cases.
+- **Recommendation:** Prefer `PreToolUse` for image interception, retain `UserPromptSubmit` for prompt-aware analysis.
 
 ## Pi coding agent
 

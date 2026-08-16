@@ -42,7 +42,7 @@ Implement the npm-free distribution strategy from `../plans/backend-cli-distribu
 
 - GitHub Actions for cross-platform builds + releases.
 - Homebrew tap repository under `tan-yong-sheng/homebrew-tap`.
-- `curl` + `jq` + `sha256sum` for the installer.
+- `curl` + `jq` + a portable checksum check (`sha256sum`, falling back to `shasum -a 256` on macOS) for the installer.
 - `fallow audit` for change review.
 - `git worktree` / `wt` for isolation.
 
@@ -53,7 +53,7 @@ Implement the npm-free distribution strategy from `../plans/backend-cli-distribu
 | Build all platforms | `act` or push a tag and check GitHub Actions | Release created with 5 assets + checksum file |
 | Curl install | `./scripts/install.sh` in a clean container/VM | `vp --version` works, on `PATH` |
 | Homebrew install | `brew install tan-yong-sheng/tap/vision-proxy` in a clean macOS/Linux env | `vp --version` works |
-| Hook shims travel together | install `vp`, then `vp integration install claude-code` | `shared.mjs` present next to the shim (blocked by finding #4) |
+| Hook shims travel together | install `vp`, then `vp integration install claude-code` | `shared.mjs` present next to the shim (guaranteed by `fix/hook-shim-shared-mjs`) |
 
 ## Status
 
@@ -65,7 +65,8 @@ Implement the npm-free distribution strategy from `../plans/backend-cli-distribu
 - [ ] Run `fallow audit`.
 - [ ] Open PR and merge to `main`.
 
-## Open questions
-
-- Does this depend on fixing finding #4 first? Functionally the release can ship, but hook installs will break at runtime if `shared.mjs` is missing; best to land #4 before the first public release.
 - Should we attempt `bun build --compile` (Track B) in this worktree or defer to a follow-up worktree? Recommended: defer.
+
+## Resolved dependencies
+
+- Hook shim sidecar (`shared.mjs`): finding #4 is resolved on `fix/hook-shim-shared-mjs`, which always copies `shared.mjs` next to the installed shim and fails loudly when it is missing. The release no longer depends on a follow-up fix before the first public release.

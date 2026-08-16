@@ -278,18 +278,29 @@ export async function runAnalyze(
 			};
 		}
 
-		const resp = await generateWithFallback(
-			candidates,
-			{
-				imagePayloads: [p],
-				systemPrompt,
-				question,
-				maxOutputTokens: flags.maxOutputTokens,
-			},
-			env,
-			flags.apiKey,
-			analyzeImpl,
-		);
+		const resp = await (provider === "acp"
+			? (async () => {
+					const r = await analyzeImpl({
+						imagePayloads: [p],
+						systemPrompt,
+						question,
+						model: resolved.model,
+						maxOutputTokens: flags.maxOutputTokens,
+					});
+					return { text: r.text, usedProvider: provider, usedModel: modelId };
+				})()
+			: generateWithFallback(
+					candidates,
+					{
+						imagePayloads: [p],
+						systemPrompt,
+						question,
+						maxOutputTokens: flags.maxOutputTokens,
+					},
+					env,
+					flags.apiKey,
+					analyzeImpl,
+				));
 		const description = resp.text;
 		await cacheSet(cacheKey, description);
 		const output = flags.fence
@@ -328,19 +339,31 @@ export async function runAnalyze(
 		};
 	}
 
-	const resp = await generateWithFallback(
-		candidates,
-		{
-			imagePayloads: payloads,
-			systemPrompt,
-			question,
-			providerOptions: buildProviderOptions(effectiveFormat),
-			maxOutputTokens: flags.maxOutputTokens,
-		},
-		env,
-		flags.apiKey,
-		analyzeImpl,
-	);
+	const resp = await (provider === "acp"
+		? (async () => {
+				const r = await analyzeImpl({
+					imagePayloads: payloads,
+					systemPrompt,
+					question,
+					model: resolved.model,
+					providerOptions: buildProviderOptions(effectiveFormat),
+					maxOutputTokens: flags.maxOutputTokens,
+				});
+				return { text: r.text, usedProvider: provider, usedModel: modelId };
+			})()
+		: generateWithFallback(
+				candidates,
+				{
+					imagePayloads: payloads,
+					systemPrompt,
+					question,
+					providerOptions: buildProviderOptions(effectiveFormat),
+					maxOutputTokens: flags.maxOutputTokens,
+				},
+				env,
+				flags.apiKey,
+				analyzeImpl,
+			));
 	const description = resp.text;
 	await cacheSet(jointCacheKey, description);
 	const output = flags.fence

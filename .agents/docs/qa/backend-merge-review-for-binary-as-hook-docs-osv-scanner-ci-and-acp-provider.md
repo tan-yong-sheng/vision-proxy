@@ -43,6 +43,7 @@ After integration, the ACP provider was removed because the community provider c
 | Secrets scan | `pnpm secrets` | PASS |
 | Lint / format | `pnpm lint` | PASS |
 | Fallow audit | `fallow audit --format json --quiet --explain --gate-marker agent` | PASS |
+| no-mistakes review | `no-mistakes axi run ...` | Review step passed; test step hit agent output parser failure (see Findings) |
 | PR opened | - | [#7](https://github.com/tan-yong-sheng/vision-proxy/pull/7) |
 
 ## Findings
@@ -58,6 +59,13 @@ After integration, the ACP provider was removed because the community provider c
 - Proved via a fake ACP agent that `@mcpc-tech/acp-ai-provider@0.3.5` drops image `FilePart`s before sending them to the agent; only text prompts are transmitted.
 - Confirmed Vercel AI SDK v7 has no first-party ACP provider.
 - Removed ACP provider code, tests, dependency, and documentation from PR #7.
+
+### no-mistakes test step: agent output parser failure
+
+- **Observation:** The `no-mistakes axi run` review step completed with no findings, but the `test` step failed with `pi output parse: invalid character 'a' after object key:value pair`. The agent-generated JSON summary contained embedded newlines inside a string value.
+- **Root cause:** no-mistakes test agent output parser does not handle multi-line JSON string values in the agent response.
+- **Mitigation:** Ran the full local verification suite manually; all checks pass.
+- **Status:** pipeline tooling issue, not a code defect.
 
 ## Retirement criteria
 

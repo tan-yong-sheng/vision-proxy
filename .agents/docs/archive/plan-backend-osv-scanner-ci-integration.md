@@ -4,12 +4,11 @@ title: OSV-Scanner CI integration
 description: Add OSV-Scanner to vision-proxy CI for dependency vulnerability scanning on PRs and scheduled full scans.
 area: backend
 tags: [security, ci, osv-scanner]
-status: active
+status: complete
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-10-15"
-related:
-  - ../research/backend-osv-scanner-adoption-for-vision-proxy-ci.md
+related: [../research/backend-osv-scanner-adoption-for-vision-proxy-ci.md]
 ---
 # OSV-Scanner CI integration
 

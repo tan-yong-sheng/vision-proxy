@@ -4,11 +4,13 @@ title: OSV-Scanner CI integration QA
 description: QA dossier for the OSV-Scanner PR and scheduled workflow integration.
 area: backend
 tags: [security, ci, osv-scanner, qa]
-status: active
+status: retired
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-11-14"
-related: [../plans/backend-osv-scanner-ci-integration.md, ../research/backend-osv-scanner-adoption-for-vision-proxy-ci.md]
+related:
+  - ../plans/backend-osv-scanner-ci-integration.md
+  - ../research/backend-osv-scanner-adoption-for-vision-proxy-ci.md
 ---
 # OSV-Scanner CI integration QA
 

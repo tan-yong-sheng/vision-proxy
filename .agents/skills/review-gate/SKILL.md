@@ -45,12 +45,12 @@ If the PR adds or modifies `.github/workflows/*.yml`, run the workflow locally w
 # Pin the runner image to a versioned reference and update it deliberately.
 act pull_request --job verify \
   --container-architecture linux/amd64 \
-  -P ubuntu-latest=catthehacker/ubuntu:act-22.04
+  -P ubuntu-latest=catthehacker/ubuntu:act-22.04@sha256:3488f78aa97770c8d5d835f2913c1a782d3121ad3f2aafb17054fb1d554ea4e1
 
 # Run a specific workflow file.
 act -W .github/workflows/ci.yml pull_request \
   --container-architecture linux/amd64 \
-  -P ubuntu-latest=catthehacker/ubuntu:act-22.04
+  -P ubuntu-latest=catthehacker/ubuntu:act-22.04@sha256:3488f78aa97770c8d5d835f2913c1a782d3121ad3f2aafb17054fb1d554ea4e1
 ```
 
 `act` requires Docker and may not perfectly replicate GitHub-hosted runners, but it catches environment-specific failures early and avoids a push-fix-push loop.

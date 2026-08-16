@@ -5,8 +5,14 @@ description: Add OSV-Scanner to vision-proxy CI for dependency vulnerability sca
 area: backend
 tags: [security, ci, osv-scanner]
 status: active
+branch: feat/backend-osv-scanner-ci
+base: main
+stack_position: 1
+stack_batch: vp-security-tooling
 created: "2026-08-16"
 updated: "2026-08-16"
+commits_verified: []
+merge_preview_verified: ""
 stale_after: "2026-08-30"
 related: [../plans/backend-osv-scanner-ci-integration.md]
 ---

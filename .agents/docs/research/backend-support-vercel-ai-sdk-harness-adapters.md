@@ -98,14 +98,22 @@ Reasons:
 3. It is experimental and requires sandbox credentials, making setup harder for users.
 4. `vp` is a single-shot image-description CLI; harness sessions are overkill for this use case.
 
+## Does Vercel AI SDK v7 support ACP directly?
+
+No. Vercel AI SDK v7 does **not** ship a first-party ACP provider.
+The ACP provider documented on `ai-sdk.dev/v7/providers/community-providers/acp` **is** `@mcpc-tech/acp-ai-provider`, the same community package already used in `vision-proxy`.
+
+So the current implementation is already using the ACP provider that Vercel recommends in its docs.
+
 ### Better options for the version-mismatch concern
 
-1. **Keep ACP but find/update to an `ai@7`-compatible ACP provider package.**
-2. **Remove ACP from PR #7** if the version mismatch is unacceptable, and add it back later when a compatible package exists.
-3. **Keep ACP with the version-mismatch warning** and document the limitation clearly.
+1. **Keep ACP and verify the version mismatch is not runtime-breaking.** The warning may be about internal peer dependencies that do not affect `vp` at runtime.
+2. **Pin/shim the community plugin** if a compatibility issue surfaces.
+3. **Vendor a minimal ACP stdio client** inside `vision-proxy` to remove the third-party dependency entirely.
+4. **Remove ACP from PR #7** if the dependency risk is unacceptable, and re-add it later.
 
 ## Open questions
 
 - Is the `ai@6.x` vs `ai@7.x` mismatch a hard blocker for PR #7, or can it be documented as a known limitation?
-- Should we search for an `ai@7`-compatible ACP provider alternative before deciding?
-- If ACP is removed from PR #7, should the `docs/providers/acp.md` guide be moved to a draft/PR branch until it is re-added?
+- Should we run the test suite against the ACP provider to confirm it works despite the internal peer-dependency warning?
+- If ACP is removed from PR #7, should the `docs/providers/acp.md` guide be moved to a draft branch until it is re-added?

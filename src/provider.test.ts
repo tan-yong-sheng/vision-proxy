@@ -86,7 +86,7 @@ describe("resolveAcpModel", () => {
 			args: ["test"],
 			cwd: "/tmp",
 		});
-		assert.ok("ok" in result);
+		assert.equal(result.ok, true);
 	});
 });
 

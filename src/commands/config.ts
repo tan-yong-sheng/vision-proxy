@@ -79,24 +79,20 @@ export async function configSet(
 	const existing = (await readJsonFile(target)) ?? {};
 
 	const coerced = coerceValue(key, value);
+
+	// Validate ACP-specific constraints before writing.
+	// If provider is acp and acpCommand is not set, only allow setting acpCommand.
+	const before = resolveConfig(process.env, existing as Partial<VisionConfig>);
+	if (before.provider === "acp" && !before.acpCommand && key !== "acpCommand") {
+		return {
+			ok: false,
+			message: 'cannot set "' + key + '" while provider is "acp" without an "acpCommand". Set acpCommand first.',
+			code: 1,
+		};
+	}
+
 	(existing as Record<string, unknown>)[key] = coerced;
 	await fs.writeFile(target, JSON.stringify(existing, null, 2) + "\n", "utf8");
-
-	// Validate ACP-specific constraints after writing.
-	const merged = resolveConfig(process.env, existing as Partial<VisionConfig>);
-	if (merged.provider === "acp") {
-		if (!merged.acpCommand) {
-			// Revert: remove acpCommand if it was just set to something invalid.
-			// Actually, if they set another key while provider=acp, warn them.
-			if (key !== "acpCommand") {
-				return {
-					ok: false,
-					message: 'cannot set "' + key + '" while provider is "acp" without an "acpCommand". Set acpCommand first.',
-					code: 1,
-				};
-			}
-		}
-	}
 
 	return { ok: true, message: `set ${key} = ${JSON.stringify(coerced)} in ${target}`, code: 0 };
 }
@@ -147,10 +143,15 @@ export async function configValidate(opts: {
 	}
 
 	// Reachability: does the provider have a key?
-	const probe = resolveModel(sanitized.provider, sanitized.modelId, opts.env ?? process.env);
-	const authNote = probe.ok
-		? `provider "${sanitized.provider}" reachable (key present)`
-		: `provider "${probe.provider}" missing key ${probe.apiKeyEnv}`;
+	let authNote: string;
+	if (sanitized.provider === "acp") {
+		authNote = `provider "acp" (ACP) — key: n/a (ACP does not use env var keys)`;
+	} else {
+		const probe = resolveModel(sanitized.provider, sanitized.modelId, opts.env ?? process.env);
+		authNote = probe.ok
+			? `provider "${sanitized.provider}" reachable (key present)`
+			: `provider "${probe.provider}" missing key ${probe.apiKeyEnv}`;
+	}
 
 	if (problems.length > 0) {
 		return {

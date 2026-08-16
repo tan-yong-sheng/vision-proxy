@@ -201,5 +201,5 @@ export async function resolveAcpModel(
 
 /** Check whether a resolved provider list contains a given provider id. */
 export function isKnownProvider(id: string): boolean {
-	return id in PROVIDERS || id === "acp";
+	return id in PROVIDERS;
 }

@@ -45,19 +45,27 @@ export function providerCheck(
 	name: string | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): ProviderResult {
-	const specs = name ? [getProvider(name)].filter(Boolean) as Array<ApiProviderSpec> : listProviders().filter((p): p is ApiProviderSpec => !isAcpProvider(p));
+	const allSpecs = listProviders();
+	const specs = name
+		? allSpecs.filter((p) => p.id === name || p.id === name)
+		: allSpecs.filter((p) => !isAcpProvider(p));
+
 	if (specs.length === 0) {
 		return { ok: false, message: `unknown provider "${name}"`, code: 1 };
 	}
 	const lines: string[] = [];
 	let allOk = true;
 	for (const spec of specs) {
-		const hasKey = Boolean(env[spec.apiKeyEnv]) || Boolean(getStoredProviderKey(spec.id));
-		if (hasKey) {
-			lines.push(`${spec.id}: OK (key present)`);
+		if (isAcpProvider(spec)) {
+			lines.push(`${spec.id}: OK (key: n/a — ACP does not use env var keys)`);
 		} else {
-			allOk = false;
-			lines.push(`${spec.id}: MISSING KEY (${spec.apiKeyEnv})`);
+			const hasKey = Boolean(env[spec.apiKeyEnv]) || Boolean(getStoredProviderKey(spec.id));
+			if (hasKey) {
+				lines.push(`${spec.id}: OK (key present)`);
+			} else {
+				allOk = false;
+				lines.push(`${spec.id}: MISSING KEY (${spec.apiKeyEnv})`);
+			}
 		}
 	}
 	return {

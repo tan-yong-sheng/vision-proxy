@@ -136,7 +136,7 @@ describe("ACP provider config", () => {
 		assert.match(r.message, /acpCommand/);
 	});
 
-	it("accepts acpArgs after acpCommand is set", async () => {
+	it("accepts acpArgs as a valid config key", async () => {
 		const r = await configSet("acpArgs", '["--test"]', cwd);
 		assert.equal(r.ok, true);
 	});

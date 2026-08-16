@@ -593,6 +593,17 @@ function cmdAbandon(args) {
   if (!status) fail(`cannot abandon doc of type "${type || "(missing)"}" - set --status explicitly`);
   const terminal = TERMINAL_STATUS[type] || [];
   if (!terminal.includes(status)) fail(`status "${status}" is not terminal for type "${type}"`);
+  // Evidence gate: a research doc may not be abandoned as `complete` while
+  // critical evidence flags are unresolved. Fix the doc, then abandon.
+  if (doc.fm.type === "research" && status === "complete") {
+    const blockers = completionBlockers(doc);
+    if (blockers.length) {
+      console.error(`docs.js: evidence gate: ${blockers.length} critical flag(s) block status: complete for ${doc.rel}:`);
+      for (const b of blockers) console.error(`  ${formatFlag(b)}`);
+      console.error(`resolve the flags (add sources / lower relevance / mark dead-end) and retry.`);
+      process.exit(1);
+    }
+  }
   const archiveName = archiveBasename(type, doc.rel);
   if (dryRun) {
     console.log(`would abandon ${doc.rel} -> archive/${archiveName} (status: ${status})`);

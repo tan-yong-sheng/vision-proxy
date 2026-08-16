@@ -13,22 +13,20 @@ import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { getStoredProviderKey } from "./keyring.ts";
 
-export interface ProviderSpec {
-	id: string;
+/** Discriminated union for API-key-backed providers (openai, anthropic, google). */
+export interface ApiProviderSpec {
+	id: "openai" | "anthropic" | "google";
 	label: string;
-	/** Environment variable that holds the API key. */
 	apiKeyEnv: string;
-	/** Optional base URL override env var. */
 	baseUrlEnv?: string;
-	/** Factory: build a LanguageModel from the resolved key + model id. */
 	make: (opts: { apiKey: string; modelId: string; baseURL?: string }) => LanguageModel;
-	/** Whether the provider supports image input by default. */
 	supportsImage: boolean;
-	/** Default model id used for probes and fallbacks. */
 	defaultModelId: string;
 }
 
-const openaiProvider: ProviderSpec = {
+export type ProviderSpec = ApiProviderSpec;
+
+const openaiProvider: ApiProviderSpec = {
 	id: "openai",
 	label: "OpenAI",
 	apiKeyEnv: "OPENAI_API_KEY",
@@ -38,7 +36,7 @@ const openaiProvider: ProviderSpec = {
 	make: ({ apiKey, modelId, baseURL }) => createOpenAI({ apiKey, baseURL })(modelId),
 };
 
-const anthropicProvider: ProviderSpec = {
+const anthropicProvider: ApiProviderSpec = {
 	id: "anthropic",
 	label: "Anthropic",
 	apiKeyEnv: "ANTHROPIC_API_KEY",
@@ -48,7 +46,7 @@ const anthropicProvider: ProviderSpec = {
 	make: ({ apiKey, modelId, baseURL }) => createAnthropic({ apiKey, baseURL })(modelId),
 };
 
-const googleProvider: ProviderSpec = {
+const googleProvider: ApiProviderSpec = {
 	id: "google",
 	label: "Google",
 	apiKeyEnv: "GOOGLE_API_KEY",
@@ -68,8 +66,8 @@ export function listProviders(): ProviderSpec[] {
 	return Object.values(PROVIDERS);
 }
 
-export function getProvider(id: string): ProviderSpec | undefined {
-	return PROVIDERS[id];
+export function getProvider(id: string): ApiProviderSpec | undefined {
+	return PROVIDERS[id] as ApiProviderSpec | undefined;
 }
 
 export interface ResolvedModel {
@@ -109,9 +107,8 @@ export function resolveModel(
 	explicitApiKey?: string,
 	explicitBaseURL?: string,
 ): ResolveModelOutcome {
-	const provider = PROVIDERS[providerId];
+	const provider = PROVIDERS[providerId] as ApiProviderSpec | undefined;
 	if (!provider) {
-		// Unknown provider: synthesize a missing-key outcome so callers can report it.
 		return {
 			ok: false,
 			missingKey: true,

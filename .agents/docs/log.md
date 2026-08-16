@@ -98,8 +98,13 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: new plan plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md
 - 2026-08-15: sync plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md from .lavish/worktree-plan.html (synced from lavish feedback)
 - 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)
-- 2026-08-16: archive bugs/backend-pi-extension-undeclared-typebox-dependency.md -> archive/bug-backend-pi-extension-undeclared-typebox-dependency.md (fixed)
-- 2026-08-16: archive bugs/backend-core-dead-max-tool-calls-per-turn-surface.md -> archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md (fixed)
+- 2026-08-15: new plan plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md
+- 2026-08-16: new research research/backend-binary-as-hook-vision-proxy-integration.md
+- 2026-08-16: new plan plans/backend-binary-as-hook-vision-proxy-integration.md
+- 2026-08-16: archive research/backend-binary-as-hook-vision-proxy-integration.md -> archive/research-backend-binary-as-hook-vision-proxy-integration.md (complete)
+- 2026-08-16: new research research/backend-osv-scanner-adoption-for-vision-proxy-ci.md
+- 2026-08-16: new plan plans/backend-osv-scanner-ci-integration.md
+- 2026-08-16: archive worktrees/backend-fix-hook-shim-shared-mjs-copy.md -> archive/worktree-backend-fix-hook-shim-shared-mjs-copy.md (landed)
 - 2026-08-16: archive plans/backend-cli-distribution-strategy.md -> archive/plan-backend-cli-distribution-strategy.md (complete)
 - 2026-08-16: archive plans/backend-fix-pi-uninstall-message.md -> archive/plan-backend-fix-pi-uninstall-message.md (complete)
 - 2026-08-16: archive plans/backend-tooling-biome-betterleaks.md -> archive/plan-backend-tooling-biome-betterleaks.md (complete)
@@ -109,10 +114,26 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: archive worktrees/backend-tooling-biome-betterleaks.md -> archive/worktree-backend-tooling-biome-betterleaks.md (landed)
 - 2026-08-16: archive worktrees/backend-prune-max-tool-calls-per-turn.md -> archive/worktree-backend-prune-max-tool-calls-per-turn.md (landed)
 - 2026-08-16: archive worktrees/backend-fix-pi-extension-typebox-dependency.md -> archive/worktree-backend-fix-pi-extension-typebox-dependency.md (landed)
-- 2026-08-16: archive worktrees/backend-fix-hook-shim-shared-mjs-copy.md -> archive/worktree-backend-fix-hook-shim-shared-mjs-copy.md (landed)
 - 2026-08-16: archive worktrees/backend-vp-distribution.md -> archive/worktree-backend-vp-distribution.md (landed)
-- 2026-08-16: archive qa/backend-vision-proxy-post-migration-merge-review.md -> archive/coverage-backend-vision-proxy-post-migration-merge-review.md (retired)
-- 2026-08-16: archive qa/backend-post-merge-qa-for-pr-5.md -> archive/coverage-backend-post-merge-qa-for-pr-5.md (retired)
+- 2026-08-16: archive bugs/backend-pi-extension-undeclared-typebox-dependency.md -> archive/bug-backend-pi-extension-undeclared-typebox-dependency.md (fixed)
+- 2026-08-16: archive bugs/backend-core-dead-max-tool-calls-per-turn-surface.md -> archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md (fixed)
+- 2026-08-16: new research research/backend-userpromptsubmit-inject-description-versus-vp-analyze-instruction.md
+- 2026-08-16: scaffold-worktrees plans/backend-binary-as-hook-vision-proxy-integration.md -> worktrees/backend-worktree.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-add-mcpc-tech-acp-ai-provider-dependency.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-extend-provider-registry-with-acp.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-persist-acp-config-keys.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-validate-acp-config-in-cli.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-adapter-remains-provider-agnostic.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-update-help-and-provider-list.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-documentation.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-tests.md
+- 2026-08-16: scaffold-worktrees plans/backend-osv-scanner-ci-integration.md -> worktrees/backend-osv-scanner-ci-integration.md
+- 2026-08-16: new coverage qa/backend-merge-review-for-binary-as-hook-docs-osv-scanner-ci-and-acp-provider.md
 - 2026-08-16: new bug bugs/backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md
-- 2026-08-16: new coverage qa/backend-codex-status-and-uninstall-consistency-fix.md
-- 2026-08-16: archive bugs/backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md -> archive/bug-backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md (fixed)
+- 2026-08-16: new research research/backend-support-vercel-ai-sdk-harness-adapters.md
+- 2026-08-16: new research research/backend-missing-user-guide-coverage.md
+- 2026-08-16: archive plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> archive/plan-backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md (complete)
+- 2026-08-16: archive worktrees/backend-support-acp-provider.md -> archive/worktree-backend-support-acp-provider.md (abandoned)
+- 2026-08-16: archive qa/backend-manual-review-acp-provider-support.md -> archive/coverage-backend-manual-review-acp-provider-support.md (retired)
+- 2026-08-16: archive research/backend-missing-user-guide-coverage.md -> archive/research-backend-missing-user-guide-coverage.md (complete)
+- 2026-08-16: archive research/backend-support-vercel-ai-sdk-harness-adapters.md -> archive/research-backend-support-vercel-ai-sdk-harness-adapters.md (complete)

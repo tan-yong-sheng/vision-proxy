@@ -29,6 +29,7 @@ Keep it short and update it when workflows change.
 - `src/shims/` - Agent hook shims (copied to `dist/` at build time).
 - `scripts/` - Build helpers (`copy-shims.mjs`).
 - `.claude/hooks/` - Generated fallow gate hook.
+- `.github/workflows/` - CI workflows (ci.yml, release.yml, osv-scanner-pr.yml, osv-scanner-scheduled.yml).
 
 ## Architecture Notes
 
@@ -57,6 +58,9 @@ Environment overrides use `VP_*`.
 | Typecheck | `npm run typecheck` |
 | Build | `npm run build` |
 | Fallow audit | `fallow audit --format json --quiet` |
+| OSV-Scanner (PR) | `.github/workflows/osv-scanner-pr.yml` — scans for newly introduced dependency CVEs |
+| OSV-Scanner (scheduled) | `.github/workflows/osv-scanner-scheduled.yml` — weekly full scan with SARIF upload |
+| BetterLeaks | `pnpm secrets` — scans for accidental secret exposure |
 
 Runtime requirements:
 

@@ -6,7 +6,7 @@ area: backend
 tags: [cli, integration, codex, config]
 status: fixed
 owning_branch: fix/codex-status-uninstall
-superseded_by: ../qa/backend-codex-status-uninstall-fix.md
+superseded_by: ../qa/backend-codex-status-and-uninstall-consistency-fix.md
 created: "2026-08-16"
 updated: "2026-08-16"
 priority: medium

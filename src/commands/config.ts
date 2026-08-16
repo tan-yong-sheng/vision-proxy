@@ -72,6 +72,7 @@ export async function configSet(key: string, value: string, cwd: string): Promis
 	const existing = (await readJsonFile(target)) ?? {};
 
 	const coerced = coerceValue(key, value);
+
 	(existing as Record<string, unknown>)[key] = coerced;
 	await fs.writeFile(target, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
 	return { ok: true, message: `set ${key} = ${JSON.stringify(coerced)} in ${target}`, code: 0 };

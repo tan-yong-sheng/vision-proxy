@@ -178,7 +178,8 @@ Options:
   --format <name>      grounding format: plain (default) | qwen_pixels |
                        molmo_points | deepseek_bbox | internvl_pixels |
                        gemini_normalized_1000
-  --provider <name>    override the configured provider
+  --provider <name>    override the configured provider (openai, anthropic,
+                       or google)
   --model <id>         override the configured model id
   --joint              force a joint multi-image batch
   --crop <i:form>      crop image <index> before analysis (repeatable),
@@ -282,7 +283,8 @@ Subcommands:
 Notes:
   Credentials come from an env var (e.g. ANTHROPIC_API_KEY) or the system
   keyring. Supply the key via the env var or \`vp provider store-key <name>\`.
-  Set the active provider with \`vp config set provider <name>\`.`,
+  Set the active provider with \`vp config set provider <name>\`.
+`,
 
 	"provider list": `vp provider list
 

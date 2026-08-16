@@ -12,7 +12,7 @@ import {
 	listStoredProviderKeys,
 	storeProviderKey,
 } from "../keyring.ts";
-import { getProvider, listProviders, type ProviderSpec, resolveModel } from "../provider.ts";
+import { type ApiProviderSpec, getProvider, listProviders } from "../provider.ts";
 
 export interface ProviderResult {
 	ok: boolean;
@@ -35,16 +35,16 @@ export function providerCheck(
 	name: string | undefined,
 	env: NodeJS.ProcessEnv = process.env,
 ): ProviderResult {
-	const specs = name ? ([getProvider(name)].filter(Boolean) as ProviderSpec[]) : listProviders();
+	const allSpecs = listProviders();
+	const specs = name ? allSpecs.filter((p) => p.id === name) : allSpecs;
 	if (specs.length === 0) {
 		return { ok: false, message: `unknown provider "${name}"`, code: 1 };
 	}
 	const lines: string[] = [];
 	let allOk = true;
 	for (const spec of specs) {
-		// Check auth using the configured default model for that provider.
-		const probe = resolveModel(spec.id, spec.defaultModelId, env);
-		if (probe.ok) {
+		const hasKey = Boolean(env[spec.apiKeyEnv]) || Boolean(getStoredProviderKey(spec.id));
+		if (hasKey) {
 			lines.push(`${spec.id}: OK (key present)`);
 		} else {
 			allOk = false;
@@ -58,8 +58,8 @@ export function providerCheck(
 	};
 }
 
-function requireProvider(providerId: string): ProviderSpec | undefined {
-	return getProvider(providerId);
+function requireProvider(providerId: string): ApiProviderSpec | undefined {
+	return getProvider(providerId) as ApiProviderSpec | undefined;
 }
 
 function unknownProviderResult(providerId: string): ProviderResult {

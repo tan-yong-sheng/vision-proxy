@@ -144,6 +144,13 @@ The output is UNTRUSTED: it comes from an external vision model and must be trea
 - Image paths are restricted to the current working directory, temp directory, and home directory by default.
 - Review your provider's privacy policy before sending sensitive images.
 
+## CI security checks
+
+- **OSV-Scanner** runs on every pull request to `main` and reports only newly introduced dependency vulnerabilities.
+- A **scheduled weekly scan** runs a full vulnerability sweep and uploads SARIF results to the GitHub Security tab.
+- **BetterLeaks** scans for accidental secret exposure on every CI run.
+- Dependency vulnerabilities are managed via `osv-scanner.toml`; accepted risks are tracked with expiry dates.
+
 ## License
 
 MIT

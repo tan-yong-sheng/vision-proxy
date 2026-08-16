@@ -201,13 +201,18 @@ export async function runAnalyze(
 
 	// The primary model must be resolvable (have a key); fallbacks are only
 	// tried on a runtime failure later, so a missing key on the primary is fatal.
-	const resolved = resolveModel(provider, modelId, env, flags.apiKey, config.baseURLs[provider]);
-	if (!resolved.ok) {
+	const modelOutcome = resolveModel(
+		provider,
+		modelId,
+		env,
+		flags.apiKey,
+		config.baseURLs[provider],
+	);
+	if (!modelOutcome.ok) {
 		throw new AnalyzeError(
-			`no API key for provider "${resolved.provider}". Set ${resolved.apiKeyEnv} (or pass --api-key).`,
+			`no API key for provider "${modelOutcome.provider}". Set ${modelOutcome.apiKeyEnv} (or pass --api-key).`,
 		);
 	}
-
 	const grounding = getGroundingFormat(config, provider, modelId);
 	const effectiveFormat: GroundingFormat =
 		flags.format && flags.format !== "none" ? flags.format : grounding;

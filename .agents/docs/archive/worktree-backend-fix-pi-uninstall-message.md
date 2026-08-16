@@ -1,10 +1,10 @@
 ---
 type: worktree
-title: "fix pi uninstall message"
-description: "Fix the wrong success message when uninstalling the pi integration on the first attempt."
+title: fix pi uninstall message
+description: Fix the wrong success message when uninstalling the pi integration on the first attempt.
 area: backend
 tags: [cli, integration, bug, pi]
-status: active
+status: landed
 branch: fix/pi-uninstall-message
 base: main
 stack_position: 2

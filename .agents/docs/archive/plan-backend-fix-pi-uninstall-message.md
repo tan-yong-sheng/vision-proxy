@@ -4,7 +4,7 @@ title: fix pi uninstall message
 description: "Fix `vp integration uninstall pi` reporting 'was not installed' on first uninstall even though the extension file is removed."
 area: backend
 tags: [cli, integration, bug, pi, uninstall]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

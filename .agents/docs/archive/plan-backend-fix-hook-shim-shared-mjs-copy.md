@@ -4,7 +4,7 @@ title: fix hook shim shared mjs copy
 description: "Fix Claude Code / Codex hook install writing a shim that imports a missing ./shared.mjs, causing an ESM resolve error at hook runtime."
 area: backend
 tags: [cli, integration, bug, hook, shim, claude-code, codex]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

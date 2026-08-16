@@ -1,7 +1,7 @@
 ---
 type: bug
 title: Core exposes maxToolCallsPerTurn configuration without enforcement
-description: "VisionConfig and env overrides expose maxToolCallsPerTurn but no CLI or adapter path enforces it."
+description: VisionConfig and env overrides expose maxToolCallsPerTurn but no CLI or adapter path enforces it.
 area: backend
 tags: [config, dead-code, core, limits]
 status: fixed

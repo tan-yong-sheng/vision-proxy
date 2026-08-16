@@ -4,7 +4,7 @@ title: prune max tool calls per turn
 description: "Prune the dead maxToolCallsPerTurn config surface from core, config, and tests."
 area: backend
 tags: [cli, config, dead-code, core, limits]
-status: active
+status: landed
 branch: qa/pr-5-qa-and-distribution-merge-preview
 base: main
 stack_position: 1
@@ -14,8 +14,7 @@ updated: "2026-08-15"
 commits_verified: []
 merge_preview_verified: ""
 stale_after: "2026-08-29"
-related:
-  - ../bugs/backend-core-dead-max-tool-calls-per-turn-surface.md
+related: [../bugs/backend-core-dead-max-tool-calls-per-turn-surface.md]
 ---
 # prune max tool calls per turn
 

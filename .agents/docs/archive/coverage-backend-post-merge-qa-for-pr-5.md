@@ -4,7 +4,7 @@ title: "Post-merge QA for PR #5"
 description: Manual validation findings for the merged vision-proxy CLI cleanup branches.
 area: backend
 tags: [cli, integration, config, qa, pr-5, post-merge]
-status: active
+status: retired
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-11-13"

@@ -17,6 +17,16 @@ vp config set acpCommand gemini
 vp config set acpArgs '["--experimental-acp"]'
 ```
 
+Or write the full config to `~/.vision-proxy/config.json`:
+
+```json
+{
+  "provider": "acp",
+  "acpCommand": "gemini",
+  "acpArgs": ["--experimental-acp"]
+}
+```
+
 ## ACP configuration keys
 
 | Key | Description |

@@ -2,6 +2,8 @@
 
 How to get a vision-capable model working with `vp`.
 
+For the fastest path from install to first result, see [QUICKSTART.md](./QUICKSTART.md).
+
 ## Pick a provider
 
 `vp` supports API-key-backed providers and the Agent Client Protocol (ACP).
@@ -33,6 +35,14 @@ vp config get
 ```bash
 vp analyze screenshot.png
 ```
+
+## Agent integrations
+
+Install `vp` into your agent so it can see images in prompts:
+
+- [Claude Code](./integrations/claude-code.md)
+- [Codex](./integrations/codex.md)
+- [Pi](./integrations/pi.md)
 
 ## Shared options
 
@@ -71,6 +81,11 @@ Delete a stored key:
 ```bash
 vp provider delete-key openai
 ```
+
+### Config reference
+
+- [Full config schema and JSON examples](./CONFIG.md)
+- [Environment variable reference](./ENV.md)
 
 ### Config precedence
 

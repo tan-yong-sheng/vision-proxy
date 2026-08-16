@@ -26,11 +26,41 @@ vp config set provider anthropic
 vp config set modelId claude-sonnet-4-5
 ```
 
+Or write the full config to `~/.vision-proxy/config.json`:
+
+```json
+{
+  "provider": "anthropic",
+  "modelId": "claude-sonnet-4-5",
+  "fallbackModels": ["openai/gpt-4o"]
+}
+```
+
 ## Run
 
 ```bash
 vp analyze screenshot.png
 ```
+
+## Fallback models
+
+If `claude-sonnet-4-5` fails, `vp` can try another model:
+
+```bash
+vp config set fallbackModels '["openai/gpt-4o","google/gemini-2.5-flash"]'
+```
+
+Or in `~/.vision-proxy/config.json`:
+
+```json
+{
+  "provider": "anthropic",
+  "modelId": "claude-sonnet-4-5",
+  "fallbackModels": ["openai/gpt-4o", "google/gemini-2.5-flash"]
+}
+```
+
+A missing API key on the primary provider is a fatal error; fallbacks only kick in once a model call actually fails.
 
 ## Use a custom endpoint
 

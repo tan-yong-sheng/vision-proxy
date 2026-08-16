@@ -131,3 +131,4 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: new coverage qa/backend-merge-review-for-binary-as-hook-docs-osv-scanner-ci-and-acp-provider.md
 - 2026-08-16: new bug bugs/backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md
 - 2026-08-16: new research research/backend-support-vercel-ai-sdk-harness-adapters.md
+- 2026-08-16: new research research/backend-missing-user-guide-coverage.md

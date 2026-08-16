@@ -36,7 +36,7 @@ The skill self-triggers from its description: it loads on research/plan/worktree
 | `worktree_path` | Absolute path to the QA worktree, for traceability after removal. | `/home/user/repo/.worktrees/qa-inline-image-merged-2026-08-12` |
 | `source_branches` | Branches merged into the QA worktree for this verification. | `[origin/feat/inline-image-backend, origin/feat/inline-image-frontend]` |
 | `commits_verified` | Commits that were present in the QA worktree when verified. | `[feat/inline-image-backend@53439bb0]` |
-| `sources` | Trust family: where the facts came from. | `[url]` |
+| `sources` | Trust family: where the facts came from. Enforced for research docs: `archive --status complete` is refused while it is missing or empty. | `[url]` |
 | `generated` | Trust family: generated output, with `by` and `at`. | `{by: claude, at: 2026-08-10}` |
 | `verified` | Trust family: verification events, each with `by` and `at`. | `[{by: tuske, at: 2026-08-09}]` |
 | `depends_on` | Stacked worktrees: list of upstream dependency docs. | `[../worktrees/backend-schema.md]` |
@@ -89,11 +89,19 @@ All docs share the frontmatter contract above. The one-line summary under `# <ti
 # <title>
 
 ## Question
+## Summary of findings          # table: # | Finding | Relevance | Confidence | Evidence
+                                 #       |---|---------|-----------|------------|----------
 ## Options considered
 ## Findings
 ## Recommendation / decision
 ## Sources
 ```
+
+The Summary-of-findings table ranks findings by relevance x confidence.
+Relevance (ACH vocabulary): `critical` = a decision depends on it, `normal`, `trivial`.
+Confidence (GRADE / ICD 203 vocabulary): `high` = primary source or executed command, `medium` = secondary source, `low` = unverified.
+Evidence: a URL, `verified-by: <command>`, `local:<path>`, or `none`.
+The table is enforced by the evidence gate - see Evidence validation below.
 
 **plan** - actionable steps toward a committed outcome.
 
@@ -208,7 +216,7 @@ Run with `bun .agents/skills/agents-docs/scripts/docs.js <command>`.
 | `index` | Regenerate `index.md` from frontmatter (catalog grouped by folder x status). |
 | `clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]` | Auto-archive terminal/superseded docs and GC unreferenced archive docs (the sweep). Dry-run previews; default applies. `--stale-orphan` archives stale+unreferenced docs (dry-run by default, requires `--apply`). Also runs automatically at the end of lifecycle commands. |
 | `prune [--dry-run] [--apply] [--gc] [--ttl <days>] [--force]` | Explicit, batched version of `clean`. Propose archiving for terminal / superseded docs, or GC archive docs that are superseded AND past the TTL (default 180 days). Referenced archive docs refused with linker names; `--force` overrides. |
-| `archive <doc> [--status=<terminal>]` | Move to `archive/<type>-<basename>.md`, set terminal status, rewrite inbound + outbound links file-relative, append `log.md`, regen index. |
+| `archive <doc> [--status=<terminal>] [--dry-run]` | Move to `archive/<type>-<basename>.md`, set terminal status, rewrite inbound + outbound links file-relative, append `log.md`, regen index. `--dry-run` prints the planned archive without moving files. Research docs: `--status complete` is refused while critical evidence flags are unresolved (see Evidence validation). |
 | `revive <archive-doc>` | Move from `archive/<type>-<name>.md` back to active home folder with `status: active` (or `open`), reset staleness deadline, rewrite links, regen index. |
 | `abandon <doc> [--status=<terminal>] [--dry-run]` | One-step archive with the type's default terminal status. Use when a doc is left behind without a full review. |
 
@@ -221,6 +229,36 @@ All computed from frontmatter + the link graph - never declared by the LLM, so t
 - `nonconformant` - missing required `type` (archive docs exempt - historical).
 - `orphan` - zero inbound links. Advisory only; `entry_point: true` docs are excluded from orphan counts. `--show-orphan` surfaces the flag.
 - `not-terminal` - an archived doc reads with an unknown or active status (e.g. `active`, `done`). Anomaly only - surfaces via `status`/`report` and `--show-archive`, never fails `--check`. Fix by setting a terminal status.
+
+### Evidence validation (`evidence.js`)
+
+`scripts/evidence.js` runs rule-based evidence checks on research docs - first-layer protection against unsourced or hallucinated claims.
+It is language-agnostic and structural: it verifies that evidence slots are filled, not the evidence content.
+Ecosystem-specific verification (dependency metadata commands like `npm view`, capability probes) is authoring guidance in SKILL.md, not script code.
+
+Rules:
+
+| Rule | Severity | Fires when |
+|---|---|---|
+| `sources-section` | critical | the doc has no non-empty `## Summary of findings` or `## Sources` section |
+| `negative-claim` | critical | a prose paragraph makes a negative existence claim about an external product ("no documented X", "does not support Y", "cannot") without a URL or `verified-by:` command in the same paragraph |
+| `sources-frontmatter` | critical | frontmatter `sources:` is missing or empty |
+| `critical-low-confidence` | critical | a critical-relevance Summary-of-findings row is marked low confidence |
+| `finding-evidence` | critical / warning | a Summary-of-findings row has no usable evidence (expected a URL, `verified-by:`, or `local:`); warning for non-critical rows |
+
+Fenced code blocks, HTML comments, and table rows are excluded from the negative-claim scan; table rows are covered by the Summary-of-findings rules instead.
+
+Usage:
+
+```bash
+bun .agents/skills/agents-docs/scripts/evidence.js <doc-ref...>   # check specific research docs
+bun .agents/skills/agents-docs/scripts/evidence.js --all          # every research doc (active + archive)
+bun .agents/skills/agents-docs/scripts/evidence.js --all --json   # machine-readable output
+```
+
+Exit code is 1 when any checked doc has a critical flag, 0 otherwise.
+`docs.js archive <doc> --status complete` runs the same checks as a gate: it prints the blocking flags and refuses the move.
+Resolve the flags (add sources, verify or downgrade the finding, or archive as `dead-end` instead) and retry.
 
 ## 5. Lavish integration protocol
 

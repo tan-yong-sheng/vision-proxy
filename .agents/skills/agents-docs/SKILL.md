@@ -92,6 +92,10 @@ The script moves it to `archive/<type>-<basename>.md`, rewrites inbound + outbou
 Override with `--status=<v>`.
 Use it when a doc is being left behind mid-process without a full review.
 
+> **Evidence gate for research.** `archive <research-doc> --status complete` is refused while `scripts/evidence.js` reports critical flags (missing sources, unsourced negative claims about external products, low-confidence critical findings).
+> Resolve the flags, or archive as `dead-end` instead.
+> Run `bun .agents/skills/agents-docs/scripts/evidence.js --all` to audit every research doc; see REFERENCE.md for the rule list.
+
 ### revive - restore an archived doc to active status
 
 `revive <archive-doc>` moves any archived doc from `archive/<type>-<basename>.md` back to its active home folder (e.g. `research/`, `plans/`, `worktrees/`, `bugs/`), sets its status to `active` (or `open` for bugs), resets its staleness deadline, rewrites links, and regenerates the index.
@@ -193,6 +197,7 @@ bun .agents/skills/agents-docs/scripts/docs.js prune --gc --dry-run
 
 ## Rules
 
+- Verify dependency and version claims with ecosystem-appropriate commands (e.g. `npm view <pkg> version`, `pip index versions <pkg>`) before citing them in a research doc, and record the command as `verified-by: <command>` in the Evidence column. This is authoring guidance - `evidence.js` checks that evidence slots are filled, not that you ran the command.
 - Frontmatter is the source of truth for status/area/freshness; the body holds prose read once a doc is chosen.
 - Never overwrite an existing frontmatter field; `ensure` only adds missing fields.
 - `archive/` docs are historical - no `type` is guessed for them.

@@ -48,6 +48,7 @@ Eliminate the Node.js shim scripts and `shared.mjs` sidecar. `vp integration ins
 3. **PATH assumption.** The hook command is `vp analyze --hook`, which requires `vp` to be on PATH when the agent runs. For non-PATH installs, add `--vp-bin <path>` to `vp integration install` so it writes the absolute path.
 4. **Fail-open.** On any error (no image found, analyze failure, malformed event), the hook emits an empty/no-op response and exits 0 so the agent proceeds unchanged.
 5. **Image detection in `PreToolUse`.** Match `tool_name === "Read"` and a file path ending in a known image extension. Use the same extension list as the legacy shim.
+6. **Keep both `UserPromptSubmit` and `PreToolUse` hooks.** `UserPromptSubmit` proactively injects descriptions before the agent decides what to do; `PreToolUse(Read image)` reactively blocks direct image reads on text-only models. They are not redundant because they cover different failure modes. The overlap is cheap because `vp analyze` caches results by image hash.
 6. **Config file locations.** Keep using `~/.claude/settings.json` and `~/.codex/config.toml` as the default config targets; no shim files means no install directory decision.
 
 ## Deliverables

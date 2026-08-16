@@ -272,6 +272,23 @@ function specFor(agent: string): AgentSpec | undefined {
 	return undefined;
 }
 
+/**
+ * Whether any installed hook shim other than `exclude` still imports
+ * `./shared.mjs` from `dir`. Hook agents co-locate their shim and the shared
+ * sidecar; when one agent is uninstalled we must not delete a sidecar another
+ * still-installed agent depends on.
+ */
+function sharedShimStillUsed(dir: string, exclude: string): boolean {
+	if (!existsSync(dir)) return false;
+	for (const file of readdirSync(dir)) {
+		if (!file.endsWith(".mjs") || file === "shared.mjs") continue;
+		const path = join(dir, file);
+		if (path === exclude) continue;
+		if (readFileSync(path, "utf8").includes('"./shared.mjs"')) return true;
+	}
+	return false;
+}
+
 function isAgentInstalled(spec: AgentSpec): boolean {
 	const target = spec.target({});
 	const targetExists = existsSync(target);
@@ -307,10 +324,10 @@ export async function integrationInstall(
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
 	mkdirSync(dirname(target), { recursive: true });
-	writeFileSync(target, spec.generate(), { mode: 0o644 });
 	// Hook shims import ./shared.mjs from the same directory, so it has to land
-	// next to the shim. resolveSharedShim() throws (loud failure) if no candidate
-	// resolves, so we never ship a shim that fails at hook runtime.
+	// next to the shim. Resolve it first: resolveSharedShim() throws (loud
+	// failure) if no candidate resolves, so we reject before writing a shim
+	// that would fail at hook runtime with a missing `import "./shared.mjs"`.
 	if (spec.sharedShim) {
 		const sharedSrc = resolveSharedShim();
 		// Rewrite the install-time placeholder with the absolute `vp` binary path.
@@ -323,6 +340,7 @@ export async function integrationInstall(
 			readFileSync(sharedSrc, "utf8").split("__VP_PATH__PLACEHOLDER__").join(vpBin),
 		);
 	}
+	writeFileSync(target, spec.generate(), { mode: 0o644 });
 	const cfgPath = spec.configPath();
 	if (cfgPath) {
 		mkdirSync(dirname(cfgPath), { recursive: true });
@@ -447,10 +465,13 @@ export async function integrationUninstall(
 		}
 	}
 	const removed = configRemoved || fileDeleted;
-	// Hook agents also ship shared.mjs next to the shim; drop it if now orphaned.
+	// Hook agents also ship shared.mjs next to the shim. Claude Code and Codex
+	// install into the same directory and both import it, so only drop it when
+	// no remaining hook shim still references it (e.g. uninstalling codex must
+	// not break a still-installed claude-code shim in the same dir).
 	if (spec.sharedShim) {
 		const sharedPath = join(dirname(target), "shared.mjs");
-		if (existsSync(sharedPath)) {
+		if (existsSync(sharedPath) && !sharedShimStillUsed(dirname(target), target)) {
 			try {
 				rmSync(sharedPath);
 			} catch {

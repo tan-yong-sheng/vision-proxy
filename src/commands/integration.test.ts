@@ -65,10 +65,16 @@ export function spawnSync(..._args) { return nextResult; }
 	);
 
 	const mod = await import(join(dir, "vision-proxy.ts"));
-	const registered: Array<{ name: string; execute: (args: unknown) => Promise<unknown> }> = [];
+	// Pi extension tools are invoked as execute(toolCallId, params, signal).
+	const registered: Array<{
+		name: string;
+		execute: (toolCallId: string, params: unknown, signal?: unknown) => Promise<unknown>;
+	}> = [];
 	const mockPi = {
-		registerTool: (tool: { name: string; execute: (args: unknown) => Promise<unknown> }) =>
-			registered.push(tool),
+		registerTool: (tool: {
+			name: string;
+			execute: (toolCallId: string, params: unknown, signal?: unknown) => Promise<unknown>;
+		}) => registered.push(tool),
 	};
 
 	assert.equal(
@@ -285,6 +291,25 @@ test("uninstall claude-code removes only the vision-proxy block and leaves other
 	cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.match(cfg.hooks.UserPromptSubmit[0].hooks[0].command, /other-hook\.mjs$/);
+	reset();
+});
+
+test("uninstall claude-code keeps shared.mjs when codex shim still imports it", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	// Both hook agents co-locate their shim and the shared sidecar in `dir`.
+	await runIntegration("install", "claude-code", dir);
+	await runIntegration("install", "codex", dir);
+	assert.equal(existsSync(join(dir, "shared.mjs")), true);
+	const r = await runIntegration("uninstall", "claude-code", dir);
+	assert.equal(r.ok, true);
+	// The codex shim still imports ./shared.mjs, so the sidecar must survive.
+	assert.equal(
+		existsSync(join(dir, "shared.mjs")),
+		true,
+		"shared.mjs must remain while another hook shim still uses it",
+	);
+	assert.equal(existsSync(join(dir, "codex-vision-proxy-user-prompt-submit.mjs")), true);
 	reset();
 });
 

@@ -1,10 +1,17 @@
 ---
 type: plan
 title: tooling biome betterleaks
-description: "Add Biome linter/formatter and BetterLeaks secret-scanning pre-commit hooks to reduce/prevent secrets leakage."
+description: Add Biome linter/formatter and BetterLeaks secret-scanning pre-commit hooks to reduce/prevent secrets leakage.
 area: backend
-tags: [tooling, lint, format, secrets, pre-commit, biome, betterleaks]
-status: active
+tags:
+  - tooling
+  - lint
+  - format
+  - secrets
+  - pre-commit
+  - biome
+  - betterleaks
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

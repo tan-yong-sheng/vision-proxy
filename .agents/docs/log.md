@@ -102,3 +102,18 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: new research research/backend-binary-as-hook-vision-proxy-integration.md
 - 2026-08-16: new plan plans/backend-binary-as-hook-vision-proxy-integration.md
 - 2026-08-16: archive research/backend-binary-as-hook-vision-proxy-integration.md -> archive/research-backend-binary-as-hook-vision-proxy-integration.md (complete)
+- 2026-08-16: new research research/backend-osv-scanner-adoption-for-vision-proxy-ci.md
+- 2026-08-16: new plan plans/backend-osv-scanner-ci-integration.md
+- 2026-08-16: archive worktrees/backend-fix-hook-shim-shared-mjs-copy.md -> archive/worktree-backend-fix-hook-shim-shared-mjs-copy.md (landed)
+- 2026-08-16: archive plans/backend-cli-distribution-strategy.md -> archive/plan-backend-cli-distribution-strategy.md (complete)
+- 2026-08-16: archive plans/backend-fix-pi-uninstall-message.md -> archive/plan-backend-fix-pi-uninstall-message.md (complete)
+- 2026-08-16: archive plans/backend-tooling-biome-betterleaks.md -> archive/plan-backend-tooling-biome-betterleaks.md (complete)
+- 2026-08-16: archive plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md -> archive/plan-backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md (complete)
+- 2026-08-16: archive plans/backend-fix-hook-shim-shared-mjs-copy.md -> archive/plan-backend-fix-hook-shim-shared-mjs-copy.md (complete)
+- 2026-08-16: archive worktrees/backend-fix-pi-uninstall-message.md -> archive/worktree-backend-fix-pi-uninstall-message.md (landed)
+- 2026-08-16: archive worktrees/backend-tooling-biome-betterleaks.md -> archive/worktree-backend-tooling-biome-betterleaks.md (landed)
+- 2026-08-16: archive worktrees/backend-prune-max-tool-calls-per-turn.md -> archive/worktree-backend-prune-max-tool-calls-per-turn.md (landed)
+- 2026-08-16: archive worktrees/backend-fix-pi-extension-typebox-dependency.md -> archive/worktree-backend-fix-pi-extension-typebox-dependency.md (landed)
+- 2026-08-16: archive worktrees/backend-vp-distribution.md -> archive/worktree-backend-vp-distribution.md (landed)
+- 2026-08-16: archive bugs/backend-pi-extension-undeclared-typebox-dependency.md -> archive/bug-backend-pi-extension-undeclared-typebox-dependency.md (fixed)
+- 2026-08-16: archive bugs/backend-core-dead-max-tool-calls-per-turn-surface.md -> archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md (fixed)

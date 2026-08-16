@@ -4,7 +4,7 @@ title: vp-cli-simplify
 description: "Drop `vp provider add` and `vp hook`, unify `vp integration install/show/list/uninstall`, and add `vp integration status` with version markers."
 area: backend
 tags: [cli, hook, integration, provider, refactor, status, version]
-status: merged
+status: landed
 merged_commit: b097e3c
 branch: vp-cli-simplify
 base: main

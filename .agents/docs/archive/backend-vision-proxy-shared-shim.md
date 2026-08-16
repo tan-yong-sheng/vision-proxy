@@ -4,7 +4,7 @@ title: Vision Proxy shared shim
 description: Extract common hook-shim helpers into src/shims/shared.mjs to eliminate duplication.
 area: backend
 tags: [vision-proxy, cli, refactoring, shims]
-status: merged
+status: landed
 created: "2026-08-14"
 updated: "2026-08-14"
 stale_after: "2026-08-28"

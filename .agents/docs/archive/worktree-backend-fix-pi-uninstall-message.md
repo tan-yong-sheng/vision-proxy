@@ -1,10 +1,10 @@
 ---
 type: worktree
-title: "fix pi uninstall message"
-description: "Fix the wrong success message when uninstalling the pi integration on the first attempt."
+title: fix pi uninstall message
+description: Fix the wrong success message when uninstalling the pi integration on the first attempt.
 area: backend
 tags: [cli, integration, bug, pi]
-status: active
+status: landed
 branch: fix/pi-uninstall-message
 base: main
 stack_position: 2
@@ -15,8 +15,8 @@ depends_on:
   - ../worktrees/backend-tooling-biome-betterleaks.md
 created: "2026-08-15"
 updated: "2026-08-15"
-commits_verified: []
-merge_preview_verified: ""
+commits_verified: [pr-6-preview]
+merge_preview_verified: qa/pr-5-qa-and-distribution-merge-preview
 stale_after: "2026-08-29"
 related:
   - ../qa/backend-post-merge-qa-for-pr-5.md

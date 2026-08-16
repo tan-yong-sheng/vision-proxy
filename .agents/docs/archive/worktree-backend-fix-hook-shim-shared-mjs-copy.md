@@ -1,10 +1,10 @@
 ---
 type: worktree
 title: fix hook shim shared mjs copy
-description: "Worktree to fix the Claude Code / Codex hook install writing a shim that imports a missing ./shared.mjs (ESM resolve error at hook runtime)."
+description: Worktree to fix the Claude Code / Codex hook install writing a shim that imports a missing ./shared.mjs (ESM resolve error at hook runtime).
 area: backend
 tags: [cli, integration, bug, hook, shim, claude-code, codex]
-status: active
+status: landed
 branch: fix/hook-shim-shared-mjs
 base: fix/pi-uninstall-message
 stack_position: 2
@@ -17,8 +17,8 @@ depends_on:
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-08-29"
-commits_verified: []
-merge_preview_verified: ""
+commits_verified: [pr-6-preview]
+merge_preview_verified: qa/pr-5-qa-and-distribution-merge-preview
 related:
   - ../plans/backend-fix-hook-shim-shared-mjs-copy.md
   - ../qa/backend-post-merge-qa-for-pr-5.md

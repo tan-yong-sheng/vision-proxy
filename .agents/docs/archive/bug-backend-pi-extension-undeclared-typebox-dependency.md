@@ -1,10 +1,10 @@
 ---
 type: bug
 title: Pi extension template undeclared typebox runtime dependency
-description: "Generated Pi extension imports Type from typebox without declaring typebox in vision-proxy dependencies."
+description: Generated Pi extension imports Type from typebox without declaring typebox in vision-proxy dependencies.
 area: backend
 tags: [pi-extension, typebox, dependencies]
-status: open
+status: fixed
 pre-existing: true
 owning_branch: vp-pi-extension
 created: "2026-08-15"

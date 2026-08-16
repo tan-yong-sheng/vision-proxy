@@ -1,20 +1,19 @@
 ---
 type: worktree
-title: "tooling Biome + BetterLeaks"
+title: tooling Biome + BetterLeaks
 description: "Add Biome, BetterLeaks, Lefthook pre-commit, and CI workflow to the vision-proxy backend; apply auto-fixes."
 area: backend
 tags: [tooling, lint, secrets, ci, biome, betterleaks, lefthook]
-status: active
+status: landed
 branch: vp-tooling-biome-betterleaks
 base: main
 stack_position: 1
 created: "2026-08-16"
 updated: "2026-08-16"
-commits_verified: []
-merge_preview_verified: ""
+commits_verified: [pr-6-preview]
+merge_preview_verified: qa/pr-5-qa-and-distribution-merge-preview
 stale_after: "2026-08-30"
-related:
-  - ../qa/backend-post-merge-qa-for-pr-5.md
+related: [../qa/backend-post-merge-qa-for-pr-5.md]
 ---
 
 # tooling Biome + BetterLeaks

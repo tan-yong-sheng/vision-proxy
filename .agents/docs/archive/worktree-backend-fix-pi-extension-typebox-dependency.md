@@ -1,18 +1,18 @@
 ---
 type: worktree
 title: fix pi extension typebox dependency
-description: "Replace the TypeBox import in the generated Pi extension with inline JSON Schema so the extension has no undeclared runtime dependency."
+description: Replace the TypeBox import in the generated Pi extension with inline JSON Schema so the extension has no undeclared runtime dependency.
 area: backend
 tags: [pi-extension, typebox, dependencies, cli, integration]
-status: active
+status: landed
 branch: vp-pi-extension
 base: main
 stack_position: 1
 stack_batch: vp-pre-existing-bugs
 created: "2026-08-15"
 updated: "2026-08-15"
-commits_verified: []
-merge_preview_verified: ""
+commits_verified: [pr-6-preview]
+merge_preview_verified: qa/pr-5-qa-and-distribution-merge-preview
 stale_after: "2026-08-29"
 related:
   - ../bugs/backend-pi-extension-undeclared-typebox-dependency.md

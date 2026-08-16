@@ -4,7 +4,7 @@ title: config keys
 description: "Persist `fallbackModels` and provider `*BaseURL` keys in `.vision-proxy.json`; respect `*_BASE_URL` env vars as overrides."
 area: backend
 tags: [config, fallback, baseURL, provider]
-status: merged
+status: landed
 branch: vp-config-keys
 base: main
 stack_position: 1

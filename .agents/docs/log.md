@@ -147,3 +147,5 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: archive research/backend-osv-scanner-adoption-for-vision-proxy-ci.md -> archive/research-backend-osv-scanner-adoption-for-vision-proxy-ci.md (complete)
 - 2026-08-16: archive research/backend-userpromptsubmit-inject-description-versus-vp-analyze-instruction.md -> archive/research-backend-userpromptsubmit-inject-description-versus-vp-analyze-instruction.md (complete)
 - 2026-08-16: archive qa/backend-manual-review-osv-scanner-ci.md -> archive/coverage-backend-manual-review-osv-scanner-ci.md (retired)
+- 2026-08-16: new research research/backend-rule-based-evidence-validation-for-research-docs.md
+- 2026-08-16: new plan plans/backend-evidence-validation-mvp-for-agents-docs.md

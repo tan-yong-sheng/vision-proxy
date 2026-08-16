@@ -90,6 +90,7 @@ All docs share the frontmatter contract above. The one-line summary under `# <ti
 
 ## Question
 ## Summary of findings          # table: # | Finding | Relevance | Confidence | Evidence
+                                 #       |---|---------|-----------|------------|----------
 ## Options considered
 ## Findings
 ## Recommendation / decision
@@ -215,7 +216,7 @@ Run with `bun .agents/skills/agents-docs/scripts/docs.js <command>`.
 | `index` | Regenerate `index.md` from frontmatter (catalog grouped by folder x status). |
 | `clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]` | Auto-archive terminal/superseded docs and GC unreferenced archive docs (the sweep). Dry-run previews; default applies. `--stale-orphan` archives stale+unreferenced docs (dry-run by default, requires `--apply`). Also runs automatically at the end of lifecycle commands. |
 | `prune [--dry-run] [--apply] [--gc] [--ttl <days>] [--force]` | Explicit, batched version of `clean`. Propose archiving for terminal / superseded docs, or GC archive docs that are superseded AND past the TTL (default 180 days). Referenced archive docs refused with linker names; `--force` overrides. |
-| `archive <doc> [--status=<terminal>]` | Move to `archive/<type>-<basename>.md`, set terminal status, rewrite inbound + outbound links file-relative, append `log.md`, regen index. Research docs: `--status complete` is refused while critical evidence flags are unresolved (see Evidence validation). |
+| `archive <doc> [--status=<terminal>] [--dry-run]` | Move to `archive/<type>-<basename>.md`, set terminal status, rewrite inbound + outbound links file-relative, append `log.md`, regen index. `--dry-run` prints the planned archive without moving files. Research docs: `--status complete` is refused while critical evidence flags are unresolved (see Evidence validation). |
 | `revive <archive-doc>` | Move from `archive/<type>-<name>.md` back to active home folder with `status: active` (or `open`), reset staleness deadline, rewrite links, regen index. |
 | `abandon <doc> [--status=<terminal>] [--dry-run]` | One-step archive with the type's default terminal status. Use when a doc is left behind without a full review. |
 

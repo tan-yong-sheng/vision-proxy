@@ -10,19 +10,15 @@ import { parseYaml } from "./yaml.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function findRepoRoot() {
-  if (process.env.AGENTS_DOCS_ROOT) {
-    // Test/override: point the corpus elsewhere but keep repo-relative link
-    // resolution anchored at the real repo root (inferred from this script).
-    return walkUpForAgents();
-  }
+  // Repo-relative link resolution stays anchored at the real repo root, even
+  // when AGENTS_DOCS_ROOT points the corpus elsewhere.
   return walkUpForAgents();
 }
 
 export function walkUpForAgents() {
   let dir = __dirname;
   while (true) {
-    const candidates = [path.join(dir, ".agents", "docs"), path.join(dir, "docs")];
-    if (fs.existsSync(candidates[0])) return dir;
+    if (fs.existsSync(path.join(dir, ".agents", "docs"))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) throw new Error("could not locate repo root (.agents/docs)");
     dir = parent;

@@ -67,16 +67,16 @@ function proseParagraphs(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
+    if (inComment) {
+      if (trimmed.includes("-->")) inComment = false;
+      continue;
+    }
     if (/^```/.test(trimmed)) {
       flush();
       inCode = !inCode;
       continue;
     }
     if (inCode) continue;
-    if (inComment) {
-      if (trimmed.includes("-->")) inComment = false;
-      continue;
-    }
     if (trimmed.startsWith("<!--")) {
       flush();
       if (!trimmed.includes("-->")) inComment = true;
@@ -121,11 +121,12 @@ function sectionLines(text, headingRe) {
 }
 
 function hasEvidenceSection(text) {
-  for (const re of [SOF_HEADING_RE, SOURCES_HEADING_RE]) {
-    const lines = sectionLines(text, re);
-    if (lines.some((l) => l.trim() !== "")) return true;
-  }
-  return false;
+  if (summaryOfFindingsRows(text).length > 0) return true;
+  const lines = sectionLines(text, SOURCES_HEADING_RE);
+  return lines.some((l) => {
+    const trimmed = l.trim();
+    return trimmed !== "" && !trimmed.startsWith("|");
+  });
 }
 
 // Parse the Summary of findings table into rows keyed by header name.
@@ -141,7 +142,7 @@ function summaryOfFindingsRows(text) {
   if (idx.relevance === -1 || idx.confidence === -1 || idx.evidence === -1) return [];
   const rows = [];
   for (const l of lines.slice(1)) {
-    if (/^\|[\s\-|]+\|$/.test(l.trim())) continue; // separator row
+    if (/^\|[\s\-:|]+\|$/.test(l.trim())) continue; // separator row (allows :---: alignment)
     const cells = splitRow(l);
     if (cells.length < header.length) continue;
     rows.push({

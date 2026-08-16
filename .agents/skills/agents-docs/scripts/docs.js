@@ -175,6 +175,7 @@ function cmdNew(args) {
     updated: today(),
   };
   if (type === "bug") fm.priority = "medium";
+  if (type === "research") fm.sources = [];
   const staleDays = STALE_DAYS_BY_TYPE[type];
   if (staleDays) {
     const deadline = new Date(Date.now() + staleDays * 24 * 3600 * 1000);
@@ -559,25 +560,46 @@ function performArchive(doc, docs, opts) {
   console.log(`archived ${doc.rel} -> ${newRel} (status: ${status})`);
 }
 
+function parseStatusFlag(args) {
+  const eqIdx = args.findIndex((a) => a.startsWith("--status="));
+  if (eqIdx !== -1) return args[eqIdx].slice("--status=".length);
+  const spaceIdx = args.indexOf("--status");
+  if (spaceIdx !== -1 && args[spaceIdx + 1]) return args[spaceIdx + 1];
+  return null;
+}
+
+function enforceEvidenceGate(doc, effectiveStatus, { dryRun, preview } = {}) {
+  if (doc.fm.type !== "research" || effectiveStatus !== "complete") return;
+  const blockers = completionBlockers(doc);
+  if (!blockers.length) return;
+  if (dryRun && preview) console.log(preview);
+  console.error(`docs.js: evidence gate: ${blockers.length} critical flag(s) block status: complete for ${doc.rel}:`);
+  for (const b of blockers) console.error(`  ${formatFlag(b)}`);
+  console.error(`resolve the flags (add sources / lower relevance / mark dead-end) and retry.`);
+  process.exit(1);
+}
+
 function cmdArchive(args) {
-  if (args.length < 1) die("usage: archive <doc> [--status <terminal-status>]");
+  if (args.length < 1) die("usage: archive <doc> [--status=<terminal-status>] [--dry-run]");
+  const dryRun = args.includes("--dry-run");
   const docs = scanDocs();
   const doc = findDoc(docs, args[0]);
-  const statusFlag = args.find((a) => a.startsWith("--status="));
-  const status = statusFlag ? statusFlag.split("=")[1] : null;
-  // Evidence gate: a research doc may not be archived as `complete` while
-  // critical evidence flags are unresolved. Fix the doc, then archive.
-  const effectiveStatus = status || (TERMINAL_STATUS[doc.fm.type] ? TERMINAL_STATUS[doc.fm.type][0] : null);
-  if (doc.fm.type === "research" && effectiveStatus === "complete") {
-    const blockers = completionBlockers(doc);
-    if (blockers.length) {
-      console.error(`docs.js: evidence gate: ${blockers.length} critical flag(s) block status: complete for ${doc.rel}:`);
-      for (const b of blockers) console.error(`  ${formatFlag(b)}`);
-      console.error(`resolve the flags (add sources / lower relevance / mark dead-end) and retry.`);
-      process.exit(1);
-    }
+  const type = doc.fm.type;
+  const status = parseStatusFlag(args);
+  const effectiveStatus = status || (TERMINAL_STATUS[type] ? TERMINAL_STATUS[type][0] : null);
+  if (!effectiveStatus) fail(`cannot archive doc of type "${type || "(missing)"}" - set --status explicitly`);
+  const terminal = TERMINAL_STATUS[type] || [];
+  if (!terminal.includes(effectiveStatus)) fail(`status "${effectiveStatus}" is not terminal for type "${type}"`);
+  const archiveName = archiveBasename(type, doc.rel);
+  enforceEvidenceGate(doc, effectiveStatus, {
+    dryRun,
+    preview: `would archive ${doc.rel} -> archive/${archiveName} (status: ${effectiveStatus})`,
+  });
+  if (dryRun) {
+    console.log(`would archive ${doc.rel} -> archive/${archiveName} (status: ${effectiveStatus})`);
+    return;
   }
-  performArchive(doc, docs, { status });
+  performArchive(doc, docs, { status: effectiveStatus });
   regenIndex(scanDocs());
   maybeSweep();
 }
@@ -588,28 +610,21 @@ function cmdAbandon(args) {
   const docs = scanDocs();
   const doc = findDoc(docs, args[0]);
   const type = doc.fm.type;
-  const statusFlag = args.find((a) => a.startsWith("--status="));
-  const status = statusFlag ? statusFlag.split("=")[1] : ABANDON_STATUS[type];
-  if (!status) fail(`cannot abandon doc of type "${type || "(missing)"}" - set --status explicitly`);
+  const status = parseStatusFlag(args);
+  const effectiveStatus = status || ABANDON_STATUS[type];
+  if (!effectiveStatus) fail(`cannot abandon doc of type "${type || "(missing)"}" - set --status explicitly`);
   const terminal = TERMINAL_STATUS[type] || [];
-  if (!terminal.includes(status)) fail(`status "${status}" is not terminal for type "${type}"`);
-  // Evidence gate: a research doc may not be abandoned as `complete` while
-  // critical evidence flags are unresolved. Fix the doc, then abandon.
-  if (doc.fm.type === "research" && status === "complete") {
-    const blockers = completionBlockers(doc);
-    if (blockers.length) {
-      console.error(`docs.js: evidence gate: ${blockers.length} critical flag(s) block status: complete for ${doc.rel}:`);
-      for (const b of blockers) console.error(`  ${formatFlag(b)}`);
-      console.error(`resolve the flags (add sources / lower relevance / mark dead-end) and retry.`);
-      process.exit(1);
-    }
-  }
+  if (!terminal.includes(effectiveStatus)) fail(`status "${effectiveStatus}" is not terminal for type "${type}"`);
   const archiveName = archiveBasename(type, doc.rel);
+  enforceEvidenceGate(doc, effectiveStatus, {
+    dryRun,
+    preview: `would abandon ${doc.rel} -> archive/${archiveName} (status: ${effectiveStatus})`,
+  });
   if (dryRun) {
-    console.log(`would abandon ${doc.rel} -> archive/${archiveName} (status: ${status})`);
+    console.log(`would abandon ${doc.rel} -> archive/${archiveName} (status: ${effectiveStatus})`);
     return;
   }
-  performArchive(doc, docs, { status });
+  performArchive(doc, docs, { status: effectiveStatus });
   regenIndex(scanDocs());
   maybeSweep();
 }
@@ -1298,11 +1313,12 @@ Usage: bun docs.js <command> [args] [flags]
   index                                regenerate index.md from frontmatter
   clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]  auto-archive terminal/superseded docs and GC unreferenced archive docs
   prune [--dry-run|--apply] [--gc] [--ttl <days>] [--force]  propose archive moves; --gc lists archive deletions
-  archive <doc> [--status=<v>]         move to archive/<type>-*.md, set terminal status, rewrite links, append log
-                                     (research + status complete runs the evidence gate first - see evidence.js)
+  archive <doc> [--status=<v>] [--dry-run]  move to archive/<type>-*.md, set terminal status, rewrite links, append log
+                                            (research + status complete runs the evidence gate first - see evidence.js)
   revive <archive-doc>                 restore an archived doc to its active folder with status: active
   scaffold-worktrees <plan-doc>        parse ## Worktree Strategy tracks from plan and create worktrees/*.md
   abandon <doc> [--status=<v>] [--dry-run]  one-step archive with the default terminal status for the doc's type
+                                            (research + --status=complete runs the evidence gate first - see evidence.js)
   ensure [--dry-run|--apply]           converge the 8-folder corpus onto the 6-folder structure (idempotent)
 
 Environment: AGENTS_DOCS_ROOT overrides the corpus directory (used by tests).

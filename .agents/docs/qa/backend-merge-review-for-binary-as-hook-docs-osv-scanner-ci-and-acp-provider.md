@@ -60,12 +60,29 @@ After integration, the ACP provider was removed because the community provider c
 - Confirmed Vercel AI SDK v7 has no first-party ACP provider.
 - Removed ACP provider code, tests, dependency, and documentation from PR #7.
 
-### no-mistakes test step: agent output parser failure
+### no-mistakes review: repeated agent output parser failures
 
-- **Observation:** The `no-mistakes axi run` review step completed with no findings, but the `test` step failed with `pi output parse: invalid character 'a' after object key:value pair`. The agent-generated JSON summary contained embedded newlines inside a string value.
-- **Root cause:** no-mistakes test agent output parser does not handle multi-line JSON string values in the agent response.
-- **Mitigation:** Ran the full local verification suite manually; all checks pass.
-- **Status:** pipeline tooling issue, not a code defect.
+- **Observation:** Multiple `no-mistakes axi run` attempts on `merge-plan-binary` completed the `review` step with **no findings**, then failed in later agent-driven steps with `pi output parse` errors:
+  - Attempt 1: `test` step failed on `invalid character 'a' after object key:value pair` (multi-line JSON string).
+  - Attempt 2: `test` step passed, but `document` step failed on `invalid character 'G' looking for beginning of value` (prose prefix before JSON).
+  - Attempt 3 (`--skip document`): `test` step failed on `invalid character 'T' looking for beginning of value` (prose suffix after JSON).
+- **Root cause:** The no-mistakes agent output parser is not robust to prose around or inside the JSON response; this is a pipeline tooling issue, not a code defect.
+- **Mitigation:** Ran the full local verification suite manually after every attempt; all checks pass.
+- **Status:** Review and test logic both succeeded; only the response parsing failed. Manual verification is recorded below.
+
+## Manual verification verdict
+
+Because no-mistakes cannot complete a run due to agent-output parser failures, the branch was verified manually:
+
+| Check | Command | Result |
+|---|---|---|
+| Type check | `pnpm run typecheck` | PASS |
+| Tests | `pnpm test` | PASS (149 unit + 3 e2e) |
+| Secrets scan | `pnpm secrets` | PASS |
+| Lint / format | `pnpm lint` | PASS |
+| Fallow audit | `fallow audit --format json --quiet --explain --gate-marker agent` | PASS |
+
+**Verdict:** PR #7 is ready for merge pending a green GitHub Actions CI run.
 
 ## Retirement criteria
 

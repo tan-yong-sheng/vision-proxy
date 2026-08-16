@@ -10,7 +10,7 @@ updated: "2026-08-15"
 stale_after: "2026-11-13"
 related:
   - ../archive/research-backend-vision-proxy-review-run-lessons.md
-  - ../bugs/backend-pi-extension-undeclared-typebox-dependency.md
+  - ../archive/bug-backend-pi-extension-undeclared-typebox-dependency.md
   - ../archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md
 ---
 # vision-proxy post-migration merge review
@@ -38,7 +38,7 @@ This is a local-only review (`--skip push,pr,ci`) because preview worktrees are 
 
 ## Review Findings & Escalations
 
-- **W1 (Undeclared `typebox` runtime dependency):** Tracked in [../bugs/backend-pi-extension-undeclared-typebox-dependency.md](../bugs/backend-pi-extension-undeclared-typebox-dependency.md). Recommended resolution is Option A1 (inline JSON Schema).
+- **W1 (Undeclared `typebox` runtime dependency):** Tracked in [../archive/bug-backend-pi-extension-undeclared-typebox-dependency.md](../archive/bug-backend-pi-extension-undeclared-typebox-dependency.md). Recommended resolution is Option A1 (inline JSON Schema).
 - **W2 (Dead `maxToolCallsPerTurn` surface):** Tracked in [../archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md](../archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md). Recommended resolution is Option B1 (prune dead configuration surface).
 - **Operational lessons & post-mortem:** Documented in [../archive/research-backend-vision-proxy-review-run-lessons.md](../archive/research-backend-vision-proxy-review-run-lessons.md).
 

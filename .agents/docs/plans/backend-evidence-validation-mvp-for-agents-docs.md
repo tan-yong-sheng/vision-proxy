@@ -9,7 +9,7 @@ created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-10-15"
 related:
-  - ../research/backend-rule-based-evidence-validation-for-research-docs.md
+  - ../archive/research-backend-rule-based-evidence-validation-for-research-docs.md
 ---
 # evidence validation MVP for agents-docs
 

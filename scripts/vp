@@ -1,0 +1,5 @@
+#!/bin/sh
+# Launcher for the vision-proxy CLI shipped in the release tarball.
+# Runs the compiled ES-module entry point (dist/cli.js) under the system node.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "$here/dist/cli.js" "$@"

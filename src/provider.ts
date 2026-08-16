@@ -6,10 +6,11 @@
  * that maps a provider id to a language-model factory and resolves the key from
  * the environment (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY) or an explicit flag.
  */
-import { createOpenAI } from "@ai-sdk/openai";
-import type { LanguageModel } from "ai";
+
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
+import type { LanguageModel } from "ai";
 import { getStoredProviderKey } from "./keyring.ts";
 
 export interface ProviderSpec {
@@ -34,8 +35,7 @@ const openaiProvider: ProviderSpec = {
 	baseUrlEnv: "OPENAI_BASE_URL",
 	supportsImage: true,
 	defaultModelId: "gpt-4o",
-	make: ({ apiKey, modelId, baseURL }) =>
-		createOpenAI({ apiKey, baseURL })(modelId),
+	make: ({ apiKey, modelId, baseURL }) => createOpenAI({ apiKey, baseURL })(modelId),
 };
 
 const anthropicProvider: ProviderSpec = {
@@ -45,8 +45,7 @@ const anthropicProvider: ProviderSpec = {
 	baseUrlEnv: "ANTHROPIC_BASE_URL",
 	supportsImage: true,
 	defaultModelId: "claude-sonnet-4-5",
-	make: ({ apiKey, modelId, baseURL }) =>
-		createAnthropic({ apiKey, baseURL })(modelId),
+	make: ({ apiKey, modelId, baseURL }) => createAnthropic({ apiKey, baseURL })(modelId),
 };
 
 const googleProvider: ProviderSpec = {
@@ -56,8 +55,7 @@ const googleProvider: ProviderSpec = {
 	baseUrlEnv: "GOOGLE_BASE_URL",
 	supportsImage: true,
 	defaultModelId: "gemini-2.5-pro",
-	make: ({ apiKey, modelId, baseURL }) =>
-		createGoogleGenerativeAI({ apiKey, baseURL })(modelId),
+	make: ({ apiKey, modelId, baseURL }) => createGoogleGenerativeAI({ apiKey, baseURL })(modelId),
 };
 
 const PROVIDERS: Record<string, ProviderSpec> = {

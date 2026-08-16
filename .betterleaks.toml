@@ -1,0 +1,38 @@
+# BetterLeaks configuration for vision-proxy.
+#
+# BetterLeaks is a gitleaks-compatible secret scanner. When no config is passed
+# it uses the upstream default ruleset (AWS, GCP, GitHub, OpenAI, private keys,
+# etc.). This file only narrows that default with project-specific allowlists
+# so fixtures and docs do not trip the pre-commit / CI gate.
+#
+# Docs: betterleaks config --help
+# Scan: betterleaks dir .          (full tree)
+#       betterleaks git --staged   (pre-commit, staged diff only)
+
+title = "vision-proxy betterleaks config"
+
+# Allowlist only known fixture/testdata paths. Real credentials committed to
+# ordinary project files (source, tests, docs, README, agent files) stay
+# subject to scanning so a leaked secret is not silently skipped. Placeholder
+# example secrets are handled by the `regexes` allowlist below.
+[allowlist]
+description = "Project allowlist for test fixtures and documentation"
+
+paths = [
+  '''^.*/fixtures/.*''',
+  '''^.*/__fixtures__/.*''',
+  '''^.*/testdata/.*''',
+]
+
+# Common placeholder / example strings that are not real secrets.
+regexes = [
+  '''(?i)(sk|api[_-]?key)[\"'-]?\s*[:=]\s*["']?(your[_-]?key|example|test|dummy|fake|placeholder|xxxx+|sk-xxxx+)["']?''',
+  '''pk[_-]?test[_-]?[a-f0-9]{32}''',
+]
+
+# Allowlist stop-words: short hex blobs that are not keys (hashes, ids, etc.).
+stopwords = [
+  "0000000000000000000000000000000000000000",
+  "0123456789abcdef",
+  "abcdef0123456789",
+]

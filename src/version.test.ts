@@ -2,9 +2,10 @@
  * Unit tests for the version module: reading the running version from
  * package.json and embedding/extracting the version marker in artifacts.
  */
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
-import { VERSION, renderVersionMarker, extractMarkerVersion } from "./version.ts";
+import { test } from "node:test";
+import { extractMarkerVersion, renderVersionMarker, VERSION } from "./version.ts";
 
 test("VERSION is a non-empty semver-ish string", () => {
 	assert.equal(typeof VERSION, "string");

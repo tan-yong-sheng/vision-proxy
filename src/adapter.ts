@@ -72,9 +72,7 @@ function buildPromptText(imagePayloads: ImagePayload[], question: string): strin
  *
  * Returns the model text. The caller owns caching and fence emission.
  */
-export async function analyzeImagesWithModel(
-	req: AnalyzeRequest,
-): Promise<AnalyzeResponse> {
+export async function analyzeImagesWithModel(req: AnalyzeRequest): Promise<AnalyzeResponse> {
 	const { imagePayloads, systemPrompt, question, model, providerOptions, signal, maxOutputTokens } =
 		req;
 

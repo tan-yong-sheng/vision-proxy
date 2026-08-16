@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { basename } from "node:path";
 /**
  * vision-proxy / vp CLI entry point.
  *
@@ -11,25 +12,19 @@
  *   integration install | show | list | status | uninstall <agent>
  *   version | help
  */
-import { runAnalyze, parseCropFlags, AnalyzeError, type AnalyzeFlags } from "./commands/analyze.ts";
-import {
-	configInit,
-	configGet,
-	configSet,
-	configValidate,
-} from "./commands/config.ts";
-import {
-	providerList,
-	providerCheck,
-	providerStoreKey,
-	providerDeleteKey,
-	providerListKeys,
-} from "./commands/provider.ts";
-import { cacheStatus, cacheClearCmd, cachePruneCmd } from "./commands/cache.ts";
+import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
+import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
+import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
 import { runIntegration } from "./commands/integration.ts";
-import { isKnownProvider } from "./provider.ts";
+import {
+	providerCheck,
+	providerDeleteKey,
+	providerList,
+	providerListKeys,
+	providerStoreKey,
+} from "./commands/provider.ts";
 import type { GroundingFormat } from "./core.ts";
-import { basename } from "node:path";
+import { isKnownProvider } from "./provider.ts";
 
 const VERSION = "0.1.0";
 
@@ -200,7 +195,7 @@ Notes:
   The description fence is ON by default. Image-derived text is
   attacker-controlled, so only use --no-fence for local debugging.`,
 
-	"config": `vp config <subcommand> [options]
+	config: `vp config <subcommand> [options]
 
 Manage the VisionConfig (.vision-proxy.json).
 
@@ -266,7 +261,7 @@ Options:
   --config <path>    explicit config file path
   -h, --help         show this help`,
 
-	"provider": `vp provider <subcommand> [options]
+	provider: `vp provider <subcommand> [options]
 
 Manage the provider registry and credentials.
 
@@ -344,7 +339,7 @@ List providers that have a key stored in the system keyring.
 Usage:
   vp provider list-keys`,
 
-	"cache": `vp cache <subcommand> [options]
+	cache: `vp cache <subcommand> [options]
 
 Inspect and manage the pHash / description cache.
 
@@ -384,7 +379,7 @@ Options:
 
 Entries are removed by content age, not last access.`,
 
-	"integration": `vp integration <subcommand> [agent]
+	integration: `vp integration <subcommand> [agent]
 
 Install, inspect, list, or remove the vision-proxy integration for an agent.
 
@@ -463,7 +458,7 @@ Output:
   marker embedded in the installed artifact. Outdated integrations are
   flagged with a refresh hint.`,
 
-	"hook": `vp hook <subcommand> <agent>
+	hook: `vp hook <subcommand> <agent>
 
 Install, inspect, or remove a per-agent UserPromptSubmit hook.
 
@@ -528,7 +523,7 @@ Arguments:
 };
 
 function print(msg: string): void {
-	process.stdout.write(msg + "\n");
+	process.stdout.write(`${msg}\n`);
 }
 
 /**
@@ -546,7 +541,7 @@ function renderHelp(path: string[]): string {
 }
 
 function fail(msg: string, code = 1): void {
-	process.stderr.write(msg + "\n");
+	process.stderr.write(`${msg}\n`);
 	process.exitCode = code;
 }
 
@@ -577,7 +572,8 @@ export async function main(argv: string[]): Promise<void> {
 				return;
 			}
 			const formatRaw = str(flags, "format");
-			const format = formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
+			const format =
+				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
 			const analyzeFlags: AnalyzeFlags = {
 				format,
 				provider: str(flags, "provider"),
@@ -597,13 +593,7 @@ export async function main(argv: string[]): Promise<void> {
 			try {
 				const outcome = await runAnalyze(images, analyzeFlags);
 				if (analyzeFlags.json) {
-					print(
-						JSON.stringify(
-							{ cacheHit: outcome.cacheHit, records: outcome.records },
-							null,
-							2,
-						),
-					);
+					print(JSON.stringify({ cacheHit: outcome.cacheHit, records: outcome.records }, null, 2));
 				} else {
 					print(outcome.output);
 				}
@@ -692,7 +682,9 @@ export async function main(argv: string[]): Promise<void> {
 					handle(providerListKeys());
 					return;
 				default:
-					fail(`unknown provider subcommand "${sub ?? ""}". Try: list, check, store-key, delete-key, list-keys`);
+					fail(
+						`unknown provider subcommand "${sub ?? ""}". Try: list, check, store-key, delete-key, list-keys`,
+					);
 			}
 			return;
 		}
@@ -712,7 +704,9 @@ export async function main(argv: string[]): Promise<void> {
 					handle(await cacheClearCmd());
 					return;
 				case "prune":
-					handle(await cachePruneCmd(str(flags, "older") ? Number(str(flags, "older")) : undefined));
+					handle(
+						await cachePruneCmd(str(flags, "older") ? Number(str(flags, "older")) : undefined),
+					);
 					return;
 				default:
 					fail(`unknown cache subcommand "${sub ?? ""}". Try: status, clear, prune`);

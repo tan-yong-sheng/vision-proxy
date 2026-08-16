@@ -15,12 +15,12 @@
  *   status            show installed version markers per agent (flags outdated).
  *   uninstall <agent> removes vision-proxy from the agent.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
-import { VERSION, renderVersionMarker, extractMarkerVersion } from "../version.ts";
+import { extractMarkerVersion, renderVersionMarker, VERSION } from "../version.ts";
 
 const SUPPORTED = ["pi", "claude-code", "codex"];
 const PI_EXTENSION_FILENAME = "vision-proxy.ts";
@@ -85,6 +85,29 @@ function shimDir(): string {
 	return join(here, "..", "shims");
 }
 
+/**
+ * Resolve the `shared.mjs` that hook shims `import "./shared.mjs"` from.
+ *
+ * The build normally copies `src/shims/shared.mjs` into `dist/shims` (see
+ * `scripts/copy-shims.mjs`), so `shimDir()`'s result is the first candidate.
+ * If the build is stale, skipped, or changed, that file can be absent: fall
+ * back to the repo source dir (`src/shims`), which always has it. Throw if no
+ * candidate resolves, so we fail loudly instead of installing a shim whose
+ * `import "./shared.mjs"` would throw `node:internal/modules/esm/resolve` at
+ * hook runtime.
+ */
+function resolveSharedShim(): string {
+	const candidates = [shimDir(), join(process.cwd(), "src", "shims")];
+	for (const c of candidates) {
+		const p = join(c, "shared.mjs");
+		if (existsSync(p)) return p;
+	}
+	throw new Error(
+		"could not locate shared.mjs for the hook shim. Looked in: " +
+			candidates.map((c) => join(c, "shared.mjs")).join(", "),
+	);
+}
+
 const piSpec: AgentSpec = {
 	id: "pi",
 	target: ({ installDir }) => join(installDir ?? piExtensionsDir(), PI_EXTENSION_FILENAME),
@@ -105,9 +128,15 @@ const piSpec: AgentSpec = {
 const claudeCode: AgentSpec = {
 	id: "claude-code",
 	target: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "claude-code-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"claude-code-vision-proxy-user-prompt-submit.mjs",
+		),
 	locationLabel: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "claude-code-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"claude-code-vision-proxy-user-prompt-submit.mjs",
+		),
 	generate: () =>
 		readFileSync(join(shimDir(), "claude-code-user-prompt-submit.mjs"), "utf8").replace(
 			"__VP_VERSION__PLACEHOLDER__",
@@ -132,9 +161,7 @@ const claudeCode: AgentSpec = {
 			hooks: [{ type: "command", command: `node ${targetPath}`, timeout: HOOK_TIMEOUT_SEC }],
 		};
 		const existing = Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
-		const filtered = (existing as any[]).filter(
-			(g) => !JSON.stringify(g).includes(HOOK_MARKER),
-		);
+		const filtered = (existing as any[]).filter((g) => !JSON.stringify(g).includes(HOOK_MARKER));
 		hooks.UserPromptSubmit = [...filtered, entry];
 		cfg.hooks = hooks;
 		return JSON.stringify(cfg, null, 2);
@@ -183,9 +210,15 @@ const claudeCode: AgentSpec = {
 const codex: AgentSpec = {
 	id: "codex",
 	target: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "codex-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"codex-vision-proxy-user-prompt-submit.mjs",
+		),
 	locationLabel: ({ installDir }) =>
-		join(installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"), "codex-vision-proxy-user-prompt-submit.mjs"),
+		join(
+			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
+			"codex-vision-proxy-user-prompt-submit.mjs",
+		),
 	generate: () =>
 		readFileSync(join(shimDir(), "codex-user-prompt-submit.mjs"), "utf8").replace(
 			"__VP_VERSION__PLACEHOLDER__",
@@ -215,7 +248,10 @@ const codex: AgentSpec = {
 			kept.push(`[[UserPromptSubmit]]${blocks[i]!}`);
 		}
 		return {
-			raw: kept.join("").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n",
+			raw: `${kept
+				.join("")
+				.replace(/\n{3,}/g, "\n\n")
+				.trimEnd()}\n`,
 			removed,
 		};
 	},
@@ -234,6 +270,23 @@ function specFor(agent: string): AgentSpec | undefined {
 	if (agent === "claude-code") return claudeCode;
 	if (agent === "codex") return codex;
 	return undefined;
+}
+
+/**
+ * Whether any installed hook shim other than `exclude` still imports
+ * `./shared.mjs` from `dir`. Hook agents co-locate their shim and the shared
+ * sidecar; when one agent is uninstalled we must not delete a sidecar another
+ * still-installed agent depends on.
+ */
+function sharedShimStillUsed(dir: string, exclude: string): boolean {
+	if (!existsSync(dir)) return false;
+	for (const file of readdirSync(dir)) {
+		if (!file.endsWith(".mjs") || file === "shared.mjs") continue;
+		const path = join(dir, file);
+		if (path === exclude) continue;
+		if (readFileSync(path, "utf8").includes('"./shared.mjs"')) return true;
+	}
+	return false;
 }
 
 function isAgentInstalled(spec: AgentSpec): boolean {
@@ -271,14 +324,23 @@ export async function integrationInstall(
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
 	mkdirSync(dirname(target), { recursive: true });
-	writeFileSync(target, spec.generate(), { mode: 0o644 });
-	// Hook shims import ./shared.mjs, so it has to land in the same directory.
+	// Hook shims import ./shared.mjs from the same directory, so it has to land
+	// next to the shim. Resolve it first: resolveSharedShim() throws (loud
+	// failure) if no candidate resolves, so we reject before writing a shim
+	// that would fail at hook runtime with a missing `import "./shared.mjs"`.
 	if (spec.sharedShim) {
-		const sharedSrc = join(shimDir(), "shared.mjs");
-		if (existsSync(sharedSrc)) {
-			writeFileSync(join(dirname(target), "shared.mjs"), readFileSync(sharedSrc));
-		}
+		const sharedSrc = resolveSharedShim();
+		// Rewrite the install-time placeholder with the absolute `vp` binary path.
+		// process.argv[1] is the executed script (dist/cli.js), which resolves to
+		// the real binary for curl installs and Homebrew symlinks alike. A global
+		// replace covers every occurrence of the placeholder token.
+		const vpBin = resolve(process.argv[1] ?? "vp");
+		writeFileSync(
+			join(dirname(target), "shared.mjs"),
+			readFileSync(sharedSrc, "utf8").split("__VP_PATH__PLACEHOLDER__").join(vpBin),
+		);
 	}
+	writeFileSync(target, spec.generate(), { mode: 0o644 });
 	const cfgPath = spec.configPath();
 	if (cfgPath) {
 		mkdirSync(dirname(cfgPath), { recursive: true });
@@ -347,7 +409,9 @@ export async function integrationStatus(): Promise<IntegrationResult> {
 		if (marker === VERSION) {
 			lines.push(`✓ ${agent}  ${marker}`);
 		} else {
-			lines.push(`! ${agent}  ${marker} (installed vp is ${VERSION}, run: vp integration install ${agent})`);
+			lines.push(
+				`! ${agent}  ${marker} (installed vp is ${VERSION}, run: vp integration install ${agent})`,
+			);
 			outdated++;
 		}
 	}
@@ -371,12 +435,12 @@ export async function integrationUninstall(
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
 	const cfgPath = spec.configPath();
-	let removed = false;
+	let configRemoved = false;
 	if (cfgPath && existsSync(cfgPath)) {
 		const { raw } = spec.readConfig();
 		const result = spec.remove(raw);
 		writeFileSync(cfgPath, result.raw);
-		removed = result.removed;
+		configRemoved = result.removed;
 	} else if (!existsSync(target)) {
 		return {
 			ok: true,
@@ -384,9 +448,14 @@ export async function integrationUninstall(
 			code: 0,
 		};
 	}
+	// `removed` must reflect file deletion as well as host-config removal.
+	// Agents like `pi` have no host config (configPath() === ""), so the
+	// config branch never fires for them; the extension file is the signal.
+	let fileDeleted = false;
 	if (existsSync(target)) {
 		try {
 			rmSync(target);
+			fileDeleted = true;
 		} catch {
 			return {
 				ok: false,
@@ -395,10 +464,14 @@ export async function integrationUninstall(
 			};
 		}
 	}
-	// Hook agents also ship shared.mjs next to the shim; drop it if now orphaned.
+	const removed = configRemoved || fileDeleted;
+	// Hook agents also ship shared.mjs next to the shim. Claude Code and Codex
+	// install into the same directory and both import it, so only drop it when
+	// no remaining hook shim still references it (e.g. uninstalling codex must
+	// not break a still-installed claude-code shim in the same dir).
 	if (spec.sharedShim) {
 		const sharedPath = join(dirname(target), "shared.mjs");
-		if (existsSync(sharedPath)) {
+		if (existsSync(sharedPath) && !sharedShimStillUsed(dirname(target), target)) {
 			try {
 				rmSync(sharedPath);
 			} catch {

@@ -6,13 +6,35 @@ It is designed to be called from agent `UserPromptSubmit` hooks so any coding ag
 
 ## Install
 
+vision-proxy ships prebuilt per-OS/arch tarballs from [GitHub Releases](https://github.com/tan-yong-sheng/vision-proxy/releases). Pick either install path below; both pull the same artifacts.
+
+### Homebrew (macOS / Linux)
+
+> Note: The Homebrew formula is not installable yet. Its per-arch `sha256`
+> hashes are placeholders that must be filled from a published release's
+> `sha256sum.txt` before `brew install` will succeed. Until then, use the
+> curl installer below.
+
 ```bash
-npm install -g vision-proxy
+brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy
+brew install tan-yong-sheng/vision-proxy/vision-proxy
 ```
 
-This installs the `vp` and `vision-proxy` binaries.
+This installs the `vp` binary and pulls in Node 22 as a dependency.
 
-Requires Node 22 or later.
+### curl installer (no Homebrew)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh
+```
+
+The installer detects your OS/arch, downloads the matching release tarball, verifies its SHA-256 against the published `sha256sum.txt`, extracts into `~/.local/share/vision-proxy`, and symlinks `vp` into `~/.local/bin`.
+
+### Requirements
+
+Requires Node 22 or later on `PATH` (the Homebrew formula satisfies this automatically; the curl installer prints a warning if your system Node is older).
+
+> Prefer a single static binary with no Node dependency? Standalone `bun build --compile` binaries (Track B) are planned as a fast-follow and will land in the same releases.
 
 ## Quick start
 
@@ -56,7 +78,6 @@ Run `vp config init` to scaffold a project config file.
 | `VP_PHASH_THRESHOLD` | Perceptual-hash similarity threshold (0-1) | `0.8` |
 | `VP_BASE_URLS` | Per-provider base URL overrides as `provider=url` pairs, comma-separated (e.g. `openai=http://localhost:8000/v1`) | unset |
 | `VP_FALLBACK_MODELS` | Comma-separated `provider/model-id` list tried when the primary model fails (e.g. `openai/gpt-4o,google/gemini-2.5-flash`) | unset |
-| `VP_MAX_TOOL_CALLS_PER_TURN` | Max tool calls per turn; `-1` for unlimited | `-1` |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
 | `VP_ALLOW_DRIVES` | Set to `0`/`false`/`no`/`off` to disable local drive access on Windows | unset (drives allowed) |
 | `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from hook shims | shim-specific |

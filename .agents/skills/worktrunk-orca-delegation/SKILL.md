@@ -44,6 +44,18 @@ orca orchestration run-create --objective "<objective>" --json
 orca orchestration task-create --run <run-id> --spec "<scope>" [--deps '["<task-id>"]'] --json
 ```
 
+### 2b. Commit agents-docs to the default branch
+
+Worker agents run in linked git worktrees that share the repository history but start from the committed state of their base branch. Any `.agents/docs/` plans, worktrees, or decisions created in the orchestrator's checkout must be committed to the default branch (usually `main`) **before** creating worktrees. Otherwise workers will see stale or missing docs and fall back to searching the source directly.
+
+```bash
+# Commit planning docs and flight logs so worktrees inherit them.
+git add .agents/docs/
+git commit -m "docs(agents): sync execution plans and worktree flight logs"
+```
+
+If you must keep docs on a feature branch, merge that branch into the default branch first, or rebase every worktree branch onto the docs commit.
+
 ### 3. Create worktrees
 
 ```bash

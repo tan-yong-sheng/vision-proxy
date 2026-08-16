@@ -6,12 +6,7 @@
  *   clear             drop all cached entries
  *   prune [--older]  evict entries older than N days (default 30)
  */
-import {
-	cacheClear,
-	cachePrune,
-	cacheStats,
-	configureCache,
-} from "../cache.ts";
+import { cacheClear, cachePrune, cacheStats, configureCache } from "../cache.ts";
 import { loadConfig } from "../config.ts";
 
 export interface CacheResult {
@@ -42,10 +37,7 @@ export async function cacheClearCmd(): Promise<CacheResult> {
 	return { ok: true, message: "cache cleared", code: 0 };
 }
 
-export async function cachePruneCmd(
-	olderDays?: number,
-	maxEntries?: number,
-): Promise<CacheResult> {
+export async function cachePruneCmd(olderDays?: number, maxEntries?: number): Promise<CacheResult> {
 	const { config } = await loadConfig();
 	configureCache(maxEntries ?? config.cacheSize, undefined, config.cacheMaxAgeDays);
 	const effectiveDays = olderDays ?? config.cacheMaxAgeDays;

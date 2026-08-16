@@ -7,17 +7,23 @@
  * beforeEach.
  */
 import { strict as assert } from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { providerCheck, providerList, providerDeleteKey, providerListKeys, providerStoreKey } from "./provider.ts";
-import { resolveModel } from "../provider.ts";
-import { setKeyringBackend } from "../keyring.ts";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import type { KeyringBackend } from "../keyring.ts";
+import { setKeyringBackend } from "../keyring.ts";
+import { resolveModel } from "../provider.ts";
+import {
+	providerCheck,
+	providerDeleteKey,
+	providerList,
+	providerListKeys,
+	providerStoreKey,
+} from "./provider.ts";
 
 let home: string;
-let env: NodeJS.ProcessEnv;
+let _env: NodeJS.ProcessEnv;
 let savedBackend: KeyringBackend | null | undefined;
 
 function fakeBackend(): KeyringBackend {
@@ -32,7 +38,7 @@ function fakeBackend(): KeyringBackend {
 
 beforeEach(async () => {
 	home = await mkdtemp(path.join(os.tmpdir(), "vp-home-"));
-	env = { ...process.env, HOME: home, USERPROFILE: home };
+	_env = { ...process.env, HOME: home, USERPROFILE: home };
 	savedBackend = undefined;
 	setKeyringBackend(fakeBackend());
 });
@@ -44,7 +50,11 @@ afterEach(async () => {
 
 describe("providerList", () => {
 	it("lists all known providers and key presence from env", () => {
-		const r = providerList({ OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "", GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv);
+		const r = providerList({
+			OPENAI_API_KEY: "sk-x",
+			ANTHROPIC_API_KEY: "",
+			GOOGLE_API_KEY: "",
+		} as NodeJS.ProcessEnv);
 		assert.equal(r.ok, true);
 		assert.match(r.message, /openai/);
 		assert.match(r.message, /anthropic/);
@@ -55,7 +65,11 @@ describe("providerList", () => {
 
 	it("reports keyring-stored keys as present", async () => {
 		await providerStoreKey("openai", async () => "sk-keyring\n");
-		const r = providerList({ OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv);
+		const r = providerList({
+			OPENAI_API_KEY: "",
+			ANTHROPIC_API_KEY: "",
+			GOOGLE_API_KEY: "",
+		} as NodeJS.ProcessEnv);
 		assert.equal(r.ok, true);
 		assert.match(r.message, /openai.*present/);
 	});
@@ -63,13 +77,19 @@ describe("providerList", () => {
 
 describe("providerCheck", () => {
 	it("reports MISSING KEY when no env key is present", () => {
-		const r = providerCheck(undefined, { OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "" } as NodeJS.ProcessEnv);
+		const r = providerCheck(undefined, {
+			OPENAI_API_KEY: "",
+			ANTHROPIC_API_KEY: "",
+		} as NodeJS.ProcessEnv);
 		assert.equal(r.ok, false);
 		assert.match(r.message, /MISSING KEY/);
 	});
 
 	it("reports OK for a provider whose key is present", () => {
-		const r = providerCheck("openai", { OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "" } as NodeJS.ProcessEnv);
+		const r = providerCheck("openai", {
+			OPENAI_API_KEY: "sk-x",
+			ANTHROPIC_API_KEY: "",
+		} as NodeJS.ProcessEnv);
 		assert.equal(r.ok, true);
 		assert.match(r.message, /openai: OK/);
 	});
@@ -81,7 +101,10 @@ describe("providerCheck", () => {
 	});
 
 	it("reports unknown provider for a bad name", () => {
-		const r = providerCheck("bogus", { OPENAI_API_KEY: "x", ANTHROPIC_API_KEY: "y" } as NodeJS.ProcessEnv);
+		const r = providerCheck("bogus", {
+			OPENAI_API_KEY: "x",
+			ANTHROPIC_API_KEY: "y",
+		} as NodeJS.ProcessEnv);
 		assert.equal(r.ok, false);
 		assert.match(r.message, /unknown provider/);
 	});
@@ -166,7 +189,12 @@ describe("resolveModel keyring fallback", () => {
 			delete: (a) => store.delete(a),
 			list: () => [...store.keys()],
 		});
-		const r = resolveModel("openai", "gpt-4o", { OPENAI_API_KEY: "" } as NodeJS.ProcessEnv, "sk-explicit");
+		const r = resolveModel(
+			"openai",
+			"gpt-4o",
+			{ OPENAI_API_KEY: "" } as NodeJS.ProcessEnv,
+			"sk-explicit",
+		);
 		assert.equal(r.ok, true);
 		if (r.ok) assert.equal(r.model.apiKey, "sk-explicit");
 	});

@@ -1,10 +1,10 @@
 ---
 type: plan
 title: Add config keys for fallback models and provider baseURL
-description: Persist user-facing fallback model lists and provider baseURL endpoints in `.vision-proxy.json` instead of forcing users to set env vars each run.
+description: "Persist user-facing fallback model lists and provider baseURL endpoints in `.vision-proxy.json` instead of forcing users to set env vars each run."
 area: backend
 tags: [config, fallback, baseURL, provider]
-status: active
+status: complete
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-10-14"

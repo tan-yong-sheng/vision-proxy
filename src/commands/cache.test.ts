@@ -5,12 +5,12 @@
  * respect user-configured cacheSize and cacheMaxAgeDays instead of defaults.
  */
 import { strict as assert } from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { cacheStatus, cachePruneCmd } from "./cache.ts";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureCache, resetCacheState } from "../cache.ts";
+import { cachePruneCmd, cacheStatus } from "./cache.ts";
 
 let home: string;
 let cwd: string;
@@ -38,10 +38,12 @@ afterEach(async () => {
 async function writeUserConfig(config: object): Promise<void> {
 	const dir = path.join(home, ".vision-proxy");
 	await mkdir(dir, { recursive: true });
-	await writeFile(path.join(dir, "config.json"), JSON.stringify(config, null, 2) + "\n", "utf8");
+	await writeFile(path.join(dir, "config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-async function writeCacheEntries(entries: Record<string, { value: string; createdAt: number }>): Promise<void> {
+async function writeCacheEntries(
+	entries: Record<string, { value: string; createdAt: number }>,
+): Promise<void> {
 	const dir = path.dirname(cacheFile);
 	await mkdir(dir, { recursive: true });
 	await writeFile(cacheFile, JSON.stringify(entries), "utf8");

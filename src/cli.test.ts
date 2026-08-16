@@ -5,7 +5,7 @@
  * block is printed (and that exit code stays 0).
  */
 import { strict as assert } from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { main } from "./cli.ts";
 
 let savedWrite: typeof process.stdout.write;
@@ -32,7 +32,7 @@ async function run(args: string[]): Promise<string> {
 	capture();
 	await main(args);
 	const text = out;
-	const code = process.exitCode ?? 0;
+	const _code = process.exitCode ?? 0;
 	restore();
 	return text;
 }

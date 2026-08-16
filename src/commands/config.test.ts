@@ -6,11 +6,11 @@
  * (writing `provider` into the project file) and `configValidate`.
  */
 import { strict as assert } from "node:assert";
-import { afterEach, beforeEach, describe, it } from "node:test";
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { configInit, configGet, configSet, configValidate } from "./config.ts";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { configGet, configInit, configSet, configValidate } from "./config.ts";
 
 let cwd: string;
 let prevHome: string | undefined;

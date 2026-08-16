@@ -1,0 +1,47 @@
+# Lefthook configuration for vision-proxy.
+#
+# Install the hooks once with `lefthook install` (or `pnpm lefthook install`).
+# The pre-commit group scans staged changes for secrets and formatting/lint
+# issues before they reach the repository. The fallow gate audits AI-generated
+# changes on touched files per AGENTS.md.
+#
+# Docs: https://lefthook.dev/
+
+min_version: "2.0.0"
+
+colors: true
+
+pre-commit:
+  parallel: false
+  commands:
+    # Secret scanning on staged diff. Uses .betterleaks.toml + .betterleaksignore.
+    betterleaks:
+      run: betterleaks git --staged --no-banner
+      fail_text: "Secrets detected in staged changes - remove or mark with betterleaks:allow"
+      glob: "*.{ts,js,mjs,json,yml,yaml,md}"
+      stage_fixed: false
+
+    # Formatting + lint + import organization via Biome (auto-fix in place).
+    biome:
+      run: biome check --write --no-errors-on-unmatched
+      fail_text: "Biome reported issues it could not auto-fix - run `biome check --write` and review"
+      glob: "*.{ts,js,mjs,json,jsonc,yml,yaml}"
+      # Stage Biome's in-place auto-fixes so the commit ships the fixed content
+      # rather than the pre-fix staged version.
+      stage_fixed: true
+
+    # Fallow audit gate for AI-generated changes (per AGENTS.md convention).
+    fallow:
+      run: fallow audit --format json --quiet --explain --gate-marker agent
+      fail_text: "Fallow audit failed on touched files - fix reported findings before committing"
+      skip:
+        - ref: "HEAD" # no diff on an empty repo / first commit
+      env:
+        FALLOW_QUIET: "1"
+
+pre-push:
+  commands:
+    # Full secret sweep before pushing (cheap insurance for the whole tree).
+    betterleaks:
+      run: betterleaks dir --no-banner .
+      fail_text: "Secrets detected in the working tree - remove before pushing"

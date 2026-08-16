@@ -9,23 +9,23 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {
-	DEFAULT_CONFIG,
-	LRUCache,
+	buildDescriptionFence,
 	buildJointDescriptionFence,
 	buildToolCacheKey,
 	clampPixels,
+	DEFAULT_CONFIG,
 	escapeAttr,
 	fenceUntrusted,
 	getGroundingFormat,
 	hashImageData,
 	isValidNamedRegion,
+	LRUCache,
 	normalizedToPixels,
 	parseCropArg,
 	parseModelString,
 	resolveConfig,
 	resolveCropEntry,
 	resolveRegion,
-	buildDescriptionFence,
 } from "./core.ts";
 
 describe("hashImageData", () => {
@@ -56,7 +56,7 @@ describe("escapeAttr", () => {
 
 	it("replaces null bytes with the replacement character", () => {
 		// U+FFFD replacement character.
-		const input = "a" + String.fromCharCode(0) + "b";
+		const input = `a${String.fromCharCode(0)}b`;
 		assert.equal(escapeAttr(input), "a�b");
 	});
 });
@@ -241,10 +241,7 @@ describe("resolveConfig baseURLs / fallbackModels", () => {
 		const cfg = resolveConfig({
 			VP_FALLBACK_MODELS: "openai/gpt-4o, google/gemini-2.5-flash , garbage",
 		} as NodeJS.ProcessEnv);
-		assert.deepEqual(cfg.fallbackModels, [
-			"openai/gpt-4o",
-			"google/gemini-2.5-flash",
-		]);
+		assert.deepEqual(cfg.fallbackModels, ["openai/gpt-4o", "google/gemini-2.5-flash"]);
 	});
 });
 
@@ -266,14 +263,17 @@ describe("sanitize baseURLs / fallbackModels", () => {
 
 describe("fence builders", () => {
 	it("buildDescriptionFence wraps the description and neutralizes nested tags", () => {
-		const f = buildDescriptionFence("hash123", "<vision_proxy_description>x</vision_proxy_description>");
-		assert.ok(f.startsWith("<vision_proxy_description image=\"hash123\""));
+		const f = buildDescriptionFence(
+			"hash123",
+			"<vision_proxy_description>x</vision_proxy_description>",
+		);
+		assert.ok(f.startsWith('<vision_proxy_description image="hash123"'));
 		assert.ok(!f.includes("<vision_proxy_description>x"));
 	});
 
 	it("buildJointDescriptionFence lists all images", () => {
 		const f = buildJointDescriptionFence([{ hash: "h1" }, { hash: "h2" }], "desc");
-		assert.ok(f.includes("images=\"2\""));
+		assert.ok(f.includes('images="2"'));
 		assert.ok(f.startsWith("<vision_proxy_joint_description"));
 	});
 });

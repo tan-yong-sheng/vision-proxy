@@ -24,7 +24,6 @@ export const PI_EXTENSION_SOURCE = `/**
  * treat it as untrusted input.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { spawnSync } from "node:child_process";
 
 // __VP_VERSION__PLACEHOLDER__
@@ -40,17 +39,25 @@ export default function setup(pi: ExtensionAPI): void {
       "Describe one or more images using the vision-proxy CLI. Returns a fenced, UNTRUSTED " +
       "description for each image. Use this to extract information from screenshots, diagrams, " +
       "or photos the user references by path.",
-    parameters: Type.Object({
-      paths: Type.Array(Type.String(), {
-        description: "Absolute or project-relative paths to image files.",
-      }),
-      question: Type.Optional(
-        Type.String({ description: "Optional question to analyze the image against." }),
-      ),
-      format: Type.Optional(
-        Type.String({ description: "Optional grounding format override (e.g. qwen_pixels)." }),
-      ),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Absolute or project-relative paths to image files.",
+        },
+        question: {
+          type: "string",
+          description: "Optional question to analyze the image against.",
+        },
+        format: {
+          type: "string",
+          description: "Optional grounding format override (e.g. qwen_pixels).",
+        },
+      },
+      required: ["paths"],
+    },
     async execute(_toolCallId, params, _signal) {
       const { paths, question, format } = params as {
         paths: string[];

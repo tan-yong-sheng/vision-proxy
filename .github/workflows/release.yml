@@ -1,0 +1,98 @@
+name: release
+
+# Build per-OS/arch tarballs of the compiled CLI (Track A: JS dist + Node 22)
+# and publish them to GitHub Releases alongside a sha256 manifest.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-14
+          - target: windows-x64
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        # --ignore-scripts skips the `prepare` build; we build explicitly below.
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Build dist
+        run: npm run build
+
+      - name: Prune dev dependencies
+        # The tarball ships only production deps; typescript/@types are build-time only.
+        run: npm prune --omit=dev --no-audit --no-fund
+
+      - name: Stage release tree
+        shell: bash
+        run: |
+          mkdir -p stage/vision-proxy
+          cp -R dist node_modules package.json stage/vision-proxy/
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp scripts/vp.cmd stage/vision-proxy/vp.cmd
+          else
+            cp scripts/vp stage/vision-proxy/vp
+            chmod +x stage/vision-proxy/vp
+          fi
+
+      - name: Package
+        shell: bash
+        run: tar -C stage -czf "vision-proxy-${{ matrix.target }}.tar.gz" vision-proxy
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision-proxy-${{ matrix.target }}
+          path: vision-proxy-${{ matrix.target }}.*
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum vision-proxy-* > sha256sum.txt
+          cat sha256sum.txt
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/vision-proxy-*.tar.gz
+            artifacts/sha256sum.txt
+          generate_release_notes: true

@@ -12,13 +12,10 @@
  * module layers the file lookups above them and exposes a single
  * `loadConfig` entry point used by every command.
  */
-import {
-	resolveConfig,
-	readPersistentFile,
-	type VisionConfig,
-} from "./core.ts";
+
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { readPersistentFile, resolveConfig, type VisionConfig } from "./core.ts";
 
 export interface LoadedConfig {
 	config: VisionConfig;
@@ -42,11 +39,9 @@ export async function readJsonFile(file: string): Promise<Partial<VisionConfig> 
 }
 
 /** Load the effective config, layering explicit > project > user > env > default. */
-export async function loadConfig(opts: {
-	explicitConfigPath?: string;
-	cwd?: string;
-	env?: NodeJS.ProcessEnv;
-} = {}): Promise<LoadedConfig> {
+export async function loadConfig(
+	opts: { explicitConfigPath?: string; cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<LoadedConfig> {
 	const cwd = opts.cwd ?? process.cwd();
 	const env = opts.env ?? process.env;
 

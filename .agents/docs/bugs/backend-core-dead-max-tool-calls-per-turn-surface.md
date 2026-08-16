@@ -4,7 +4,7 @@ title: Core exposes maxToolCallsPerTurn configuration without enforcement
 description: "VisionConfig and env overrides expose maxToolCallsPerTurn but no CLI or adapter path enforces it."
 area: backend
 tags: [config, dead-code, core, limits]
-status: open
+status: fixed
 pre-existing: true
 owning_branch: configurable-analyze-image-limit
 created: "2026-08-15"

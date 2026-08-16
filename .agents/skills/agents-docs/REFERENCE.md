@@ -50,7 +50,7 @@ Status values:
 |---|---|---|---|
 | research | `active` | `complete`, `dead-end` | complete links to its plan via `superseded_by` |
 | plan | `active`, `deferred` | `complete`, `dropped` | deferred stays in `plans/`, never archived while deferred |
-| worktree | `active` | `merged`, `abandoned` | merged links the merge commit + dossiers |
+| worktree | `active` | `landed`, `abandoned` | landed links the branch commit + dossiers; use after worker_done but before the actual git merge |
 | bug | `open` | `fixed`, `wontfix` | a regression files a NEW bug, never un-archives; use `pre-existing: true` for bugs that reproduce on the base branch |
 | coverage | `active` | `retired` | retired when the covered surface disappears |
 | dossier | `verified` | `retired` | retired when its matrix retires |
@@ -173,7 +173,7 @@ Three automatic rules + one advisory:
 |---|---|---|
 | `research/` | concluded - promoted to a plan or dead-end. Set `status: complete` (+ `superseded_by` if promoted) and move to `archive/research-*.md` | in archive, superseded + past TTL |
 | `plans/` | `complete` (full execution, links to verification) or `dropped` / `deferred`. Moves to `archive/plan-*.md` | deferred past a max-defer window -> mark abandoned, archive, then GC |
-| `worktrees/` | `merged` (link merge commit + dossiers) or `abandoned`. Moves to `archive/worktree-*.md` | merged/abandoned worktrees are the prime GC candidates |
+| `worktrees/` | `landed` (link branch commit + dossiers) or `abandoned`. Moves to `archive/worktree-*.md` | landed/abandoned worktrees are the prime GC candidates |
 | `bugs/` | `fixed` (link fix commit + dossier) or `wontfix`. Moves to `archive/bug-*.md` | fixed bugs past TTL |
 | `qa/` | coverage matrix retired when the surface disappears; dossiers retired when `stale_after` passes or their matrix retires | evidence is longest-retained; GC only well past TTL |
 | `archive/` | - | the only folder that ever deletes - superseded AND past TTL; `log.md` keeps a trace line |
@@ -260,7 +260,7 @@ Docs-first applies at every scale: sync the doc before editing the HTML.
 
 ### Parallel-execution handoff
 
-agents-docs owns the seam to parallel work and never reimplements orchestration. An approved plan doc is the contract handed to the orchestration skill (`worktrunk-orca-delegation`). Each worktree gets a `worktrees/` doc tracking `branch -> active -> merged`; merged worktrees archive with dossier links; bugs found mid-execution enter `bugs/` from the side. The plan doc therefore carries tasks + verification criteria that worktree docs and qa/ dossiers reference.
+agents-docs owns the seam to parallel work and never reimplements orchestration. An approved plan doc is the contract handed to the orchestration skill (`worktrunk-orca-delegation`). Each worktree gets a `worktrees/` doc tracking `branch -> active -> landed`; landed worktrees archive with dossier links; bugs found mid-execution enter `bugs/` from the side. The plan doc therefore carries tasks + verification criteria that worktree docs and qa/ dossiers reference.
 
 ## 6. Reviewability design (flat authoring, generated views)
 

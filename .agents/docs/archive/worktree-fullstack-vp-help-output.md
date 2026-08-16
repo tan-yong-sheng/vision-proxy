@@ -4,7 +4,7 @@ title: vp-help-output
 description: "Add a `--help` / `-h` guard before each subcommand switch in `src/cli.ts` so `vp provider --help`, `vp cache --help`, and `vp config --help` print subcommand-specific help instead of `unknown subcommand`."
 area: fullstack
 tags: [CLI, help, UX]
-status: merged
+status: landed
 branch: vp-help-output
 base: main
 stack_position: 1

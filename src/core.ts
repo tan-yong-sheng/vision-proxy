@@ -46,7 +46,6 @@ export interface VisionConfig {
 	cacheMaxAgeDays: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
-	maxToolCallsPerTurn: number;
 	/** Per-provider base URL overrides, e.g. { "openai": "http://localhost:8000/v1" }. */
 	baseURLs: Record<string, string>;
 	/** Alternate `provider/model-id` strings to try when the primary model fails. */
@@ -89,9 +88,7 @@ export function buildAnalyzeResult(
 		.map((p, i) => {
 			const meta = _imageMeta.get(p.hash);
 			const dims = meta ? ` width="${meta.width}" height="${meta.height}"` : "";
-			const filename = meta?.filename
-				? ` filename="${escapeAttr(meta.filename)}"`
-				: "";
+			const filename = meta?.filename ? ` filename="${escapeAttr(meta.filename)}"` : "";
 			return `<vision_proxy_description image_index="${i}"${dims}${filename}>${p.hash}</vision_proxy_description>`;
 		})
 		.join("\n");
@@ -251,15 +248,11 @@ export function isGroundingExcluded(providerModel: string): boolean {
 }
 
 export function parseGroundingFormat(raw: string): GroundingFormat | null {
-	if ((VALID_GROUNDING_FORMATS as readonly string[]).includes(raw))
-		return raw as GroundingFormat;
+	if ((VALID_GROUNDING_FORMATS as readonly string[]).includes(raw)) return raw as GroundingFormat;
 	return null;
 }
 
-function parse4Numbers(
-	form: string,
-	prefix: string,
-): number[] | string {
+function parse4Numbers(form: string, prefix: string): number[] | string {
 	const parts = form.slice(prefix.length).split(",").map(Number);
 	if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n)))
 		return `Error: expected 4 numbers after "${prefix}"`;
@@ -360,7 +353,6 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-2.5-pro": { format: "gemini_normalized_1000" },
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
-	maxToolCallsPerTurn: -1,
 	baseURLs: {},
 	fallbackModels: [],
 };
@@ -385,7 +377,6 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"cacheMaxAgeDays",
 	"pHashSimilarityThreshold",
 	"groundingModels",
-	"maxToolCallsPerTurn",
 	"baseURLs",
 	"fallbackModels",
 ]);
@@ -398,9 +389,7 @@ function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
 	return filtered as Partial<VisionConfig>;
 }
 
-export async function readPersistentFile(
-	agentDir?: string,
-): Promise<Partial<VisionConfig>> {
+export async function readPersistentFile(agentDir?: string): Promise<Partial<VisionConfig>> {
 	const path = getPersistentConfigPath(agentDir);
 	try {
 		const raw = await readFile(path, "utf8");
@@ -434,7 +423,7 @@ export async function writePersistentFile(
 	try {
 		const path = getPersistentConfigPath(agentDir);
 		await mkdir(dirname(path), { recursive: true });
-		await writeFile(path, JSON.stringify(config, null, 2) + "\n", "utf8");
+		await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 	} catch {
 		// Best effort — don't break the CLI if disk write fails
 	}
@@ -488,11 +477,7 @@ function isOutOfRange(n: number, min: number, max: number): boolean {
 	return false;
 }
 
-function parseIntOverride(
-	value: string | undefined,
-	min: number,
-	max: number,
-): number | undefined {
+function parseIntOverride(value: string | undefined, min: number, max: number): number | undefined {
 	if (value === undefined) return undefined;
 	const n = Number.parseInt(value, 10);
 	if (isOutOfRange(n, min, max)) return undefined;
@@ -510,22 +495,11 @@ function parseFloatOverride(
 	return n;
 }
 
-function parseToolCallsOverride(
-	value: string | undefined,
-): number | undefined {
-	if (value === undefined) return undefined;
-	const n = Number(value);
-	if (Number.isFinite(n) && n > 0) return Math.floor(n);
-	return -1;
-}
-
 /**
  * Parse `VP_BASE_URLS` — a comma-separated list of `provider=url` pairs into a
  * per-provider base URL map. Invalid entries are skipped.
  */
-function parseBaseUrlsOverride(
-	value: string | undefined,
-): Record<string, string> | undefined {
+function parseBaseUrlsOverride(value: string | undefined): Record<string, string> | undefined {
 	if (value === undefined) return undefined;
 	const out: Record<string, string> = {};
 	for (const pair of value.split(",")) {
@@ -543,9 +517,7 @@ function parseBaseUrlsOverride(
  * Parse `VP_FALLBACK_MODELS` — a comma-separated list of `provider/model-id`
  * strings. Malformed entries are skipped.
  */
-function parseFallbackModelsOverride(
-	value: string | undefined,
-): string[] | undefined {
+function parseFallbackModelsOverride(value: string | undefined): string[] | undefined {
 	if (value === undefined) return undefined;
 	const out: string[] = [];
 	for (const raw of value.split(",")) {
@@ -559,9 +531,7 @@ function parseFallbackModelsOverride(
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
-export function readEnvOverrides(
-	env: NodeJS.ProcessEnv = process.env,
-): Partial<VisionConfig> {
+export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<VisionConfig> {
 	const overrides: Partial<VisionConfig> = {};
 
 	assignIfDefined(overrides, "mode", parseModeOverride(env.VP_MODE));
@@ -570,27 +540,15 @@ export function readEnvOverrides(
 		assignIfDefined(overrides, "provider", modelOverride.provider);
 		assignIfDefined(overrides, "modelId", modelOverride.modelId);
 	}
-	assignIfDefined(
-		overrides,
-		"includeContext",
-		parseBooleanOverride(env.VP_INCLUDE_CONTEXT),
-	);
+	assignIfDefined(overrides, "includeContext", parseBooleanOverride(env.VP_INCLUDE_CONTEXT));
 	assignIfDefined(overrides, "tool", parseToolOverride(env.VP_TOOL));
 	assignIfDefined(
 		overrides,
 		"maxImagesPerCall",
 		parseIntOverride(env.VP_MAX_IMAGES_PER_CALL, 1, 20),
 	);
-	assignIfDefined(
-		overrides,
-		"maxBatch",
-		parseIntOverride(env.VP_MAX_BATCH, 1, 10),
-	);
-	assignIfDefined(
-		overrides,
-		"cacheSize",
-		parseIntOverride(env.VP_CACHE_SIZE, 0, 500),
-	);
+	assignIfDefined(overrides, "maxBatch", parseIntOverride(env.VP_MAX_BATCH, 1, 10));
+	assignIfDefined(overrides, "cacheSize", parseIntOverride(env.VP_CACHE_SIZE, 0, 500));
 	assignIfDefined(
 		overrides,
 		"cacheMaxAgeDays",
@@ -601,21 +559,8 @@ export function readEnvOverrides(
 		"pHashSimilarityThreshold",
 		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
-	assignIfDefined(
-		overrides,
-		"maxToolCallsPerTurn",
-		parseToolCallsOverride(env.VP_MAX_TOOL_CALLS_PER_TURN),
-	);
-	assignIfDefined(
-		overrides,
-		"baseURLs",
-		parseBaseUrlsOverride(env.VP_BASE_URLS),
-	);
-	assignIfDefined(
-		overrides,
-		"fallbackModels",
-		parseFallbackModelsOverride(env.VP_FALLBACK_MODELS),
-	);
+	assignIfDefined(overrides, "baseURLs", parseBaseUrlsOverride(env.VP_BASE_URLS));
+	assignIfDefined(overrides, "fallbackModels", parseFallbackModelsOverride(env.VP_FALLBACK_MODELS));
 
 	return overrides;
 }
@@ -629,7 +574,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxBatch: boolean;
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
-	maxToolCallsPerTurn: boolean;
 	baseURLs: boolean;
 	fallbackModels: boolean;
 } {
@@ -642,7 +586,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		maxBatch: env.VP_MAX_BATCH !== undefined,
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
-		maxToolCallsPerTurn: env.VP_MAX_TOOL_CALLS_PER_TURN !== undefined,
 		baseURLs: env.VP_BASE_URLS !== undefined,
 		fallbackModels: env.VP_FALLBACK_MODELS !== undefined,
 	};
@@ -654,9 +597,7 @@ function isValidModelParts(provider: string, modelId: string): boolean {
 	return true;
 }
 
-export function parseModelString(
-	s: string,
-): { provider: string; modelId: string } | null {
+export function parseModelString(s: string): { provider: string; modelId: string } | null {
 	const slash = s.indexOf("/");
 	if (slash <= 0 || slash >= s.length - 1) return null;
 	const provider = s.slice(0, slash);
@@ -720,23 +661,11 @@ function fallbackGroundingModels(
 	return validated;
 }
 
-function fallbackToolCallsCap(value: unknown): number {
-	if (value === -1) return -1;
-	const n = Number(value);
-	if (Number.isFinite(n) && n > 0) return Math.floor(n);
-	return DEFAULT_CONFIG.maxToolCallsPerTurn;
-}
-
 function fallbackBaseUrls(value: unknown): Record<string, string> {
 	if (!isRecord(value)) return { ...DEFAULT_CONFIG.baseURLs };
 	const out: Record<string, string> = {};
 	for (const [provider, url] of Object.entries(value)) {
-		if (
-			typeof url !== "string" ||
-			!url ||
-			!PROVIDER_PATTERN.test(provider)
-		)
-			continue;
+		if (typeof url !== "string" || !url || !PROVIDER_PATTERN.test(provider)) continue;
 		out[provider] = url;
 	}
 	return out;
@@ -768,12 +697,7 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		DEFAULT_CONFIG.maxImagesPerCall,
 	);
 	safe.maxBatch = fallbackRange(safe.maxBatch, 1, 10, DEFAULT_CONFIG.maxBatch);
-	safe.cacheSize = fallbackRange(
-		safe.cacheSize,
-		0,
-		500,
-		DEFAULT_CONFIG.cacheSize,
-	);
+	safe.cacheSize = fallbackRange(safe.cacheSize, 0, 500, DEFAULT_CONFIG.cacheSize);
 	safe.cacheMaxAgeDays = fallbackRange(
 		safe.cacheMaxAgeDays,
 		0,
@@ -787,7 +711,6 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		DEFAULT_CONFIG.pHashSimilarityThreshold,
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
-	safe.maxToolCallsPerTurn = fallbackToolCallsCap(safe.maxToolCallsPerTurn);
 	safe.baseURLs = fallbackBaseUrls(safe.baseURLs);
 	safe.fallbackModels = fallbackFallbackModels(safe.fallbackModels);
 	return safe;
@@ -802,18 +725,14 @@ export function resolveConfig(
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────
-function isModernImageContent(
-	img: ImageContent | LegacyImage,
-): img is ImageContent {
+function isModernImageContent(img: ImageContent | LegacyImage): img is ImageContent {
 	if (!("data" in img)) return false;
 	if (typeof img.data !== "string") return false;
 	if (typeof (img as ImageContent).mimeType !== "string") return false;
 	return true;
 }
 
-function legacyImageSource(
-	img: ImageContent | LegacyImage,
-): LegacyImage["source"] | undefined {
+function legacyImageSource(img: ImageContent | LegacyImage): LegacyImage["source"] | undefined {
 	return (img as LegacyImage).source;
 }
 
@@ -915,12 +834,6 @@ function maxImageFileBytes(): number {
 	return 10 * 1024 * 1024;
 }
 
-export function maxToolCallsPerTurn(configured?: number): number {
-	const n = Number(configured ?? process.env.VP_MAX_TOOL_CALLS_PER_TURN);
-	if (Number.isFinite(n) && n > 0) return Math.floor(n);
-	return Infinity;
-}
-
 export type ReadImageReason =
 	| "not-an-image"
 	| "denied"
@@ -970,10 +883,7 @@ async function resolvedPath(filePath: string): Promise<string | null> {
 	}
 }
 
-async function insideRoot(
-	resolved: string,
-	root: Promise<string | null>,
-): Promise<boolean> {
+async function insideRoot(resolved: string, root: Promise<string | null>): Promise<boolean> {
 	const r = await root;
 	if (!r) return false;
 	return isInsideOrSame(resolved, r);
@@ -1043,16 +953,13 @@ async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 	return { ok: true, content };
 }
 
-export async function readImageFileWithReason(
-	rawPath: string,
-): Promise<ReadImageResult> {
+export async function readImageFileWithReason(rawPath: string): Promise<ReadImageResult> {
 	const filePath = cleanFilePath(rawPath);
 
 	const mimeType = mimeTypeForExt(filePath);
 	if (!mimeType) return { image: null, reason: "not-an-image" };
 
-	if (!(await isPathAllowed(filePath)))
-		return { image: null, reason: "denied" };
+	if (!(await isPathAllowed(filePath))) return { image: null, reason: "denied" };
 
 	const bytesResult = await readImageBytes(filePath);
 	if (!bytesResult.ok) {
@@ -1080,20 +987,14 @@ const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
 	"too-large": "",
 };
 
-export function describeReadReason(
-	reason: ReadImageReason,
-	bytes?: number,
-): string {
+export function describeReadReason(reason: ReadImageReason, bytes?: number): string {
 	if (reason === "too-large") {
 		return `${bytes ?? "?"} bytes exceeds limit (override with VP_MAX_IMAGE_BYTES)`;
 	}
 	return READ_REASON_MESSAGES[reason];
 }
 
-export function stripImagePaths(
-	text: string,
-	paths: readonly string[],
-): string {
+export function stripImagePaths(text: string, paths: readonly string[]): string {
 	if (paths.length === 0) return text;
 
 	const sorted = [...paths].sort((a, b) => b.length - a.length);
@@ -1119,13 +1020,10 @@ export function splitSubcommand(arg: string): { sub: string; value: string } {
 	return { sub: match[1]!.toLowerCase(), value: (match[2] ?? "").trim() };
 }
 
-const FENCE_TAG_RE =
-	/<\/?vision_proxy_(?:description|analysis|joint_description)\b[^>]*>/gi;
+const FENCE_TAG_RE = /<\/?vision_proxy_(?:description|analysis|joint_description)\b[^>]*>/gi;
 
 export function fenceUntrusted(text: string): string {
-	return text.replace(FENCE_TAG_RE, (m) =>
-		m.replace(/</g, "<​").replace(/>/g, ">​"),
-	);
+	return text.replace(FENCE_TAG_RE, (m) => m.replace(/</g, "<​").replace(/>/g, ">​"));
 }
 
 export function escapeAttr(s: string): string {
@@ -1163,10 +1061,10 @@ interface MessageLike {
 	content: unknown;
 }
 
-export function buildConversationContext(
-	messages: readonly MessageLike[],
-): string {
-	const recent = messages.filter((e) => e.role === "user" || e.role === "assistant").slice(-RECENT_MESSAGE_COUNT);
+export function buildConversationContext(messages: readonly MessageLike[]): string {
+	const recent = messages
+		.filter((e) => e.role === "user" || e.role === "assistant")
+		.slice(-RECENT_MESSAGE_COUNT);
 	const lines = recent
 		.map((entry) => {
 			const text = extractText(entry.content);
@@ -1181,13 +1079,10 @@ export function buildConversationContext(
 
 function truncateContext(result: string): string {
 	if (result.length <= CONTEXT_MAX_CHARS) return result;
-	return "…" + result.slice(-CONTEXT_MAX_CHARS);
+	return `…${result.slice(-CONTEXT_MAX_CHARS)}`;
 }
 
-export function modelLabel(config: {
-	provider: string;
-	modelId: string;
-}): string {
+export function modelLabel(config: { provider: string; modelId: string }): string {
 	return `${config.provider}/${config.modelId}`;
 }
 
@@ -1224,9 +1119,7 @@ export function shouldStripImages(
 }
 
 // ── Image dimension extraction ─────────────────────────────────────────────
-export function extractDimensions(
-	data: Buffer,
-): { width: number; height: number } | undefined {
+export function extractDimensions(data: Buffer): { width: number; height: number } | undefined {
 	try {
 		const result = imageSize(data);
 		if (result.width && result.height) {
@@ -1238,20 +1131,14 @@ export function extractDimensions(
 	return undefined;
 }
 
-function safeDimensions(
-	data: Buffer,
-): { width: number; height: number } | undefined {
+function safeDimensions(data: Buffer): { width: number; height: number } | undefined {
 	const dims = extractDimensions(data);
 	if (!dims) return undefined;
-	if (dims.width > MAX_IMAGE_DIMENSION || dims.height > MAX_IMAGE_DIMENSION)
-		return undefined;
+	if (dims.width > MAX_IMAGE_DIMENSION || dims.height > MAX_IMAGE_DIMENSION) return undefined;
 	return dims;
 }
 
-function backfillFilename(
-	existing: StoredImageMeta,
-	filename: string | undefined,
-): void {
+function backfillFilename(existing: StoredImageMeta, filename: string | undefined): void {
 	if (filename && !existing.filename) {
 		existing.filename = filename;
 	}
@@ -1268,11 +1155,7 @@ function decodeImageBuffer(imageBufferOrData: Buffer | string): Buffer | undefin
 	return Buffer.from(headerB64.slice(0, aligned), "base64");
 }
 
-function storeNewImageMeta(
-	hash: string,
-	buf: Buffer,
-	filename: string | undefined,
-): void {
+function storeNewImageMeta(hash: string, buf: Buffer, filename: string | undefined): void {
 	const dims = safeDimensions(buf);
 	if (!dims) return;
 	_imageMeta.set(hash, { width: dims.width, height: dims.height, filename });
@@ -1302,10 +1185,7 @@ export function storeImageMeta(
 }
 
 // ── Crop resolution ───────────────────────────────────────────────────────
-const REGION_MAP: Record<
-	NamedRegion,
-	{ x: number; y: number; width: number; height: number }
-> = {
+const REGION_MAP: Record<NamedRegion, { x: number; y: number; width: number; height: number }> = {
 	"top-left": { x: 0.0, y: 0.0, width: 0.5, height: 0.5 },
 	"top-right": { x: 0.5, y: 0.0, width: 0.5, height: 0.5 },
 	"bottom-left": { x: 0.0, y: 0.5, width: 0.5, height: 0.5 },
@@ -1344,10 +1224,7 @@ export function normalizedToPixels(
 	const x = Math.max(0, Math.round(norm.x * imgWidth));
 	const y = Math.max(0, Math.round(norm.y * imgHeight));
 	const x2 = Math.min(imgWidth, Math.round((norm.x + norm.width) * imgWidth));
-	const y2 = Math.min(
-		imgHeight,
-		Math.round((norm.y + norm.height) * imgHeight),
-	);
+	const y2 = Math.min(imgHeight, Math.round((norm.y + norm.height) * imgHeight));
 	const w = x2 - x;
 	const h = y2 - y;
 	if (w <= 0 || h <= 0) return null;
@@ -1369,9 +1246,7 @@ export function clampPixels(
 	return { x, y, width: w, height: h };
 }
 
-type ResolvedCropResult =
-	| { ok: true; crop: ResolvedCrop }
-	| { ok: false; label: string };
+type ResolvedCropResult = { ok: true; crop: ResolvedCrop } | { ok: false; label: string };
 
 function cropFromRegion(
 	crop: Extract<CropEntry, { region: NamedRegion }>,
@@ -1451,6 +1326,7 @@ export function resolveCropEntry(
 }
 
 const TELEMETRY_MAX_LEN = 200;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally matches C0 control chars and DEL for log sanitization
 const TELEMETRY_UNSAFE_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
 export function sanitizeForLog(s: string, maxLen = TELEMETRY_MAX_LEN): string {
@@ -1480,14 +1356,8 @@ async function safeCropImage(
 	return img.crop(crop.x, crop.y, crop.width, crop.height);
 }
 
-async function encodeCroppedImage(
-	cropped: ImageScriptImage,
-	mimeType?: string,
-): Promise<Buffer> {
-	const encoded =
-		mimeType === "image/png"
-			? await cropped.encode(1)
-			: await cropped.encodeJPEG(90);
+async function encodeCroppedImage(cropped: ImageScriptImage, mimeType?: string): Promise<Buffer> {
+	const encoded = mimeType === "image/png" ? await cropped.encode(1) : await cropped.encodeJPEG(90);
 	return Buffer.from(encoded);
 }
 
@@ -1510,26 +1380,37 @@ export function imageContentToBuffer(img: ImageContent): Buffer {
 	return Buffer.from(img.data, "base64");
 }
 
-export function bufferToImageContent(
-	buf: Buffer,
-	originalMimeType?: string,
-): ImageContent {
+export function bufferToImageContent(buf: Buffer, originalMimeType?: string): ImageContent {
 	const mimeType = originalMimeType ?? "image/png";
 	return { type: "image", data: buf.toString("base64"), mimeType };
 }
 
 // ── Perceptual hashing (imghash) ────────────────────────────────────────────
-type ImghashModule = { default?: { hash: (input: string | Buffer, bits?: number | null, format?: string) => Promise<string> } };
-let _imghash: ((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>) | null = null;
+type ImghashModule = {
+	default?: {
+		hash: (input: string | Buffer, bits?: number | null, format?: string) => Promise<string>;
+	};
+};
+let _imghash:
+	| ((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>)
+	| null = null;
 let _imghashLoadAttempted = false;
 
-async function loadImghash(): Promise<((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>) | null> {
+async function loadImghash(): Promise<
+	((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>) | null
+> {
 	if (_imghash) return _imghash;
 	if (_imghashLoadAttempted) return null;
 	_imghashLoadAttempted = true;
 	try {
 		const mod = (await import("imghash")) as unknown as ImghashModule;
-		_imghash = mod.default?.hash ?? (mod as unknown as ((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>));
+		_imghash =
+			mod.default?.hash ??
+			(mod as unknown as (
+				input: string | Buffer,
+				bits?: number | null,
+				format?: string,
+			) => Promise<string>);
 		return _imghash;
 	} catch {
 		return null;
@@ -1563,26 +1444,18 @@ export function buildToolCacheKey(
 	questionHash: string,
 	modelId: string,
 ): string {
-	return `${sortedHashes.join("+")}${cropSig ? "#crop:" + cropSig : ""}?q=${questionHash}&m=${modelId}`;
+	return `${sortedHashes.join("+")}${cropSig ? `#crop:${cropSig}` : ""}?q=${questionHash}&m=${modelId}`;
 }
 
 // ── Fence builders ────────────────────────────────────────────────────────
-function addImageMetaParts(
-	parts: string[],
-	meta: ImageMeta,
-	crop?: ResolvedCrop,
-): void {
+function addImageMetaParts(parts: string[], meta: ImageMeta, crop?: ResolvedCrop): void {
 	const width = crop ? crop.width : meta.width;
 	const height = crop ? crop.height : meta.height;
 	parts.push(`width="${width}"`, `height="${height}"`);
 	if (meta.filename) parts.push(`filename="${escapeAttr(meta.filename)}"`);
 }
 
-function buildFenceParts(
-	hash: string,
-	meta?: ImageMeta,
-	crop?: ResolvedCrop,
-): string[] {
+function buildFenceParts(hash: string, meta?: ImageMeta, crop?: ResolvedCrop): string[] {
 	const imageAttr = crop ? `${hash}#crop:${cropSignature(crop)}` : hash;
 	const parts: string[] = [`image="${escapeAttr(imageAttr)}"`];
 	if (meta) addImageMetaParts(parts, meta, crop);
@@ -1623,9 +1496,7 @@ export function getGroundingFormat(
 	return config.groundingModels[key]?.format ?? "none";
 }
 
-export function effectiveGroundingFormat(
-	config: VisionConfig,
-): GroundingFormat | undefined {
+export function effectiveGroundingFormat(config: VisionConfig): GroundingFormat | undefined {
 	const fmt = getGroundingFormat(config, config.provider, config.modelId);
 	return fmt !== "none" ? fmt : undefined;
 }
@@ -1674,9 +1545,7 @@ export function buildJointDescriptionFence(
 	return `<vision_proxy_joint_description ${parts.join(" ")}>\n${fenceUntrusted(description)}\n</vision_proxy_joint_description>`;
 }
 
-export function extractVersion(
-	filename: string,
-): { prefix: string; version: number } | null {
+export function extractVersion(filename: string): { prefix: string; version: number } | null {
 	const base = basename(filename, extname(filename));
 	const match = base.match(/^(.*?)(\d+(?:\.\d+)?)$/);
 	if (!match) return null;
@@ -1709,10 +1578,7 @@ function hasVersionedSequence(groups: Map<string, number[]>): boolean {
 	return false;
 }
 
-function hasNumberedSequence(
-	basenames: string[],
-	pattern: RegExp,
-): boolean {
+function hasNumberedSequence(basenames: string[], pattern: RegExp): boolean {
 	return basenames.every((b) => pattern.test(b)) && basenames.length >= 2;
 }
 
@@ -1733,29 +1599,17 @@ function pushPairHints(hints: string[], basenames: string[]): void {
 	}
 }
 
-function hasAnyNumberedSequence(
-	basenames: string[],
-	patterns: RegExp[],
-): boolean {
+function hasAnyNumberedSequence(basenames: string[], patterns: RegExp[]): boolean {
 	for (const pattern of patterns) {
 		if (hasNumberedSequence(basenames, pattern)) return true;
 	}
 	return false;
 }
 
-function pushSequenceHints(
-	hints: string[],
-	basenames: string[],
-	filenames: string[],
-): void {
-	if (hasVersionedSequence(buildVersionGroups(filenames)))
-		hints.push("versioned sequence");
-	const numberedPatterns = [
-		/^.*_(\d+)(\.[a-z]+)?$/,
-		/^.*-(\d+)(\.[a-z]+)?$/,
-	];
-	if (hasAnyNumberedSequence(basenames, numberedPatterns))
-		hints.push("numbered sequence");
+function pushSequenceHints(hints: string[], basenames: string[], filenames: string[]): void {
+	if (hasVersionedSequence(buildVersionGroups(filenames))) hints.push("versioned sequence");
+	const numberedPatterns = [/^.*_(\d+)(\.[a-z]+)?$/, /^.*-(\d+)(\.[a-z]+)?$/];
+	if (hasAnyNumberedSequence(basenames, numberedPatterns)) hints.push("numbered sequence");
 	if (hasDateSequence(basenames, /^\d{4}-\d{2}-\d{2}[_ ].*\.[a-z]+$/))
 		hints.push("time-ordered sequence");
 }

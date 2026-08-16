@@ -66,16 +66,16 @@ Single worktree. Branch: `feat/research-evidence-validation` (already created; r
 
 Tasks:
 
-- [ ] Extract `scripts/lib/` (frontmatter, scanner, markdown utils) from `docs.js`; all existing commands pass unchanged
-- [ ] Add `scripts/evidence.js` with rules 1-3 and structured flag output
-- [ ] Wire the completion gate into `docs.js archive --status complete` for research docs
-- [ ] Update `REFERENCE.md` template + `SKILL.md` guidance
-- [ ] Regression: validator flags the 3 archived research docs; passes the new research doc
+- [x] Extract `scripts/lib/` (frontmatter, scanner, markdown utils) from `docs.js`; all existing commands pass unchanged
+- [x] Add `scripts/evidence.js` with rules 1-3 and structured flag output
+- [x] Wire the completion gate into `docs.js archive --status complete` for research docs
+- [x] Update `REFERENCE.md` template + `SKILL.md` guidance
+- [x] Regression: validator flags the 3 archived research docs; passes the new research doc
 
 ## Risks / open questions
 
 - [ ] False positives on the negative-claim regex for prose about our own repo - mitigated by `local:` citations and rewording; monitor first week of use.
-- [ ] The split must be behavior-preserving; verify by running `status`, `report --check`, `index`, and `archive --help`-level smoke checks before and after.
+- [x] The split must be behavior-preserving; verify by running `status`, `report --check`, `index`, and `archive --help`-level smoke checks before and after. Verified: before/after output identical for status/status-full/report/clean/prune/report-html; only the intentional help-text addition differs.
 
 ## Related
 

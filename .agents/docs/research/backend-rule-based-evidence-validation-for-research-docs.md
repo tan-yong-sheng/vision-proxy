@@ -45,7 +45,7 @@ Can a cheap, rule-based pre-check (no LLM) raise the validity of `.agents/docs/r
 
 ### Failure modes observed in this corpus
 
-- **A - Negative-claim hallucination.** The hook-interception research claimed "no documented PreToolUse hook in the public Claude Code hook API" with zero sources. The official hooks reference documents PreToolUse (finding 2). Negative existence claims about external products are a high-risk hallucination class.
+- **A - Negative-claim hallucination.** The hook-interception research claimed "no documented PreToolUse hook in the public Claude Code hook API" with zero sources. The official hooks reference documents PreToolUse (finding 2, https://docs.anthropic.com/en/docs/claude-code/hooks). Negative existence claims about external products are a high-risk hallucination class.
 - **B - Version incompatibility.** The ACP plan never checked the provider's dependency range; `ai@^6` vs project `ai@7` was discoverable with one metadata command (finding 3).
 - **C - Provenance misclassification.** A community package was framed as Vercel-supported based on a community-provider docs listing.
 - **D - Core capability unverified.** Whether the provider transmits image `FilePart`s (the entire use case) was only tested after merge, via a fake-agent probe.
@@ -70,7 +70,7 @@ Guidance rule (SKILL.md, any ecosystem):
 
 4. Dependency research must record compatibility evidence via the ecosystem-appropriate metadata command (`npm view` / `cargo info` / `go list -m` / ...) plus an `official`/`community` label; the script checks the slot is filled, not the content.
 
-### What layer 1 cannot catch
+### Outside layer 1's reach
 
 Semantic claim-evidence alignment, completeness of options, gamed citations, and runtime capability (failure D) all still need the agent, a probe, or a human. The script emits a structured risk signal; it does not issue verdicts.
 

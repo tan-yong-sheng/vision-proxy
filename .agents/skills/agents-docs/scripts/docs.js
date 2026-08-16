@@ -20,568 +20,52 @@
 //   ensure [--dry-run|--apply]
 //
 // AGENTS_DOCS_ROOT overrides the corpus location (used by tests).
+//
+// Shared internals live in scripts/lib/ (constants, yaml, corpus, links,
+// frontmatter, util) so sibling scripts such as evidence.js can reuse them.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// The 6 canonical lifecycle folders. `ensure` converges the tree to exactly these.
-const FOLDERS = ["research", "plans", "worktrees", "bugs", "qa", "archive"];
-
-// Types map to a home folder for `new`.
-const TYPE_FOLDER = {
-  research: "research",
-  plan: "plans",
-  worktree: "worktrees",
-  bug: "bugs",
-  coverage: "qa",
-};
-
-// Terminal (finished) statuses per type - the only statuses that justify archive.
-const TERMINAL_STATUS = {
-  research: ["complete", "dead-end"],
-  plan: ["complete", "dropped"],
-  worktree: ["landed", "abandoned"],
-  bug: ["fixed", "wontfix"],
-  coverage: ["retired"],
-};
-
-const AREAS = ["frontend", "backend", "fullstack"];
-
-// Default status applied when `new` creates a doc of a given type.
-const DEFAULT_STATUS = {
-  research: "active",
-  plan: "active",
-  worktree: "active",
-  bug: "open",
-  coverage: "active",
-};
-
-// Retention window for archive garbage collection (prune --gc). Days.
-const DEFAULT_TTL_DAYS = 180;
-
-// Freshness threshold for active docs - older than this surfaces as stale. Days.
-const STALE_DAYS = 180;
-
-// Type-specific stale thresholds. Shorter for ephemeral work; longer for evidence.
-const STALE_DAYS_BY_TYPE = {
-  worktree: 14,
-  research: 30,
-  bug: 30,
-  plan: 60,
-  coverage: 90,
-};
-
-// Default terminal status applied by the `abandon` command per type.
-const ABANDON_STATUS = {
-  research: "dead-end",
-  plan: "dropped",
-  worktree: "abandoned",
-  bug: "wontfix",
-  coverage: "retired",
-};
-
-// Docs with entry_point: true are intentionally top-level and do not flag as orphan.
-function isEntryPoint(doc) {
-  return doc.fm.entry_point === true;
-}
-
-// ---------------------------------------------------------------------------
-// Root + corpus location
-// ---------------------------------------------------------------------------
-
-function findRepoRoot() {
-  if (process.env.AGENTS_DOCS_ROOT) {
-    // Test/override: point the corpus elsewhere but keep repo-relative link
-    // resolution anchored at the real repo root (inferred from this script).
-    return walkUpForAgents();
-  }
-  return walkUpForAgents();
-}
-
-function walkUpForAgents() {
-  let dir = __dirname;
-  while (true) {
-    const candidates = [path.join(dir, ".agents", "docs"), path.join(dir, "docs")];
-    if (fs.existsSync(candidates[0])) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) throw new Error("could not locate repo root (.agents/docs)");
-    dir = parent;
-  }
-}
-
-const REPO_ROOT = walkUpForAgents();
-const DOCS =
-  process.env.AGENTS_DOCS_ROOT != null
-    ? path.resolve(process.env.AGENTS_DOCS_ROOT)
-    : path.join(REPO_ROOT, ".agents", "docs");
-
-function docRoot() {
-  if (!fs.existsSync(DOCS)) {
-    fs.mkdirSync(DOCS, { recursive: true });
-  }
-  return DOCS;
-}
-
-// ---------------------------------------------------------------------------
-// YAML subset: parse + serialize (zero deps, deterministic)
-// ---------------------------------------------------------------------------
-
-function parseValue(text) {
-  text = text.trim();
-  if (text === "") return null;
-  if (text.startsWith("[") && text.endsWith("]")) {
-    const inner = text.slice(1, -1).trim();
-    if (inner === "") return [];
-    return splitTopLevel(inner, ",").map((s) => parseScalar(s.trim()));
-  }
-  if (text.startsWith("{") && text.endsWith("}")) {
-    const inner = text.slice(1, -1).trim();
-    const o = {};
-    if (inner !== "") {
-      for (const part of splitTopLevel(inner, ",")) {
-        const idx = part.indexOf(":");
-        if (idx === -1) throw new Error(`bad inline map entry: ${part}`);
-        o[part.slice(0, idx).trim()] = parseScalar(part.slice(idx + 1).trim());
-      }
-    }
-    return o;
-  }
-  return parseScalar(text);
-}
-
-function parseScalar(s) {
-  s = s.trim();
-  if (s === "" || s === "~" || s === "null") return null;
-  if (s.length >= 2 && (s[0] === '"' && s.endsWith('"') || s[0] === "'" && s.endsWith("'"))) {
-    return s.slice(1, -1);
-  }
-  if (s === "true") return true;
-  if (s === "false") return false;
-  if (/^-?\d+$/.test(s)) return Number(s);
-  if (/^-?\d+\.\d+$/.test(s)) return Number(s);
-  return s;
-}
-
-function splitTopLevel(s, sep) {
-  const out = [];
-  let depth = 0;
-  let cur = "";
-  let quote = null;
-  for (const ch of s) {
-    if (quote) {
-      cur += ch;
-      if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      cur += ch;
-      continue;
-    }
-    if (ch === "[" || ch === "{" || ch === "(") depth++;
-    if (ch === "]" || ch === "}" || ch === ")") depth--;
-    if (ch === sep && depth === 0) {
-      out.push(cur);
-      cur = "";
-    } else {
-      cur += ch;
-    }
-  }
-  if (cur.trim() !== "") out.push(cur);
-  return out;
-}
-
-function parseYaml(src) {
-  const lines = src.split("\n");
-  let i = 0;
-  const peek = () => lines[i];
-  const skipBlank = () => {
-    while (i < lines.length && lines[i].trim() === "") i++;
-  };
-  const indentOf = (line) => /^(\s*)/.exec(line)[1].length;
-
-  function node(minIndent) {
-    skipBlank();
-    if (i >= lines.length) return null;
-    const line = peek();
-    const ind = indentOf(line);
-    if (ind < minIndent) return null;
-    const body = line.trim();
-    if (body.startsWith("-")) return list(ind);
-    if (/^[\w.-]+:/.test(body)) return map(ind);
-    i++;
-    return parseScalar(body);
-  }
-
-  function map(ind) {
-    const o = {};
-    while (true) {
-      skipBlank();
-      if (i >= lines.length) break;
-      const line = peek();
-      const ind2 = indentOf(line);
-      if (ind2 < ind) break;
-      if (ind2 > ind) throw new Error(`bad indent: ${line}`);
-      const body = line.trim();
-      const m = /^([\w.-]+):\s*(.*)$/.exec(body);
-      if (!m) throw new Error(`expected key: value - ${line}`);
-      const key = m[1];
-      const rest = m[2].trim();
-      i++;
-      if (rest === "" || rest === "|" || rest === ">") {
-        skipBlank();
-        if (i < lines.length && indentOf(peek()) > ind && peek().trim().startsWith("-")) {
-          o[key] = list(indentOf(peek()));
-        } else if (i < lines.length && indentOf(peek()) > ind) {
-          o[key] = map(indentOf(peek()));
-        } else {
-          o[key] = null;
-        }
-      } else {
-        o[key] = parseValue(rest);
-      }
-    }
-    return o;
-  }
-
-  function list(ind) {
-    const arr = [];
-    while (true) {
-      skipBlank();
-      if (i >= lines.length) break;
-      const line = peek();
-      const ind2 = indentOf(line);
-      if (ind2 < ind) break;
-      if (ind2 > ind) throw new Error(`bad indent in list: ${line}`);
-      const body = line.trim();
-      if (!body.startsWith("- ")) break;
-      const itemRest = body.slice(2).trim();
-      i++;
-      if (itemRest === "") {
-        skipBlank();
-        if (i < lines.length && indentOf(peek()) > ind) {
-          if (peek().trim().startsWith("-")) arr.push(list(indentOf(peek())));
-          else arr.push(map(indentOf(peek())));
-        } else {
-          arr.push(null);
-        }
-        continue;
-      }
-      const m = /^([\w.-]+):\s*(.*)$/.exec(itemRest);
-      if (m) {
-        const o = { [m[1]]: parseValue(m[2]) };
-        while (i < lines.length && indentOf(peek()) === ind + 2) {
-          const cm = /^([\w.-]+):\s*(.*)$/.exec(peek().trim());
-          if (!cm) break;
-          o[cm[1]] = parseValue(cm[2]);
-          i++;
-        }
-        arr.push(o);
-      } else {
-        arr.push(parseValue(itemRest));
-      }
-    }
-    return arr;
-  }
-
-  const v = node(0);
-  if (v === null) return {};
-  return typeof v === "object" && !Array.isArray(v) ? v : {};
-}
-
-function scalarStr(v) {
-  if (v === null || v === undefined) return "null";
-  if (typeof v === "boolean") return v ? "true" : "false";
-  if (typeof v === "number") return String(v);
-  const s = String(v);
-  if (s === "") return '""';
-  if (/[:#\[\]{},&*!|>'"%@`]|^\s|^[-?]|^\d/.test(s)) return JSON.stringify(s);
-  return s;
-}
-
-function valueStr(v) {
-  if (Array.isArray(v)) return `[${v.map((x) => scalarStr(x)).join(", ")}]`;
-  if (v && typeof v === "object") {
-    return `{${Object.entries(v).map(([k, x]) => `${k}: ${scalarStr(x)}`).join(", ")}}`;
-  }
-  return scalarStr(v);
-}
-
-function emit(lines, key, value, ind) {
-  const pad = " ".repeat(ind);
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      lines.push(`${pad}${key}: []`);
-      return;
-    }
-    const inlineable = value.every((x) => x === null || ["string", "number", "boolean"].includes(typeof x));
-    if (inlineable && JSON.stringify(value).length <= 70) {
-      lines.push(`${pad}${key}: [${value.map((x) => scalarStr(x)).join(", ")}]`);
-      return;
-    }
-    lines.push(`${pad}${key}:`);
-    for (const item of value) {
-      if (item && typeof item === "object" && !Array.isArray(item)) {
-        const entries = Object.entries(item);
-        if (entries.length === 0) {
-          lines.push(`${pad}  - {}`);
-        } else {
-          lines.push(`${pad}  - ${entries[0][0]}: ${valueStr(entries[0][1])}`);
-          for (const [ek, ev] of entries.slice(1)) lines.push(`${pad}    ${ek}: ${valueStr(ev)}`);
-        }
-      } else {
-        lines.push(`${pad}  - ${valueStr(item)}`);
-      }
-    }
-  } else if (value && typeof value === "object") {
-    const entries = Object.entries(value);
-    if (entries.length === 0) {
-      lines.push(`${pad}${key}: {}`);
-      return;
-    }
-    if (entries.length <= 4 && JSON.stringify(value).length <= 90) {
-      lines.push(`${pad}${key}: {${entries.map(([k, v]) => `${k}: ${valueStr(v)}`).join(", ")}}`);
-      return;
-    }
-    lines.push(`${pad}${key}:`);
-    for (const [k, v] of entries) emit(lines, k, v, ind + 2);
-  } else {
-    lines.push(`${pad}${key}: ${valueStr(value)}`);
-  }
-}
-
-function serializeYaml(o) {
-  const lines = [];
-  for (const [k, v] of Object.entries(o)) emit(lines, k, v, 0);
-  return lines.join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Doc model
-// ---------------------------------------------------------------------------
-
-function walk(dir, base, out = []) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const abs = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walk(abs, base, out);
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
-      if (entry.name === "index.md" || entry.name === "log.md") continue;
-      out.push({ rel: path.relative(base, abs), abs });
-    }
-  }
-  return out;
-}
-
-function readDoc(entry) {
-  const text = fs.readFileSync(entry.abs, "utf8");
-  let fm = {};
-  let body = text;
-  if (text.startsWith("---\n")) {
-    const end = text.indexOf("\n---", 4);
-    if (end !== -1) {
-      try {
-        fm = parseYaml(text.slice(4, end));
-      } catch (e) {
-        fm = { __parse_error: String(e.message || e) };
-      }
-      body = text.slice(end + 5);
-    }
-  }
-  return { ...entry, text, fm, body };
-}
-
-function scanDocs() {
-  return walk(docRoot(), docRoot()).map(readDoc);
-}
-
-function areaOf(doc) {
-  const fm = doc.fm || {};
-  if (fm.area && AREAS.includes(fm.area)) return fm.area;
-  const m = /^(frontend|backend|fullstack)-/.exec(path.basename(doc.rel));
-  if (m) return m[1];
-  return null;
-}
-
-function statusOf(doc) {
-  return doc.fm.status || "active";
-}
-
-function isTerminalStatus(type, status) {
-  return !!(TERMINAL_STATUS[type] && TERMINAL_STATUS[type].includes(status));
-}
-
-function isArchiveAnomaly(d) {
-  // An archived doc must never silently read as active. With a known type we can
-  // judge against its terminal set; without one (historical), accept any word
-  // that reads finished and flag everything else.
-  if (!d.rel.startsWith("archive/")) return false;
-  const s = statusOf(d);
-  if (s === "deprecated") return false;
-  if (d.fm.type && isTerminalStatus(d.fm.type, s)) return false;
-  const TERMINISH = ["complete", "landed", "fixed", "dead-end", "dropped", "abandoned", "wontfix", "retired", "done"];
-  return !TERMINISH.includes(s);
-}
-
-function daysSince(updated) {
-  const t = new Date(String(updated).replace(/[":]/g, "").slice(0, 10) + "T00:00:00Z").getTime();
-  if (!Number.isFinite(t)) return null;
-  return Math.floor((Date.now() - t) / 86400000);
-}
-
-// ---------------------------------------------------------------------------
-// Links
-// ---------------------------------------------------------------------------
-
-const LINK_RE = /!?\[[^\]]*\]\(([^)\s]+)\)/g;
-const REPO_LINK_RE = /\.agents\/docs\/[\w./-]+\.md/g;
-
-function extractOutbound(text) {
-  const out = [];
-  let m;
-  LINK_RE.lastIndex = 0;
-  while ((m = LINK_RE.exec(text))) out.push(m[1]);
-  REPO_LINK_RE.lastIndex = 0;
-  while ((m = REPO_LINK_RE.exec(text))) out.push(m[0]);
-  return out;
-}
-
-function resolveTarget(href, fromAbs) {
-  let h = href.replace(/^<|>$/g, "").split("#")[0].split("?")[0];
-  if (!h || /^[a-z]+:/i.test(h) || h.startsWith("//")) return null;
-  if (h.startsWith(".agents/")) return path.resolve(REPO_ROOT, h);
-  if (h.startsWith("/")) return path.resolve(REPO_ROOT, h.slice(1));
-  return path.resolve(path.dirname(fromAbs), h);
-}
-
-function buildLinkGraph(docs) {
-  const byAbs = new Map(docs.map((d) => [d.abs, d]));
-  const inbound = new Map(docs.map((d) => [d.rel, new Set()]));
-  const dangling = new Map();
-  for (const d of docs) {
-    for (const href of extractOutbound(d.text)) {
-      const abs = resolveTarget(href, d.abs);
-      if (!abs) continue;
-      const target = byAbs.get(abs);
-      if (target) {
-        inbound.get(target.rel).add(d.rel);
-      } else if (abs.endsWith(".md") && !fs.existsSync(abs)) {
-        const arr = dangling.get(d.rel) || [];
-        arr.push(href);
-        dangling.set(d.rel, arr);
-      }
-    }
-  }
-  return { inbound, dangling };
-}
-
-// ---------------------------------------------------------------------------
-// Frontmatter read/write
-// ---------------------------------------------------------------------------
-
-function stripFrontmatter(text) {
-  if (text.startsWith("---\n")) {
-    const end = text.indexOf("\n---", 4);
-    if (end !== -1) return text.slice(end + 5);
-  }
-  return text;
-}
-
-function withFrontmatter(text, fm) {
-  return `---\n${serializeYaml(fm)}\n---\n${stripFrontmatter(text).replace(/^\n+/, "\n")}`;
-}
-
-function writeDoc(doc, text) {
-  fs.writeFileSync(doc.abs, text);
-}
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function kebab(title) {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
-
-function fmt(rel) {
-  return path.relative(REPO_ROOT, rel) || ".";
-}
-
-function die(msg, code = 1) {
-  console.error(`docs.js: ${msg}`);
-  process.exit(code);
-}
-
-function fail(msg) {
-  throw new Error(msg);
-}
-
-// Find a doc from a user-supplied reference: a docs-relative path, or a bare
-// filename (with or without area prefix) resolved by substring within a folder.
-function findDoc(docs, ref) {
-  const r = ref.replace(/^\.\//, "");
-  let hit = docs.find((d) => d.rel === r || d.rel.endsWith("/" + r));
-  if (hit) return hit;
-  const base = path.basename(r);
-  const folder = path.dirname(r);
-  const candidates = docs.filter(
-    (d) =>
-      d.rel === base ||
-      (folder && d.rel.startsWith(folder + "/") && d.rel.endsWith("/" + base)),
-  );
-  if (candidates.length === 0) fail(`no doc matches "${ref}"`);
-  if (candidates.length > 1) fail(`ambiguous doc ref "${ref}" -> ${candidates.map((c) => c.rel).join(", ")}`);
-  return candidates[0];
-}
-
-function appendLog(line) {
-  const logPath = path.join(docRoot(), "log.md");
-  const header = "# agents-docs log\n\nAppend-only lifecycle journal; oldest at top, newest at bottom.\n\n";
-  let text = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : header;
-  text = text.replace(/\n*$/, "") + "\n" + line + "\n";
-  fs.writeFileSync(logPath, text);
-}
-
-function relativeFrom(originAbs, targetAbs) {
-  let rel = path.relative(path.dirname(originAbs), targetAbs);
-  if (process.platform === "win32") rel = rel.split("\\").join("/");
-  return rel.startsWith(".") ? rel : "./" + rel;
-}
-
-function renderHref(newAbs, fromAbs, originalHref) {
-  if (originalHref.startsWith(".agents/")) return fmt(newAbs);
-  if (originalHref.startsWith("/")) return "/" + path.relative(REPO_ROOT, newAbs);
-  return relativeFrom(fromAbs, newAbs);
-}
-
-// Rewrite all outbound links in `text` (authored at fromAbs) that point at a doc
-// in `moves` (absOld -> absNew), preserving the referencing style.
-function rewriteOutbound(text, fromAbs, moves) {
-  let t = text;
-  for (const [oldAbs, newAbs] of Object.entries(moves)) {
-    for (const href of extractOutbound(t)) {
-      if (resolveTarget(href, fromAbs) === oldAbs) {
-        t = t.split(href).join(renderHref(newAbs, fromAbs, href));
-      }
-    }
-  }
-  return t;
-}
+import {
+  FOLDERS,
+  TYPE_FOLDER,
+  TERMINAL_STATUS,
+  AREAS,
+  DEFAULT_STATUS,
+  DEFAULT_TTL_DAYS,
+  STALE_DAYS,
+  STALE_DAYS_BY_TYPE,
+  ABANDON_STATUS,
+  isEntryPoint,
+} from "./lib/constants.js";
+import { parseYaml, serializeYaml } from "./lib/yaml.js";
+import {
+  REPO_ROOT,
+  docRoot,
+  readDoc,
+  scanDocs,
+  areaOf,
+  statusOf,
+  isTerminalStatus,
+  isArchiveAnomaly,
+  daysSince,
+} from "./lib/corpus.js";
+import { extractOutbound, resolveTarget, buildLinkGraph } from "./lib/links.js";
+import { stripFrontmatter, withFrontmatter, writeDoc } from "./lib/frontmatter.js";
+import {
+  today,
+  kebab,
+  fmt,
+  die,
+  fail,
+  findDoc,
+  appendLog,
+  relativeFrom,
+  renderHref,
+  rewriteOutbound,
+} from "./lib/util.js";
+import { completionBlockers, formatFlag } from "./evidence.js";
 
 // ---------------------------------------------------------------------------
 // index.md + report generation
@@ -650,7 +134,7 @@ function regenIndex(docs) {
 // ---------------------------------------------------------------------------
 
 const TEMPLATES = {
-  research: (t) => `# ${t}\n\n## Question\n\n## Findings\n\n## Open questions\n`,
+  research: (t) => `# ${t}\n\n## Question\n\n## Summary of findings\n\n| # | Finding | Relevance | Confidence | Evidence |\n|---|---------|-----------|------------|----------|\n\n<!-- Relevance (ACH): critical = a decision depends on it, normal, trivial.\n     Confidence (GRADE/ICD 203): high = primary source or executed command, medium = secondary source, low = unverified.\n     Evidence: a URL, verified-by: <command>, local:<path>, or none. -->\n\n## Findings\n\n## Open questions\n\n## Sources\n`,
   plan: (t) => `# ${t}\n\n## Goal capsule\n\n## Current state\n\n## Target state\n\n## Key technical decisions\n\n## Deliverables\n\n## Worktree Strategy\n\n## Risks\n`,
   worktree: (t) => `# ${t}\n\n## Objective\n\n## Scope\n\n## Verification\n\n## Status\n`,
   bug: (t) => `# ${t}\n\n## Repro\n\n## Root cause\n\n## Fix\n\n## Verification\n`,
@@ -1081,6 +565,18 @@ function cmdArchive(args) {
   const doc = findDoc(docs, args[0]);
   const statusFlag = args.find((a) => a.startsWith("--status="));
   const status = statusFlag ? statusFlag.split("=")[1] : null;
+  // Evidence gate: a research doc may not be archived as `complete` while
+  // critical evidence flags are unresolved. Fix the doc, then archive.
+  const effectiveStatus = status || (TERMINAL_STATUS[doc.fm.type] ? TERMINAL_STATUS[doc.fm.type][0] : null);
+  if (doc.fm.type === "research" && effectiveStatus === "complete") {
+    const blockers = completionBlockers(doc);
+    if (blockers.length) {
+      console.error(`docs.js: evidence gate: ${blockers.length} critical flag(s) block status: complete for ${doc.rel}:`);
+      for (const b of blockers) console.error(`  ${formatFlag(b)}`);
+      console.error(`resolve the flags (add sources / lower relevance / mark dead-end) and retry.`);
+      process.exit(1);
+    }
+  }
   performArchive(doc, docs, { status });
   regenIndex(scanDocs());
   maybeSweep();
@@ -1792,6 +1288,7 @@ Usage: bun docs.js <command> [args] [flags]
   clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]  auto-archive terminal/superseded docs and GC unreferenced archive docs
   prune [--dry-run|--apply] [--gc] [--ttl <days>] [--force]  propose archive moves; --gc lists archive deletions
   archive <doc> [--status=<v>]         move to archive/<type>-*.md, set terminal status, rewrite links, append log
+                                     (research + status complete runs the evidence gate first - see evidence.js)
   revive <archive-doc>                 restore an archived doc to its active folder with status: active
   scaffold-worktrees <plan-doc>        parse ## Worktree Strategy tracks from plan and create worktrees/*.md
   abandon <doc> [--status=<v>] [--dry-run]  one-step archive with the default terminal status for the doc's type

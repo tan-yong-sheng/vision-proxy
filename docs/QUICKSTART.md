@@ -1,6 +1,6 @@
 # Quick start
 
-Get from install to your first image description in a few minutes.
+Get from install to your first image description.
 
 ## 1. Install
 
@@ -8,7 +8,7 @@ Get from install to your first image description in a few minutes.
 npm install -g vision-proxy
 ```
 
-Or clone and link:
+Or build from source:
 
 ```bash
 git clone https://github.com/tan-yong-sheng/vision-proxy.git
@@ -18,9 +18,9 @@ pnpm run build
 npm link
 ```
 
-## 2. Pick a provider
+## 2. Set a provider
 
-Choose one provider and set its API key.
+Pick one provider and set its API key.
 
 ### OpenAI
 
@@ -46,7 +46,7 @@ vp config set provider google
 vp config set modelId gemini-2.5-pro
 ```
 
-### ACP (agent process)
+### ACP
 
 ```bash
 vp config set provider acp
@@ -60,20 +60,16 @@ vp config set acpArgs '["--experimental-acp"]'
 vp analyze screenshot.png
 ```
 
-You should see a fenced description in stdout.
-
-## 4. (Optional) Install an agent integration
+## 4. (Optional) Add an agent integration
 
 ```bash
 vp integration install claude-code
-vp integration install codex
-vp integration install pi
 ```
 
-See the [integrations](./integrations/) guides for details.
+See [INTEGRATIONS.md](./INTEGRATIONS.md) for Codex and Pi.
 
 ## Next steps
 
-- Read the [provider-specific setup guides](./providers/).
-- See the full [config reference](./CONFIG.md).
-- Store API keys in the OS keyring with `vp provider store-key`.
+- [Provider-specific guides](./providers/)
+- [Full config reference](./CONFIG.md)
+- [Setup index](./SETUP.md)

@@ -1,15 +1,10 @@
-# ACP setup
+# ACP
 
-The ACP (Agent Client Protocol) provider routes image analysis through an ACP-compatible agent process instead of a direct API key.
+The ACP (Agent Client Protocol) provider routes image analysis through an ACP-compatible agent process instead of an API key.
 
-Supported agent processes include Claude Code, Gemini CLI, and Codex CLI when run in ACP mode.
+Supported agents include Claude Code, Gemini CLI, and Codex CLI when run in ACP mode.
 
-## Prerequisites
-
-- An installed ACP-compatible agent (for example, `claude-code-acp`, `gemini`, or `codex`).
-- A subscription or credentials that the agent itself manages.
-
-## Configure `vp`
+## Quick config
 
 ```bash
 vp config set provider acp
@@ -17,7 +12,7 @@ vp config set acpCommand gemini
 vp config set acpArgs '["--experimental-acp"]'
 ```
 
-Or write the full config to `~/.vision-proxy/config.json`:
+Or paste this into `~/.vision-proxy/config.json`:
 
 ```json
 {
@@ -27,22 +22,22 @@ Or write the full config to `~/.vision-proxy/config.json`:
 }
 ```
 
-## ACP configuration keys
-
-| Key | Description |
-|-----|-------------|
-| `acpCommand` | The agent executable (for example, `gemini`, `claude-code-acp`). |
-| `acpArgs` | CLI arguments as a JSON array, for example `["--experimental-acp"]`. |
-| `acpCwd` | Working directory for the spawned agent process. |
-| `acpMcpServers` | MCP server configurations as a JSON array. |
-
 ## Run
 
 ```bash
 vp analyze screenshot.png
 ```
 
-When the provider is `acp`, the `model` config key is ignored because the agent selects its own model.
+When the provider is `acp`, the `modelId` config key is ignored because the agent selects its own model.
+
+## Options
+
+| Key | Description |
+|-----|-------------|
+| `acpCommand` | The agent executable (for example, `gemini`, `claude-code-acp`). |
+| `acpArgs` | CLI arguments as a JSON array. |
+| `acpCwd` | Working directory for the spawned agent process. |
+| `acpMcpServers` | MCP server configurations as a JSON array. |
 
 ## Security note
 

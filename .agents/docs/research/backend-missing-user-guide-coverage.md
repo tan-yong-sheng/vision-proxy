@@ -61,36 +61,29 @@ docs/
 8. **Provider feature matrix.**
    - No table summarizing which provider supports images, base URLs, keyring, fallback models, etc.
 
-### Proposed docs structure
+### Pruned docs structure (implemented)
 
 ```
 docs/
-  README.md                 # overview + links
-  QUICKSTART.md             # install -> first analysis in 5 minutes
-  SETUP.md                  # provider selection index
+  README.md       # overview + links
+  QUICKSTART.md   # install -> first analysis
+  SETUP.md        # compact provider/index page
+  CONFIG.md       # full config schema + JSON examples + env vars
+  INTEGRATIONS.md # merged claude-code / codex / pi guide
   providers/
     openai.md
     anthropic.md
     google.md
     acp.md
-  integrations/
-    claude-code.md
-    codex.md
-    pi.md
-  CONFIG.md                 # full config schema + JSON examples
-  ENV.md                    # environment variable reference
-  KEYRING.md                # keyring storage guide
-  HOOKS.md                  # binary-as-hook / UserPromptSubmit workflow
-  TROUBLESHOOTING.md        # expanded troubleshooting
 ```
 
 ### Recommendations
 
-- Add full `~/.vision-proxy/config.json` examples to every provider doc, including `fallbackModels` and `baseURLs`.
-- Create `docs/integrations/*.md` for Claude Code, Codex, and Pi agent integrations.
-- Create a `docs/CONFIG.md` with the complete config schema and copy-paste JSON blocks.
-- Create a `docs/QUICKSTART.md` for the fastest path from install to first result.
-- Keep individual guides short and cross-linked from `SETUP.md`.
+- Keep provider docs short: one JSON block + CLI commands + options list.
+- Merge ENV.md into CONFIG.md so config and env vars live in one place.
+- Merge integration pages into one INTEGRATIONS.md with per-agent sections.
+- Use SETUP.md as the single entry point that links to everything.
+- Remaining optional additions: KEYRING.md, HOOKS.md (binary-as-hook), TROUBLESHOOTING.md.
 
 ## Open questions
 

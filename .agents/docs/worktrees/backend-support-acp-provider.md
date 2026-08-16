@@ -4,7 +4,7 @@ title: support acp provider
 description: Add ACP (Agent Client Protocol) as a vision-proxy provider using the Vercel AI SDK community provider.
 area: backend
 tags: [provider, acp, ai-sdk, agent-client-protocol]
-status: active
+status: review
 branch: backend-support-acp-provider
 base: main
 stack_position: 1
@@ -12,7 +12,8 @@ stack_batch: vp-new-providers
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-08-30"
-commits_verified: []
+commits_verified:
+  - 222a67c
 merge_preview_verified: ""
 related:
   - ../plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md
@@ -54,14 +55,16 @@ Add `acp` as a first-class provider in vision-proxy so users can route image ana
 
 ## Status
 
-- [ ] Add `@mcpc-tech/acp-ai-provider` dependency.
-- [ ] Extend provider registry with ACP spec.
-- [ ] Persist ACP config keys.
-- [ ] Validate ACP config in CLI.
-- [ ] Update help and provider list.
-- [ ] Add tests.
-- [ ] Update README.
-- [ ] Run verification commands.
+- [x] Add `@mcpc-tech/acp-ai-provider` dependency.
+- [x] Extend provider registry with ACP spec.
+- [x] Persist ACP config keys.
+- [x] Validate ACP config in CLI.
+- [x] Update help and provider list.
+- [x] Add tests.
+- [x] Update README.
+- [x] Run verification commands.
+- [ ] Rebase onto `main` after PR #6 lands.
+- [ ] Run `/review-gate`.
 - [ ] Open PR and merge to `main`.
 
 ## Open questions

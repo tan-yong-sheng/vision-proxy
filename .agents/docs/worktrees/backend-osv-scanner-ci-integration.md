@@ -4,14 +4,15 @@ title: OSV-Scanner CI integration
 description: Add OSV-Scanner to vision-proxy CI for dependency vulnerability scanning on PRs and scheduled full scans.
 area: backend
 tags: [security, ci, osv-scanner]
-status: active
+status: review
 branch: feat/backend-osv-scanner-ci
 base: main
 stack_position: 1
 stack_batch: vp-security-tooling
 created: "2026-08-16"
 updated: "2026-08-16"
-commits_verified: []
+commits_verified:
+  - 4f6f5b7
 merge_preview_verified: ""
 stale_after: "2026-08-30"
 related: [../plans/backend-osv-scanner-ci-integration.md]
@@ -36,7 +37,10 @@ npm test
 
 ## Status
 
-- [ ] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
-- [ ] Landed on feature branch (ready for PR/merge)
+- [x] Worktree created
+- [x] Implementation complete
+- [x] Tests pass
+- [x] Landed on feature branch
+- [ ] Rebase onto `main` after PR #6 lands.
+- [ ] Run `/review-gate`.
+- [ ] Open PR and merge to `main`.

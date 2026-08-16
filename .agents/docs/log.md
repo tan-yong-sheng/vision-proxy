@@ -118,3 +118,13 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: archive bugs/backend-pi-extension-undeclared-typebox-dependency.md -> archive/bug-backend-pi-extension-undeclared-typebox-dependency.md (fixed)
 - 2026-08-16: archive bugs/backend-core-dead-max-tool-calls-per-turn-surface.md -> archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md (fixed)
 - 2026-08-16: new research research/backend-userpromptsubmit-inject-description-versus-vp-analyze-instruction.md
+- 2026-08-16: scaffold-worktrees plans/backend-binary-as-hook-vision-proxy-integration.md -> worktrees/backend-worktree.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-add-mcpc-tech-acp-ai-provider-dependency.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-extend-provider-registry-with-acp.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-persist-acp-config-keys.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-validate-acp-config-in-cli.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-adapter-remains-provider-agnostic.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-update-help-and-provider-list.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-documentation.md
+- 2026-08-16: scaffold-worktrees plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> worktrees/backend-tests.md
+- 2026-08-16: scaffold-worktrees plans/backend-osv-scanner-ci-integration.md -> worktrees/backend-osv-scanner-ci-integration.md

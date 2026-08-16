@@ -43,7 +43,7 @@ Provide thin, per-agent `UserPromptSubmit` hook shims that detect images in a us
 
 ## Status
 
-landed
+active
 
 ## Implementation
 

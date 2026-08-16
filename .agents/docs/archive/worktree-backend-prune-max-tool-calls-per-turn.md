@@ -5,14 +5,14 @@ description: "Prune the dead maxToolCallsPerTurn config surface from core, confi
 area: backend
 tags: [cli, config, dead-code, core, limits]
 status: landed
-branch: qa/pr-5-qa-and-distribution-merge-preview
+branch: configurable-analyze-image-limit
 base: main
 stack_position: 1
 stack_batch: vp-pre-existing-bugs
 created: "2026-08-15"
 updated: "2026-08-15"
-commits_verified: []
-merge_preview_verified: ""
+commits_verified: [pr-6-preview]
+merge_preview_verified: qa/pr-5-qa-and-distribution-merge-preview
 stale_after: "2026-08-29"
 related: [../bugs/backend-core-dead-max-tool-calls-per-turn-surface.md]
 ---

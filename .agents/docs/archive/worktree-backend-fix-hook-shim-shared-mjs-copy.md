@@ -17,8 +17,8 @@ depends_on:
 created: "2026-08-15"
 updated: "2026-08-15"
 stale_after: "2026-08-29"
-commits_verified: []
-merge_preview_verified: ""
+commits_verified: [pr-6-preview]
+merge_preview_verified: qa/pr-5-qa-and-distribution-merge-preview
 related:
   - ../plans/backend-fix-hook-shim-shared-mjs-copy.md
   - ../qa/backend-post-merge-qa-for-pr-5.md
@@ -67,4 +67,4 @@ Fix `vp integration install claude-code|codex` so it always ships `shared.mjs` n
 
 ## Open questions
 
-- Verify GitHub Release artifacts package and ship `dist/shims/*.mjs` (including `shared.mjs`) alongside the `vp` binary; the release build check must fail when `dist/shims/shared.mjs` is absent. Tracked in `../plans/backend-cli-distribution-strategy.md` and `../plans/backend-fix-hook-shim-shared-mjs-copy.md`.
+- Should `shared.mjs` travel with the binary in the chosen distribution layout (npm / Homebrew / GitHub release)? Tracked in `../plans/backend-cli-distribution-strategy.md`.

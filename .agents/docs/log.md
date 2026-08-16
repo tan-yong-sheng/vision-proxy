@@ -99,3 +99,6 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-15: sync plans/backend-vision-proxy-pr-5-qa-and-distribution-execution-plan.md from .lavish/worktree-plan.html (synced from lavish feedback)
 - 2026-08-15: sync qa/backend-post-merge-qa-for-pr-5.md from .lavish/worktree-plan.html (synced from lavish feedback)
 - 2026-08-15: new plan plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md
+- 2026-08-16: new research research/backend-binary-as-hook-vision-proxy-integration.md
+- 2026-08-16: new plan plans/backend-binary-as-hook-vision-proxy-integration.md
+- 2026-08-16: archive research/backend-binary-as-hook-vision-proxy-integration.md -> archive/research-backend-binary-as-hook-vision-proxy-integration.md (complete)

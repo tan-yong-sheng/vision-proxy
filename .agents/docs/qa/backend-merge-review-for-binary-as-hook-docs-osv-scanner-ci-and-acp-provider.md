@@ -60,19 +60,19 @@ After integration, the ACP provider was removed because the community provider c
 - Confirmed Vercel AI SDK v7 has no first-party ACP provider.
 - Removed ACP provider code, tests, dependency, and documentation from PR #7.
 
-### no-mistakes review: repeated agent output parser failures
+### no-mistakes review
 
-- **Observation:** Multiple `no-mistakes axi run` attempts on `merge-plan-binary` completed the `review` step with **no findings**, then failed in later agent-driven steps with `pi output parse` errors:
-  - Attempt 1: `test` step failed on `invalid character 'a' after object key:value pair` (multi-line JSON string).
-  - Attempt 2: `test` step passed, but `document` step failed on `invalid character 'G' looking for beginning of value` (prose prefix before JSON).
-  - Attempt 3 (`--skip document`): `test` step failed on `invalid character 'T' looking for beginning of value` (prose suffix after JSON).
-- **Root cause:** The no-mistakes agent output parser is not robust to prose around or inside the JSON response; this is a pipeline tooling issue, not a code defect.
-- **Mitigation:** Ran the full local verification suite manually after every attempt; all checks pass.
-- **Status:** Review and test logic both succeeded; only the response parsing failed. Manual verification is recorded below.
+- **Initial attempts:** Several `no-mistakes axi run` attempts failed with `pi output parse` errors in the agent-driven `test`/`document`/`review` steps (multi-line JSON strings, prose around JSON, and an invalid `"info"` severity value). These were all pipeline tooling/parser issues; the underlying review and test logic reported no findings.
+- **Final attempt:** `no-mistakes axi run --intent "Review ACP removal from PR #7" --yes --skip ci` completed successfully.
+  - Run ID: `01M05A6SDN1MY9XRGZQP7JP1FH`
+  - Steps: intent, rebase, review, test, document, lint, push, pr all **completed**
+  - Findings: **none**
+  - Outcome: **passed**
+  - PR: https://github.com/tan-yong-sheng/vision-proxy/pull/7
 
-## Manual verification verdict
+## Verification
 
-Because no-mistakes cannot complete a run due to agent-output parser failures, the branch was verified manually:
+### Local verification (ran before final no-mistakes pass)
 
 | Check | Command | Result |
 |---|---|---|
@@ -81,6 +81,11 @@ Because no-mistakes cannot complete a run due to agent-output parser failures, t
 | Secrets scan | `pnpm secrets` | PASS |
 | Lint / format | `pnpm lint` | PASS |
 | Fallow audit | `fallow audit --format json --quiet --explain --gate-marker agent` | PASS |
+
+### no-mistakes review-gate
+
+- Final run passed with no findings.
+- CI step was skipped (`--skip ci`).
 
 **Verdict:** PR #7 is ready for merge pending a green GitHub Actions CI run.
 

@@ -39,11 +39,10 @@ After integration, the ACP provider was removed because the community provider c
 | Check | Command | Result |
 |---|---|---|
 | Type check | `pnpm run typecheck` | PASS |
-| Tests | `pnpm test` | PASS (155 unit + 3 e2e) |
+| Tests | `pnpm test` | PASS (149 unit + 3 e2e) |
 | Secrets scan | `pnpm secrets` | PASS |
 | Lint / format | `pnpm lint` | PASS |
-| Fallow audit | `fallow audit --format json --quiet` | PASS |
-| no-mistakes review | `no-mistakes axi run ...` | PASS |
+| Fallow audit | `fallow audit --format json --quiet --explain --gate-marker agent` | PASS |
 | PR opened | - | [#7](https://github.com/tan-yong-sheng/vision-proxy/pull/7) |
 
 ## Findings

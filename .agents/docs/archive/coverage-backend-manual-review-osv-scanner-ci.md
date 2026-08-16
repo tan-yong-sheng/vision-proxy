@@ -1,15 +1,14 @@
 ---
 type: coverage
 title: "Manual review: OSV-Scanner CI integration"
-description: "Manual review of feat/backend-osv-scanner-ci branch after no-mistakes agent parser failures."
+description: Manual review of feat/backend-osv-scanner-ci branch after no-mistakes agent parser failures.
 area: backend
 tags: [review, security, ci, osv-scanner]
-status: active
+status: retired
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-11-14"
-related:
-  - ../../worktrees/backend-osv-scanner-ci-integration.md
+related: [../../worktrees/backend-osv-scanner-ci-integration.md]
 ---
 # Manual review: OSV-Scanner CI integration
 
@@ -43,3 +42,8 @@ No findings. The workflow permissions are scoped (`contents: read`, `actions: re
 - Branch is rebased onto `main` after PR #6 lands.
 - Workflows are verified with `act` after rebase.
 - PR is opened and merged.
+
+## Outcome
+
+- OSV-Scanner CI landed as part of PR #7, merged to `main` at `2026-08-16T13:08:41Z`.
+- GitHub Actions checks for the OSV workflows passed on the PR.

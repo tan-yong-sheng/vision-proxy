@@ -1,15 +1,21 @@
 ---
 type: research
 title: UserPromptSubmit inject description versus vp analyze instruction
-description: Compare injecting an image description directly via UserPromptSubmit with injecting instructions for the agent to run `vp analyze` itself.
+description: "Compare injecting an image description directly via UserPromptSubmit with injecting instructions for the agent to run `vp analyze` itself."
 area: backend
-tags: [cli, hooks, userpromptsubmit, claude-code, codex, integration, ux]
-status: active
+tags:
+  - cli
+  - hooks
+  - userpromptsubmit
+  - claude-code
+  - codex
+  - integration
+  - ux
+status: complete
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-09-15"
-related:
-  - ../plans/backend-binary-as-hook-vision-proxy-integration.md
+related: [../plans/backend-binary-as-hook-vision-proxy-integration.md]
 ---
 # UserPromptSubmit inject description versus vp analyze instruction
 

@@ -4,7 +4,7 @@ title: OSV-Scanner adoption for vision-proxy CI
 description: Evaluate OSV-Scanner as a lower-risk replacement for Trivy for dependency vulnerability scanning in vision-proxy.
 area: backend
 tags: [security, dependencies, ci, osv-scanner]
-status: active
+status: complete
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-09-15"

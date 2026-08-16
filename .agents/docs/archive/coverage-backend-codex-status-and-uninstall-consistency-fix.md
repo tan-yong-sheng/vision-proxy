@@ -1,10 +1,10 @@
 ---
 type: coverage
 title: codex status and uninstall consistency fix
-description: "Verification dossier for the codex integration status/uninstall consistency fix."
+description: Verification dossier for the codex integration status/uninstall consistency fix.
 area: backend
 tags: [codex, integration, cli, regression-test]
-status: active
+status: retired
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-11-14"
@@ -32,8 +32,13 @@ Make `codex.isInstalled(raw)` consistent with `codex.remove(raw)` by only report
 | Secrets scan | `pnpm secrets` | PASS |
 | Lint / format | `pnpm lint` | PASS |
 | Fallow audit | `fallow audit --format json --quiet` | PASS |
-| no-mistakes review | `no-mistakes axi run ...` | PENDING |
+| no-mistakes review | `no-mistakes axi run ...` | PASS |
 
 ## Retirement criteria
 
 Retire when the fix branch is merged to `main`.
+
+## Outcome
+
+- PR #8 merged to `main` at commit `e2c4063`.
+- GitHub Actions checks: green before merge.

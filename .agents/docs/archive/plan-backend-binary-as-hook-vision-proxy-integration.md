@@ -1,10 +1,17 @@
 ---
 type: plan
 title: Binary-as-hook vision-proxy integration
-description: Replace shim scripts with a `vp analyze --hook` entry point so Claude Code and Codex hooks invoke the CLI binary directly.
+description: "Replace shim scripts with a `vp analyze --hook` entry point so Claude Code and Codex hooks invoke the CLI binary directly."
 area: backend
-tags: [cli, hooks, claude-code, codex, pretooluse, integration, binary-as-hook]
-status: active
+tags:
+  - cli
+  - hooks
+  - claude-code
+  - codex
+  - pretooluse
+  - integration
+  - binary-as-hook
+status: complete
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-10-15"

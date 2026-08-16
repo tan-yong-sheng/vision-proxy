@@ -1,10 +1,10 @@
 ---
 type: coverage
-title: "Merge review for binary-as-hook docs and OSV-Scanner CI"
-description: "QA review for the combined integration of binary-as-hook documentation and OSV-Scanner CI workflows."
+title: Merge review for binary-as-hook docs and OSV-Scanner CI
+description: QA review for the combined integration of binary-as-hook documentation and OSV-Scanner CI workflows.
 area: backend
 tags: [merge-preview, osv-scanner, binary-as-hook, review-gate]
-status: active
+status: retired
 merge_batch: vp-pr-6-integration
 created: "2026-08-16"
 updated: "2026-08-16"
@@ -92,3 +92,9 @@ After integration, the ACP provider was removed because the community provider c
 ## Retirement criteria
 
 Retire when PR #7 is merged to `main`.
+
+## Outcome
+
+- PR #7 merged at `2026-08-16T13:08:41Z`.
+- Merge commit: `914f2ce8e79e0233eb904189e1b3562f8b390812`.
+- GitHub Actions checks: all green before merge.

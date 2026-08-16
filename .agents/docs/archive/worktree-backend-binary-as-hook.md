@@ -11,7 +11,7 @@ tags:
   - pretooluse
   - integration
   - binary-as-hook
-status: active
+status: landed
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-08-30"

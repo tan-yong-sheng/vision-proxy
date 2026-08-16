@@ -29,10 +29,6 @@ interface VisionConfig {
   groundingModels: Record<string, { format: string }>;
   baseURLs: Record<string, string>;
   fallbackModels: string[];
-  acpCommand?: string;
-  acpArgs?: string[];
-  acpCwd?: string;
-  acpMcpServers?: unknown[];
 }
 ```
 
@@ -40,8 +36,8 @@ interface VisionConfig {
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `provider` | string | `anthropic` | Provider id: `openai`, `anthropic`, `google`, or `acp`. |
-| `modelId` | string | `claude-sonnet-4-5` | Model id for the selected provider. Ignored when `provider` is `acp`. |
+| `provider` | string | `anthropic` | Provider id: `openai`, `anthropic`, or `google`. |
+| `modelId` | string | `claude-sonnet-4-5` | Model id for the selected provider. |
 | `mode` | string | `fallback` | When to route tool hooks: `fallback`, `always`, or `off`. |
 | `systemPrompt` | string | built-in | System prompt sent to the model. |
 | `includeContext` | boolean | `false` | Whether to include extra context in the prompt. |
@@ -54,10 +50,6 @@ interface VisionConfig {
 | `groundingModels` | object | `{}` | Per-model grounding format overrides. |
 | `baseURLs` | object | `{}` | Per-provider base URL overrides, e.g. `{ "openai": "http://localhost:8000/v1" }`. |
 | `fallbackModels` | string[] | `[]` | Ordered list of `provider/model-id` strings to try when the primary model fails. |
-| `acpCommand` | string | - | ACP executable, e.g. `gemini` or `claude-code-acp`. |
-| `acpArgs` | string[] | - | Arguments passed to `acpCommand`. |
-| `acpCwd` | string | - | Working directory for the ACP subprocess. |
-| `acpMcpServers` | array | - | MCP server configurations for ACP. |
 
 ## Example configs
 
@@ -99,18 +91,6 @@ interface VisionConfig {
   ]
 }
 ```
-
-### ACP (example: Gemini CLI)
-
-```json
-{
-  "provider": "acp",
-  "acpCommand": "gemini",
-  "acpArgs": ["--acp"]
-}
-```
-
-See `docs/providers/acp-*.md` for Claude Code and Codex setup.
 
 ## Environment variables
 

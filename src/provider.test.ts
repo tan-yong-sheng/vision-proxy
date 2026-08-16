@@ -1,25 +1,15 @@
 /**
- * Unit tests for ACP provider support.
+ * Unit tests for provider resolution.
  */
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import {
-	isAcpProvider,
-	isKnownProvider,
-	listProviders,
-	resolveAcpModel,
-	resolveModel,
-} from "./provider.ts";
+import { isKnownProvider, listProviders, resolveModel } from "./provider.ts";
 
 describe("isKnownProvider", () => {
 	it("returns true for known API providers", () => {
 		assert.equal(isKnownProvider("openai"), true);
 		assert.equal(isKnownProvider("anthropic"), true);
 		assert.equal(isKnownProvider("google"), true);
-	});
-
-	it("returns true for acp provider", () => {
-		assert.equal(isKnownProvider("acp"), true);
 	});
 
 	it("returns false for unknown providers", () => {
@@ -63,36 +53,6 @@ describe("resolveModel", () => {
 		assert.equal(result.ok, false);
 		if (!result.ok) {
 			assert.equal(result.provider, "unknown");
-		}
-	});
-});
-
-describe("resolveAcpModel", () => {
-	it("returns ok when acpCommand is provided", async () => {
-		// This may succeed or fail depending on whether the command exists.
-		// We just verify the function runs without throwing.
-		const result = await resolveAcpModel({
-			command: "echo",
-			args: ["test"],
-			cwd: "/tmp",
-		});
-		assert.equal(result.ok, true);
-	});
-});
-
-describe("isAcpProvider", () => {
-	it("returns true for ACP provider spec", () => {
-		const acpSpec = listProviders().find((p) => p.id === "acp");
-		assert.ok(acpSpec);
-		assert.equal(isAcpProvider(acpSpec), true);
-	});
-
-	it("returns false for API providers", () => {
-		const providers = listProviders().filter(
-			(p): p is import("./provider.ts").ApiProviderSpec => p.id !== "acp",
-		);
-		for (const p of providers) {
-			assert.equal(isAcpProvider(p), false);
 		}
 	});
 });

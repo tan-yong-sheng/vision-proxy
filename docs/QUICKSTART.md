@@ -46,14 +46,6 @@ vp config set provider google
 vp config set modelId gemini-2.5-pro
 ```
 
-### ACP
-
-```bash
-vp config set provider acp
-vp config set acpCommand gemini
-vp config set acpArgs '["--experimental-acp"]'
-```
-
 ## 3. Analyze an image
 
 ```bash

@@ -36,7 +36,7 @@ import {
 	resolveCropEntry,
 	storeImageMeta,
 } from "../core.ts";
-import { isKnownProvider, resolveAcpModel, resolveModel } from "../provider.ts";
+import { isKnownProvider, resolveModel } from "../provider.ts";
 
 export interface AnalyzeFlags {
 	format?: GroundingFormat;
@@ -201,38 +201,18 @@ export async function runAnalyze(
 
 	// The primary model must be resolvable (have a key); fallbacks are only
 	// tried on a runtime failure later, so a missing key on the primary is fatal.
-	let resolved: { ok: true; model: import("ai").LanguageModel } | { ok: false; error: string };
-	if (provider === "acp") {
-		if (!config.acpCommand) {
-			throw new AnalyzeError(
-				'ACP provider requires "acpCommand" in config (e.g. vp config set acpCommand gemini)',
-			);
-		}
-		resolved = await resolveAcpModel({
-			command: config.acpCommand,
-			args: config.acpArgs,
-			cwd: config.acpCwd,
-			mcpServers: config.acpMcpServers,
-		});
-		if (!resolved.ok) {
-			throw new AnalyzeError(`ACP provider error: ${resolved.error}`);
-		}
-	} else {
-		const modelOutcome = resolveModel(
-			provider,
-			modelId,
-			env,
-			flags.apiKey,
-			config.baseURLs[provider],
+	const modelOutcome = resolveModel(
+		provider,
+		modelId,
+		env,
+		flags.apiKey,
+		config.baseURLs[provider],
+	);
+	if (!modelOutcome.ok) {
+		throw new AnalyzeError(
+			`no API key for provider "${modelOutcome.provider}". Set ${modelOutcome.apiKeyEnv} (or pass --api-key).`,
 		);
-		if (!modelOutcome.ok) {
-			throw new AnalyzeError(
-				`no API key for provider "${modelOutcome.provider}". Set ${modelOutcome.apiKeyEnv} (or pass --api-key).`,
-			);
-		}
-		resolved = { ok: true, model: modelOutcome.model.model };
 	}
-
 	const grounding = getGroundingFormat(config, provider, modelId);
 	const effectiveFormat: GroundingFormat =
 		flags.format && flags.format !== "none" ? flags.format : grounding;
@@ -278,29 +258,18 @@ export async function runAnalyze(
 			};
 		}
 
-		const resp = await (provider === "acp"
-			? (async () => {
-					const r = await analyzeImpl({
-						imagePayloads: [p],
-						systemPrompt,
-						question,
-						model: resolved.model,
-						maxOutputTokens: flags.maxOutputTokens,
-					});
-					return { text: r.text, usedProvider: provider, usedModel: modelId };
-				})()
-			: generateWithFallback(
-					candidates,
-					{
-						imagePayloads: [p],
-						systemPrompt,
-						question,
-						maxOutputTokens: flags.maxOutputTokens,
-					},
-					env,
-					flags.apiKey,
-					analyzeImpl,
-				));
+		const resp = await generateWithFallback(
+			candidates,
+			{
+				imagePayloads: [p],
+				systemPrompt,
+				question,
+				maxOutputTokens: flags.maxOutputTokens,
+			},
+			env,
+			flags.apiKey,
+			analyzeImpl,
+		);
 		const description = resp.text;
 		await cacheSet(cacheKey, description);
 		const output = flags.fence
@@ -339,31 +308,19 @@ export async function runAnalyze(
 		};
 	}
 
-	const resp = await (provider === "acp"
-		? (async () => {
-				const r = await analyzeImpl({
-					imagePayloads: payloads,
-					systemPrompt,
-					question,
-					model: resolved.model,
-					providerOptions: buildProviderOptions(effectiveFormat),
-					maxOutputTokens: flags.maxOutputTokens,
-				});
-				return { text: r.text, usedProvider: provider, usedModel: modelId };
-			})()
-		: generateWithFallback(
-				candidates,
-				{
-					imagePayloads: payloads,
-					systemPrompt,
-					question,
-					providerOptions: buildProviderOptions(effectiveFormat),
-					maxOutputTokens: flags.maxOutputTokens,
-				},
-				env,
-				flags.apiKey,
-				analyzeImpl,
-			));
+	const resp = await generateWithFallback(
+		candidates,
+		{
+			imagePayloads: payloads,
+			systemPrompt,
+			question,
+			providerOptions: buildProviderOptions(effectiveFormat),
+			maxOutputTokens: flags.maxOutputTokens,
+		},
+		env,
+		flags.apiKey,
+		analyzeImpl,
+	);
 	const description = resp.text;
 	await cacheSet(jointCacheKey, description);
 	const output = flags.fence

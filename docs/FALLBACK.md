@@ -39,7 +39,4 @@ vp config set fallbackModels '["openai/gpt-4o-mini"]'
 - **Same-provider** fallbacks are usually simpler because you only need one API key configured.
 - **Cross-provider** fallbacks are useful when one provider is rate-limited or down.
 
-## ACP
 
-The ACP provider does **not** support fallback models.
-If `provider` is `acp`, `fallbackModels` is ignored.

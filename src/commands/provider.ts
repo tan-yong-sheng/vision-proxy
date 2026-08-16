@@ -12,7 +12,7 @@ import {
 	listStoredProviderKeys,
 	storeProviderKey,
 } from "../keyring.ts";
-import { type ApiProviderSpec, getProvider, isAcpProvider, listProviders } from "../provider.ts";
+import { type ApiProviderSpec, getProvider, listProviders } from "../provider.ts";
 
 export interface ProviderResult {
 	ok: boolean;
@@ -23,14 +23,10 @@ export interface ProviderResult {
 export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResult {
 	const lines: string[] = [];
 	for (const p of listProviders()) {
-		if (isAcpProvider(p)) {
-			lines.push(`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: n/a`);
-		} else {
-			const hasKey = Boolean(env[p.apiKeyEnv]) || Boolean(getStoredProviderKey(p.id));
-			lines.push(
-				`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : `missing (${p.apiKeyEnv})`}`,
-			);
-		}
+		const hasKey = Boolean(env[p.apiKeyEnv]) || Boolean(getStoredProviderKey(p.id));
+		lines.push(
+			`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : `missing (${p.apiKeyEnv})`}`,
+		);
 	}
 	return { ok: true, message: lines.join("\n"), code: 0 };
 }
@@ -40,25 +36,19 @@ export function providerCheck(
 	env: NodeJS.ProcessEnv = process.env,
 ): ProviderResult {
 	const allSpecs = listProviders();
-	const specs = name
-		? allSpecs.filter((p) => p.id === name)
-		: allSpecs.filter((p) => !isAcpProvider(p));
+	const specs = name ? allSpecs.filter((p) => p.id === name) : allSpecs;
 	if (specs.length === 0) {
 		return { ok: false, message: `unknown provider "${name}"`, code: 1 };
 	}
 	const lines: string[] = [];
 	let allOk = true;
 	for (const spec of specs) {
-		if (isAcpProvider(spec)) {
-			lines.push(`${spec.id}: OK (key: n/a — ACP does not use env var keys)`);
+		const hasKey = Boolean(env[spec.apiKeyEnv]) || Boolean(getStoredProviderKey(spec.id));
+		if (hasKey) {
+			lines.push(`${spec.id}: OK (key present)`);
 		} else {
-			const hasKey = Boolean(env[spec.apiKeyEnv]) || Boolean(getStoredProviderKey(spec.id));
-			if (hasKey) {
-				lines.push(`${spec.id}: OK (key present)`);
-			} else {
-				allOk = false;
-				lines.push(`${spec.id}: MISSING KEY (${spec.apiKeyEnv})`);
-			}
+			allOk = false;
+			lines.push(`${spec.id}: MISSING KEY (${spec.apiKeyEnv})`);
 		}
 	}
 	return {

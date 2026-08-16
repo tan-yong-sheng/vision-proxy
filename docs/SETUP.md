@@ -15,10 +15,6 @@ How to get a vision-capable model working with `vp`.
 - [OpenAI](./providers/openai.md)
 - [Anthropic](./providers/anthropic.md)
 - [Google](./providers/google.md)
-- ACP:
-  - [Claude Code](./providers/acp-claude-code.md)
-  - [Codex](./providers/acp-codex.md)
-  - [Gemini](./providers/acp-gemini.md)
 
 ## Agent integrations
 
@@ -41,8 +37,6 @@ vp provider delete-key openai
 Configure backup models for when the primary model fails.
 See [FALLBACK.md](./FALLBACK.md).
 
-ACP does not support fallback models.
-
 ## Config precedence
 
 1. `--config <path>` flag
@@ -60,4 +54,4 @@ See [CONFIG.md](./CONFIG.md) for the full schema and copy-paste JSON examples.
 | `no API key for provider "openai"` | Set `OPENAI_API_KEY` or use `--api-key` |
 | `path outside allowed directories` | Use an absolute path inside tmp, cwd, or home |
 | `model is currently experiencing high demand` | Try a fallback model or wait |
-| `ACP provider requires "acpCommand"` | Set `acpCommand` in config (see [ACP guide](./providers/acp.md)) |
+

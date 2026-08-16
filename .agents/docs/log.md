@@ -132,3 +132,8 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: new bug bugs/backend-codex-integration-status-and-uninstall-disagree-when-config-marker-is-outside-a-.md
 - 2026-08-16: new research research/backend-support-vercel-ai-sdk-harness-adapters.md
 - 2026-08-16: new research research/backend-missing-user-guide-coverage.md
+- 2026-08-16: archive plans/backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md -> archive/plan-backend-support-acp-protocol-via-vercel-ai-sdk-as-llm-provider.md (complete)
+- 2026-08-16: archive worktrees/backend-support-acp-provider.md -> archive/worktree-backend-support-acp-provider.md (abandoned)
+- 2026-08-16: archive qa/backend-manual-review-acp-provider-support.md -> archive/coverage-backend-manual-review-acp-provider-support.md (retired)
+- 2026-08-16: archive research/backend-missing-user-guide-coverage.md -> archive/research-backend-missing-user-guide-coverage.md (complete)
+- 2026-08-16: archive research/backend-support-vercel-ai-sdk-harness-adapters.md -> archive/research-backend-support-vercel-ai-sdk-harness-adapters.md (complete)

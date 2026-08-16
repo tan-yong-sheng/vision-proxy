@@ -117,3 +117,4 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: archive worktrees/backend-vp-distribution.md -> archive/worktree-backend-vp-distribution.md (landed)
 - 2026-08-16: archive bugs/backend-pi-extension-undeclared-typebox-dependency.md -> archive/bug-backend-pi-extension-undeclared-typebox-dependency.md (fixed)
 - 2026-08-16: archive bugs/backend-core-dead-max-tool-calls-per-turn-surface.md -> archive/bug-backend-core-dead-max-tool-calls-per-turn-surface.md (fixed)
+- 2026-08-16: new research research/backend-userpromptsubmit-inject-description-versus-vp-analyze-instruction.md

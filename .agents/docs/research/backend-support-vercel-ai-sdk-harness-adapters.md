@@ -1,7 +1,7 @@
 ---
 type: research
 title: support vercel ai sdk harness adapters
-description: Evaluate supporting Vercel AI SDK harness adapters as an alternative to the ACP provider.
+description: Evaluate replacing the ACP provider with Vercel AI SDK HarnessAgent.
 area: backend
 tags: []
 status: active
@@ -14,68 +14,98 @@ related: []
 
 ## Question
 
-Should `vp` support Vercel AI SDK harness adapters (`@ai-sdk/harness-*`) in addition to or instead of the ACP provider?
+Should we remove the current ACP provider and replace it with Vercel AI SDK `HarnessAgent`?
 
 ## Findings
 
-### What harness adapters are
+### What Vercel HarnessAgent is
 
-Vercel AI SDK harness adapters connect `HarnessAgent` to a specific agent runtime.
-They are the harness equivalent of model providers: each adapter wraps one runtime and normalizes sessions, stream events, tools, usage, lifecycle state, and configuration into the harness contract.
+Vercel AI SDK 7.x introduces `HarnessAgent`, a first-party API for running agent harnesses such as Claude Code, Codex, and Pi.
+It is currently **experimental** and available via the canary release.
 
-Available adapters (as of the docs snapshot):
+A minimal setup requires three packages:
 
-- `@ai-sdk/harness-claude-code`
-- `@ai-sdk/harness-codex`
-- `@ai-sdk/harness-deepagents`
-- `@ai-sdk/harness-grok-build`
-- `@ai-sdk/harness-opencode`
-- `@ai-sdk/harness-pi`
+- `@ai-sdk/harness` (core)
+- `@ai-sdk/harness-<runtime>` (adapter, e.g. `harness-claude-code`)
+- `@ai-sdk/sandbox-<provider>` (sandbox, e.g. `sandbox-vercel`)
 
-Coming soon:
+Example from the docs:
 
-- `@ai-sdk/harness-amp`
-- `@ai-sdk/harness-goose`
-- `@ai-sdk/harness-mastra`
+```typescript
+import { HarnessAgent } from '@ai-sdk/harness/agent';
+import { claudeCode } from '@ai-sdk/harness-claude-code';
+import { createVercelSandbox } from '@ai-sdk/sandbox-vercel';
 
-### How they differ from ACP
+const agent = new HarnessAgent({
+  harness: claudeCode,
+  sandbox: createVercelSandbox({ runtime: 'node24', ports: [4000] }),
+  instructions: '...',
+});
 
-| Aspect | ACP provider (`@mcpc-tech/acp-ai-provider`) | Vercel harness adapters |
-|--------|---------------------------------------------|-------------------------|
-| Protocol | Agent Client Protocol | Vercel AI SDK harness contract |
-| Integration | Returns a Vercel `LanguageModel` via ACP | Returns a `HarnessAgent` with session/stream/tool management |
-| Use case | Single-shot model calls through an agent | Stateful agent sessions with tool approval/filtering |
-| Dependencies | One external package | One adapter per runtime plus `@ai-sdk/harness` |
+const session = await agent.createSession();
+const result = await agent.generate({ session, prompt: '...' });
+await session.destroy();
+```
 
-### Current ACP provider in `vp`
+### Key differences from the current ACP provider
 
-- `src/provider.ts` defines an `acp` provider.
-- `src/adapter.ts` resolves the ACP model via `@mcpc-tech/acp-ai-provider@0.3.5`.
-- The CLI treats ACP like any other provider: set `provider=acp`, configure `acpCommand`, run `vp analyze`.
+| Aspect | Current ACP (`@mcpc-tech/acp-ai-provider`) | Vercel `HarnessAgent` |
+|--------|--------------------------------------------|----------------------|
+| Maturity | Community package | Official Vercel, but experimental/canary |
+| Architecture | Provides a `LanguageModel` via ACP | Provides a stateful `HarnessAgent` with sessions |
+| Model selection | Agent/harness chooses the model | Harness chooses the model; caller cannot set `modelId` |
+| Runtime requirements | Local agent binary (`acpCommand`) | Sandbox provider + harness adapter + credentials |
+| API for `vp` | Drop-in `generateText` replacement | Needs new `agent.generate()` / `agent.stream()` path |
+| Dependencies | One package (`ai@6.x` internally) | Core + per-runtime adapter + sandbox provider |
 
-### Pros of adding harness adapters
+### Can `HarnessAgent` switch models?
 
-1. **First-party Vercel integration.** Adapters are published by Vercel and maintained alongside the AI SDK.
-2. **More runtime support.** Covers Claude Code, Codex, OpenCode, Pi, and others with one abstraction.
-3. **Built-in session/tool management.** Harness agents can expose tools, approval flows, and lifecycle state.
-4. **Future proofing.** If the project moves toward agent-session-based analysis, harness adapters fit naturally.
+No. `HarnessAgent` exposes `generate()` and `stream()` that take a prompt/session; the underlying harness (Claude Code, Codex, etc.) decides which model to use. There is no `modelId` parameter in the `HarnessAgent` API. So it would **not** solve the "cannot set the model to use" problem; it would make model selection impossible from `vp`'s side.
 
-### Cons and risks
+### Can it replace the current ACP provider in `vp analyze`?
 
-1. **Scope creep.** `vp` today is a single-shot image-description CLI; harness adapters are designed for stateful agent sessions.
-2. **Additional dependencies.** Each adapter is a separate npm package, increasing install size and CVE surface.
-3. **API mismatch.** `generateText` from the AI SDK expects a `LanguageModel`; harness adapters return `HarnessAgent`, so `src/adapter.ts` would need a new code path.
-4. **Overlap with ACP.** The ACP provider already lets users route calls through Claude Code / Codex / Gemini CLI. Adding harness adapters may duplicate that value unless we need harness-specific features.
-5. **Version alignment.** The current ACP provider already triggers a no-mistakes warning because it depends on `ai@6.x` internally while the project uses `ai@7.x`. Adding more Vercel packages could amplify version-mismatch risk.
+Not directly. The current flow is:
 
-### Recommendations
+1. `vp analyze` resolves a provider to a Vercel `LanguageModel`.
+2. `generateText({ model, prompt })` produces a description.
 
-- **Defer harness adapters** unless a concrete feature needs stateful agent sessions (for example, multi-turn tool use, persistent agent context, or built-in tool approval).
-- If the goal is simply to route image analysis through Claude Code / Codex / Gemini CLI, the existing ACP provider is sufficient.
-- Revisit harness adapters when `vp` evolves from single-shot calls toward agent-session workflows.
+`HarnessAgent` returns an agent object, not a `LanguageModel`. To use it we would need:
+
+- A new `analyze` path that calls `agent.createSession()`, `agent.generate({ session, prompt })`, and `session.destroy()`.
+- Sandbox configuration (`sandbox` provider, runtime, ports, credentials).
+- Handling of harness-specific features (tools, skills, tool approval) that `vp` does not currently use.
+
+This is a significant code change, not a swap of one provider for another.
+
+### Version issue with current ACP
+
+The current community ACP provider depends on `ai@6.x` internally while the project uses `ai@7.x`.
+This triggers a cross-major compatibility warning in no-mistakes.
+Replacing it with `HarnessAgent` would remove that warning but introduces:
+
+- Experimental/canary dependencies.
+- A sandbox provider dependency and credentials requirement.
+- More complex setup for users.
+
+## Recommendation
+
+**Do not replace the current ACP provider with `HarnessAgent`.**
+
+Reasons:
+
+1. `HarnessAgent` is not a drop-in replacement; it changes the architecture from model-call to agent-session.
+2. It does **not** expose model selection, so it does not solve the original concern.
+3. It is experimental and requires sandbox credentials, making setup harder for users.
+4. `vp` is a single-shot image-description CLI; harness sessions are overkill for this use case.
+
+### Better options for the version-mismatch concern
+
+1. **Keep ACP but find/update to an `ai@7`-compatible ACP provider package.**
+2. **Remove ACP from PR #7** if the version mismatch is unacceptable, and add it back later when a compatible package exists.
+3. **Keep ACP with the version-mismatch warning** and document the limitation clearly.
 
 ## Open questions
 
-- Is there a specific harness feature (tool approval, multi-turn sessions, etc.) that `vp` needs?
-- Would harness adapters replace ACP or live alongside it as a separate provider category?
-- How would `vp analyze` map to a `HarnessAgent` session: one-shot invocation or persistent session per image?
+- Is the `ai@6.x` vs `ai@7.x` mismatch a hard blocker for PR #7, or can it be documented as a known limitation?
+- Should we search for an `ai@7`-compatible ACP provider alternative before deciding?
+- If ACP is removed from PR #7, should the `docs/providers/acp.md` guide be moved to a draft/PR branch until it is re-added?

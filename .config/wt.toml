@@ -21,6 +21,11 @@ install = "pnpm install"
 [[post-start]]
 build = "pnpm run build"
 
+# Sync .claude/skills from .agents/skills so Claude Code loads the same project
+# skills. A symlink caused Claude Code to fail with ENOENT, so we copy instead.
+[[post-start]]
+sync-claude-skills = "rsync -a --delete .agents/skills/ .claude/skills/"
+
 # Ensure the generated Claude Code fallow gate hook is executable. Git sometimes
 # loses the executable bit on generated files, and the hook silently fails if
 # it is not executable.

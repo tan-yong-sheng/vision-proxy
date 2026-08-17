@@ -151,3 +151,19 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: new plan plans/backend-evidence-validation-mvp-for-agents-docs.md
 - 2026-08-16: archive research/backend-allow-api-key-in-config-json.md -> archive/research-backend-allow-api-key-in-config-json.md (complete)
 - 2026-08-16: archive research/backend-rule-based-evidence-validation-for-research-docs.md -> archive/research-backend-rule-based-evidence-validation-for-research-docs.md (complete)
+- 2026-08-16: new bug bugs/backend-curl-and-homebrew-install-fail.md
+- 2026-08-16: new bug bugs/backend-claude-code-and-codex-hooks-not-working.md
+- 2026-08-16: archive plans/backend-evidence-validation-mvp-for-agents-docs.md -> archive/plan-backend-evidence-validation-mvp-for-agents-docs.md (complete)
+- 2026-08-16: new research research/backend-curl-and-homebrew-install-failure-on-tan-yong-sheng-fork.md
+- 2026-08-16: new research research/backend-claude-code-and-codex-hook-patterns.md
+- 2026-08-16: new plan plans/backend-fix-curl-and-homebrew-install.md
+- 2026-08-16: new plan plans/backend-add-pretooluse-read-hook.md
+- 2026-08-16: archive research/backend-curl-and-homebrew-install-failure-on-tan-yong-sheng-fork.md -> archive/research-backend-curl-and-homebrew-install-failure-on-tan-yong-sheng-fork.md (complete)
+- 2026-08-16: archive research/backend-claude-code-and-codex-hook-patterns.md -> archive/research-backend-claude-code-and-codex-hook-patterns.md (complete)
+- 2026-08-16: new research research/backend-codex-pretooluse-hook-feasibility-confirmation.md
+- 2026-08-16: new research research/backend-claude-code-hook-feasibility-openclaude-confirmation.md
+- 2026-08-17: sync plans/backend-add-pretooluse-read-hook.md from .lavish/backend-add-pretooluse-read-hook-plan.html (synced from lavish feedback)
+- 2026-08-17: sync plans/backend-add-pretooluse-read-hook.md from .lavish/backend-add-pretooluse-read-hook-plan.html (synced from lavish feedback)
+- 2026-08-17: scaffold-worktrees plans/backend-add-pretooluse-read-hook.md -> worktrees/backend-phase-1-prototype-spike.md
+- 2026-08-17: scaffold-worktrees plans/backend-add-pretooluse-read-hook.md -> worktrees/backend-phase-2-full-implementation.md
+- 2026-08-17: scaffold-worktrees plans/backend-fix-curl-and-homebrew-install.md -> worktrees/backend-fix-curl-and-homebrew-install.md

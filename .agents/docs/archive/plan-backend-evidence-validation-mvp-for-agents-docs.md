@@ -1,10 +1,10 @@
 ---
 type: plan
 title: evidence validation MVP for agents-docs
-description: "Split docs.js into scripts/lib/ + add scripts/evidence.js with 3 rule-based checks; update SKILL.md/REFERENCE.md with the Summary-of-findings format and dependency-evidence guidance."
+description: Split docs.js into scripts/lib/ + add scripts/evidence.js with 3 rule-based checks; update SKILL.md/REFERENCE.md with the Summary-of-findings format and dependency-evidence guidance.
 area: backend
 tags: [agents-docs, evidence, validation, refactor]
-status: active
+status: complete
 created: "2026-08-16"
 updated: "2026-08-16"
 stale_after: "2026-10-15"

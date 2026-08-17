@@ -8,6 +8,7 @@ status: active
 created: "2026-08-17"
 updated: "2026-08-17"
 stale_after: "2026-08-31"
+branch: feat/fix-curl-homebrew-install
 related: [../plans/backend-fix-curl-and-homebrew-install.md]
 ---
 # fix curl and homebrew install

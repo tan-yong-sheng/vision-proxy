@@ -22,15 +22,37 @@ See plan deliverables.
 
 ## Tasks
 
-- [ ] Implement fix curl and homebrew install per plan
+- [x] Implement fix curl and homebrew install per plan
+
+## Changes
+
+- `scripts/install.sh`: dropped the `jq` dependency (now parses GitHub release
+  JSON with POSIX awk), added early dependency checks with actionable guidance,
+  added a `--add-to-path` flag that appends `~/.local/bin` to the detected shell
+  profile, and improved error messages for missing assets / checksum mismatch.
+- `Formula/vision-proxy.rb`: sha256 values are now documented as auto-filled at
+  release time (no manual per-release edit needed).
+- `.github/workflows/release.yml`: switched the build to pnpm (was incorrectly
+  using npm), and added a step that backfills the four per-arch sha256 values
+  from the generated `sha256sum.txt` and commits the updated formula to `main`.
+- `.github/workflows/installer.yml` (new): exercises `scripts/install.sh`
+  end-to-end on ubuntu-latest and macos-latest against a local release mock,
+  with no `jq` installed, and verifies `vp` lands on PATH.
+- `README.md`: updated the install section to drop the "formula not installable"
+  note, document `--add-to-path`, and clarify the no-jq requirement.
 
 ## Verification
 
-npm test
+- `pnpm test` passes (152 tests).
+- `scripts/install.sh` dry-run against a local mock release succeeds: resolves
+  release, downloads, verifies checksum, symlinks `vp`, appends to `.bashrc`
+  with `--add-to-path`, and `vp --version` works on PATH.
+- Error paths verified: missing asset for the current arch exits with a clear
+  message; `json_value`/`asset_url` awk handles both pretty and compact JSON.
 
 ## Status
 
-- [ ] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
+- [x] Worktree created
+- [x] Implementation complete
+- [x] Tests pass
 - [ ] Landed on feature branch (ready for PR/merge)

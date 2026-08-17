@@ -40,6 +40,29 @@ orca orchestration worker-start \
   --json
 ```
 
+## Coordinate from the main worktree
+
+An Orca run is bound to the coordinator terminal that created it.
+Keep the coordinator in the **main worktree** - the original repository clone where `.git/` is a real directory - and reserve linked worktrees for worker execution only.
+
+If you create a run from a linked worktree and later try to dispatch from another terminal, you will see:
+
+```
+consumer_fenced: worker-start requires the coordinator terminal currently bound to the Task Run.
+```
+
+Rebind the current terminal to the run and dispatch again:
+
+```bash
+orca orchestration run-use --id <run-id> --json
+orca orchestration worker-start --worktree branch:<branch> --agent claude --task <task-id> --run <run-id> --json
+```
+
+Quick check:
+
+- Main worktree: `.git` is a directory (`test -d .git`).
+- Linked worktree: `.git` is a file pointing back to the main repo's `.git/worktrees/<name>/`.
+
 ## Worktree & terminal cleanup workflows
 
 Always clean up worktrees and worker terminals when tasks complete or fail:

@@ -80,10 +80,10 @@ Run `vp config init` to scaffold a project config file.
 | `VP_FALLBACK_MODELS` | Comma-separated `provider/model-id` list tried when the primary model fails (e.g. `openai/gpt-4o,google/gemini-2.5-flash`) | unset |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
 | `VP_ALLOW_DRIVES` | Set to `0`/`false`/`no`/`off` to disable local drive access on Windows | unset (drives allowed) |
-| `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from hook shims | shim-specific |
+| `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from `vp hook` (Codex preview limit) | `2000` |
 | `VP_CACHE_DIR` | Directory for the description cache | `~/.vision-proxy` |
-| `VP_HOOK_TIMEOUT_MS` | Hook shim timeout in milliseconds | `30000` |
-| `VP_BIN` | Path to the `vp` binary used by shims | `vp` |
+| `VP_HOOK_TIMEOUT_MS` | `vp hook` timeout in milliseconds | `30000` |
+| `VP_BIN` | Path to the `vp` binary used by `vp hook` | `vp` |
 | `VP_KEYRING` | Set to `0`, `false`, or `off` to disable OS keyring credential storage | unset (keyring enabled) |
 
 Provider API keys are read from their standard environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GOOGLE_API_KEY`.
@@ -110,14 +110,14 @@ A missing API key on the primary provider is always a fatal error; fallbacks are
 
 ## Agent hooks
 
-Install a hook so Claude Code or Codex automatically describes images on every user turn:
+Install hooks so Claude Code or Codex automatically describes images both when you mention a path in your prompt and when you read an image via the `Read` tool:
 
 ```bash
 vp integration install claude-code
 vp integration install codex
 ```
 
-The shim shells out to `vp analyze`, then returns the fenced description as additional hook context.
+Each agent registers two hooks (`UserPromptSubmit` and `PreToolUse Read`) that invoke the absolute `vp hook` path. `vp hook` reads the event from stdin, runs `vp analyze` on any image it finds, and returns the fenced description as additional hook context. On any error it fails open (exit 0, no output), so the agent proceeds unchanged.
 
 ## Pi integration
 
@@ -129,7 +129,7 @@ vp integration install pi
 
 This writes a single auto-discovered extension into `~/.pi/agent/extensions/vision-proxy.ts`. The generated extension shells out to `vp analyze --json`, reads `VP_BIN` from the environment (falling back to `vp` on `PATH`), and fails open if `vp` is missing. Re-run the installer after a CLI upgrade to refresh the extension, and use `vp integration uninstall pi` to remove it.
 
-Every generated artifact (the Pi extension and the Claude Code / Codex shims) is stamped with the `vp` version that produced it. Run `vp integration status` to list installed integrations alongside their version markers; any integration whose marker predates the installed `vp` is flagged so you know to re-run `vp integration install`.
+Every installed integration (the Pi extension and the Claude Code / Codex hooks) is stamped with the `vp` version that produced it. Run `vp integration status` to list installed integrations alongside their version markers; any integration whose marker predates the installed `vp` is flagged so you know to re-run `vp integration install`.
 
 ## Output
 

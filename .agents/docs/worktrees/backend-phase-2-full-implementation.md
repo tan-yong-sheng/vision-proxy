@@ -9,6 +9,10 @@ created: "2026-08-17"
 updated: "2026-08-17"
 stale_after: "2026-08-31"
 branch: feat/add-pretooluse-read-hook-impl
+pr_strategy: combined
+combined_with:
+  - feat/add-pretooluse-read-hook
+review_worktree: qa/vp-hook
 depends_on: [../worktrees/backend-phase-1-prototype-spike.md]
 stack_position: 2
 stack_batch: hook

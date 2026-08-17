@@ -9,6 +9,10 @@ created: "2026-08-17"
 updated: "2026-08-17"
 stale_after: "2026-08-31"
 branch: feat/add-pretooluse-read-hook
+pr_strategy: combined
+combined_with:
+  - feat/add-pretooluse-read-hook-impl
+review_worktree: qa/vp-hook
 stack_position: 1
 stack_batch: hook
 related: [../plans/backend-add-pretooluse-read-hook.md]

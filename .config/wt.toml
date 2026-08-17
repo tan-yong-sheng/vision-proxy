@@ -34,6 +34,11 @@ chmod-fallow-gate = "chmod +x .claude/hooks/fallow-gate.sh"
 
 # --- Pre-commit validation (runs during `wt merge`, before the squash commit) -
 # Fast feedback: lint + typecheck must pass before a commit is recorded.
+
+# Keep .claude/skills in sync with .agents/skills before validation.
+[[pre-commit]]
+sync-claude-skills = "rsync -a --delete .agents/skills/ .claude/skills/"
+
 [[pre-commit]]
 lint = "pnpm run lint"
 typecheck = "pnpm exec tsc --noEmit"

@@ -106,12 +106,16 @@ To review existing code that is not part of a large diff, keep the branch diff s
 
 ### Per-worktree review vs merge-preview
 
-| Branch relationship | Prefer | Why |
-| --- | --- | --- |
-| Independent branches with no shared files | Per-worktree review | Each branch is reviewable on its own. |
-| Dependent or stacked branches, or branches touching shared files | Disposable merge-preview worktree (Step 10) | The combined state is what ships; per-branch reviews can miss merge-order issues, duplicate configuration drift, or shared-contract conflicts. |
+When using `/worktrunk-orca-delegation`, inspect the worktree doc's `pr_strategy` and `review_worktree` fields to choose the review surface.
 
-When using `/worktrunk-orca-delegation`, inspect the worktree doc's `depends on` field. If it lists another active worktree, dispatch a single merge-preview review task for the whole batch instead of separate per-worktree reviews.
+| `pr_strategy` | Review surface | Why |
+| --- | --- | --- |
+| `separate` | The feature worktree | Each branch is its own PR and is reviewable on its own. |
+| `combined` | The `qa/*` merge-preview named in `review_worktree` | The combined state is what ships; per-branch reviews can miss merge-order issues, duplicate configuration drift, or shared-contract conflicts. |
+| `stacked` | Each layer's feature worktree, in order | Upper layers already include lower layers, so per-layer review is sufficient. |
+| `direct` | None (local checks only) | Docs/tests only; skip `/review-gate`. |
+
+If `review_worktree` is set, dispatch a single merge-preview review task for the whole batch instead of separate per-worktree reviews.
 
 #### Example: merge-preview for two dependent worktrees
 

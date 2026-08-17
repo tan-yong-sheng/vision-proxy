@@ -34,8 +34,19 @@ Group work so each worktree has a narrow, reviewable scope. Only independent wor
 
 > **Worktree Dispatch Contract:**
 > 1. `agents-docs` plans the feature and runs `scaffold-worktrees` to generate flight logs (`worktrees/<area>-<slug>.md`).
-> 2. Each flight log specifies the task scope, branch name, and dependencies for `worktrunk-orca-delegation`.
-> 3. The orchestrator updates the flight log status (`active` &rarr; `merged`) as workers complete, and dispatches `/review-gate` before release.
+> 2. Each flight log specifies the task scope, branch name, `pr_strategy`, and dependencies for `worktrunk-orca-delegation`.
+> 3. Before spawning worktrees, run `.agents/skills/worktrunk-orca-delegation/scripts/plan-worktrees.sh` to produce a deterministic JSON plan from the flight logs.
+> 4. Create the implementation worktrees listed in the plan, plus any `qa/*` merge-preview worktrees.
+> 5. The orchestrator updates the flight log status (`active` &rarr; `merged`) as workers complete, and dispatches `/review-gate` before release.
+
+Use the worktree doc's `pr_strategy` field to decide how many worktrees and PRs to create:
+
+| `pr_strategy` | Worktrees to spawn | QA worktree? |
+|---|---|---|
+| `separate` | One per branch | No |
+| `combined` | One per branch + one merge-preview | Yes: `review_worktree` |
+| `stacked` | One per layer | Optional end-to-end preview only |
+| `direct` | One or none | No |
 
 ### 2. Create run and tasks
 
@@ -64,17 +75,16 @@ wt switch --create <branch> --base <base> --no-cd
 
 Prime fresh worktrees once to skip first-run screens. See [REFERENCE.md](REFERENCE.md).
 
-**Overlay skills into the worktree:** After creating the worktree, copy over any orchestrator skills with `--ignore-existing`. `.claude/skills` should be a tracked relative symlink to `.agents/skills`; do not rsync into it or you will write through the symlink into `.agents/skills`.
+**Overlay skills into the worktree:** After creating the worktree, copy over any orchestrator skills with `--ignore-existing`. Claude Code does not follow a symlinked `.claude/skills` directory, so copy the directory contents instead of symlinking.
 
 ```bash
 if [ -d <source-worktree>/.agents/skills ]; then
   mkdir -p <worktree>/.agents/skills
   rsync -au --ignore-existing <source-worktree>/.agents/skills/ <worktree>/.agents/skills/
 fi
-# Ensure .claude/skills is a relative symlink to .agents/skills in the worktree.
-if [ ! -L <worktree>/.claude/skills ]; then
-  rm -rf <worktree>/.claude/skills
-  ln -s .agents/skills <worktree>/.claude/skills
+if [ -d <source-worktree>/.claude/skills ]; then
+  mkdir -p <worktree>/.claude/skills
+  rsync -au --ignore-existing <source-worktree>/.claude/skills/ <worktree>/.claude/skills/
 fi
 ```
 
@@ -154,16 +164,16 @@ If a branch was already merged without review, make it review-clear retroactivel
 
 ### 8. Validation gate & multi-worktree routing
 
-Before releasing, classify worktree risk and route to the appropriate validation path.
-**Default to a disposable merge-preview QA worktree; use per-worktree review only when branches are provably independent and low-risk.**
+Before releasing, read each worktree doc's `pr_strategy` and `review_worktree` fields, then route to the appropriate validation path.
 
-| Risk / Relationship | Signals | Validation Path |
+| `pr_strategy` | Review surface | Why |
 |---|---|---|
-| **High / Medium Risk** | Shared contracts, stacked PRs, auth/security, new dependencies, large diffs | Disposable merge-preview QA worktree + `/review-gate` |
-| **Dependent / Stacked** | Worktree doc has `depends on` or files overlap | Disposable merge-preview QA worktree + `/review-gate` |
-| **Low Risk & Independent** | Docs, tests, config tweaks, no `depends on`, disjoint files | Per-worktree `/review-gate` or local checks |
+| `separate` | The feature worktree | Each branch is its own PR and is reviewable on its own. |
+| `combined` | The `qa/*` merge-preview named in `review_worktree` | The combined state is what ships; review the union before publishing. |
+| `stacked` | Each layer's feature worktree, in dependency order | Upper layers already include lower layers, so per-layer review is sufficient. |
+| `direct` | Local checks only | Docs/tests only; skip `/review-gate`. |
 
-A branch is **provably independent** when its worktree doc has no `depends on` and its changed files do not overlap with any other active branch.
+A branch is **provably independent** when its worktree doc has `pr_strategy: separate` and its changed files do not overlap with any other active branch.
 
 **Local checks only:**
 
@@ -176,8 +186,9 @@ bunx turbo run type-check
 
 **Dispatching `/review-gate`:**
 
-- **Independent branch:** dispatch a task running `/review-gate` directly in the branch worktree.
-- **Combined / Stacked branches:** create a single disposable merge-preview QA worktree following [`/review-gate` Step 10](file:///home/tys203831/Documents/Coding/vision-proxy/.agents/skills/review-gate/SKILL.md#L229), run `/review-gate`, and write findings to `.agents/docs/qa/`.
+- **`separate` branch:** dispatch a task running `/review-gate` directly in the feature worktree.
+- **`combined` branches:** create the single disposable merge-preview QA worktree named in `review_worktree`, merge the combined branches into it, and run `/review-gate` on that worktree.
+- **`stacked` branches:** dispatch `/review-gate` per layer in dependency order; create an optional `qa/*` end-to-end preview only when explicitly requested.
 
 ### Manual `worker_done`
 
@@ -246,7 +257,7 @@ wt merge <target>
 - Verify commits exist before releasing.
 - Close stale terminals before redispatch.
 - Use a time-driven waker for silent stalls. See [REFERENCE.md](REFERENCE.md).
-- `/review-gate` is dispatched conditionally per worktree; low-risk worktrees run local checks only. When in doubt, dispatch `/review-gate` - never merge a branch that is not review-clear.
+- Read the worktree doc's `pr_strategy` and `review_worktree` fields before spawning worktrees. Dispatch `/review-gate` against the surface named in `review_worktree` for `combined` strategies, against each feature worktree for `separate` and `stacked` strategies, and skip it for `direct` strategies. Never merge a branch that is not review-clear.
 - **Single-Preview Worktree Invariant (`qa/<batch-slug>`):** Use the `qa/<batch-slug>` format for integration worktrees (e.g. `qa/vp-post-migration-merge`). Do NOT hardcode literal names. Maintain exactly one preview worktree per integration batch. When base updates arrive, pull them into the existing preview worktree via `git merge <base>`. Upon final merge, immediately prune the preview worktree (`wt remove qa/<batch-slug>`).
 - **Commit Provenance Verification:** Always run `git log -n 5 --format='%h | %an <%ae> | %cr | %s'` to ground author attribution before forming hypotheses about external agent activity on a branch.
 - Check the worker runtime for sandbox restrictions. Delegated agents that need local state persistence or browser access may fail with `EACCES` inside locked-down sandboxes (e.g., nono). Move the worktree to a host with full read/write permissions before dispatching visual QA or long-running interactive tasks.

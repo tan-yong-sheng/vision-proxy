@@ -68,6 +68,59 @@ When creating a `plan`, evaluate worktree granularity:
 - Fill in the `## Tools / MCP / Skills` section with the native tools, MCP servers, and agent skills the plan depends on.
 - Conclude the planning turn by asking the user if they want to dispatch the planned worktree(s).
 
+## PR structure, worktree mapping, and push rules
+
+Decide how branches become PRs before any worktree is spawned. Record the decision in each worktree doc's frontmatter so `/worktrunk-orca-delegation` and `/review-gate` do not have to guess.
+
+### Decision matrix
+
+| Branch relationship | PR strategy | Implementation worktrees | QA / review worktree |
+|---|---|---|---|
+| Independent, disjoint changes | One PR per branch | One per branch | None - review the feature worktree |
+| Prototype/spike overwritten by production | Combine into one PR | Prototype + production branches | One merge-preview: `qa/<feature-slug>` |
+| True stacked PRs (B depends on A) | One PR per layer | One per layer | None - review each layer in order; optional `qa/<stack>` only for end-to-end preview |
+| Low-risk docs/tests only | Single PR or direct push | One or none | None - local checks only |
+
+- `separate`: one branch becomes its own PR.
+- `combined`: multiple branches ship in one PR; use a disposable merge-preview worktree for review.
+- `stacked`: layers are reviewed independently in dependency order.
+- `direct`: docs/tests only; push straight to the target branch without a PR.
+
+### Worktree doc fields
+
+Record only the fields needed for the chosen strategy:
+
+| Field | When needed | Values |
+|---|---|---|
+| `pr_strategy` | Always | `separate` \| `combined` \| `stacked` \| `direct` |
+| `combined_with` | Only when `pr_strategy: combined` | List of branch names in the same PR |
+| `review_worktree` | Only when review happens in a `qa/*` merge-preview | e.g. `qa/vp-hook` |
+| `depends_on` | Only when `pr_strategy: stacked` | List of upstream branch names |
+| `stack_batch` | Only when grouping stacked layers for reporting | Short slug, e.g. `hook-pretooluse-read` |
+
+Example for a combined PR:
+
+```yaml
+---
+worktree: feat/add-pretooluse-read-hook
+branch: feat/add-pretooluse-read-hook
+pr_strategy: combined
+combined_with:
+  - feat/add-pretooluse-read-hook-impl
+review_worktree: qa/vp-hook
+---
+```
+
+### Planning checklist
+
+- [ ] Decide PR strategy before creating any worktree doc.
+- [ ] List every branch required for the work.
+- [ ] Mark each branch as `separate`, `combined`, `stacked`, or `direct`.
+- [ ] For `combined` strategies, pick a merge-preview worktree name `qa/<feature-slug>`.
+- [ ] For `stacked` strategies, list dependency order.
+- [ ] Record `pr_strategy`, `combined_with`, and `review_worktree` in each worktree doc.
+- [ ] Only then spawn implementation worktrees via `/worktrunk-orca-delegation`.
+
 ### scaffold-worktrees - JIT worktree generation
 
 `scaffold-worktrees <plan-doc>` parses the `## Worktree Strategy` section (or deliverables table) from a plan and auto-generates isolated `worktrees/<area>-<slug>.md` flight logs.

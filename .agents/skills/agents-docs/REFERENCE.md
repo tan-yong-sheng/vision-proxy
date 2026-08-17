@@ -42,6 +42,9 @@ The skill self-triggers from its description: it loads on research/plan/worktree
 | `depends_on` | Stacked worktrees: list of upstream dependency docs. | `[../worktrees/backend-schema.md]` |
 | `stack_position` | Stacked worktrees: integer 1-indexed position in sequential stack. | `2` |
 | `stack_batch` | Stacked worktrees: batch identifier grouping stacked layers. | `2026-02-auth-overhaul` |
+| `pr_strategy` | How this branch becomes a PR: `separate`, `combined`, `stacked`, or `direct`. | `combined` |
+| `combined_with` | Branches that ship in the same PR (when `pr_strategy: combined`). | `[feat/add-pretooluse-read-hook-impl]` |
+| `review_worktree` | Disposable merge-preview worktree used by `/review-gate` (when `pr_strategy: combined`). | `qa/vp-hook` |
 | `okf_version` | Reserved for `index.md` only. | `"0.2"` |
 
 Status values:

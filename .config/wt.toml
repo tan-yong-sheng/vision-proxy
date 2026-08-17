@@ -21,6 +21,12 @@ install = "pnpm install"
 [[post-start]]
 build = "pnpm run build"
 
+# Ensure the generated Claude Code fallow gate hook is executable. Git sometimes
+# loses the executable bit on generated files, and the hook silently fails if
+# it is not executable.
+[[post-start]]
+chmod-fallow-gate = "chmod +x .claude/hooks/fallow-gate.sh"
+
 # --- Pre-commit validation (runs during `wt merge`, before the squash commit) -
 # Fast feedback: lint + typecheck must pass before a commit is recorded.
 [[pre-commit]]

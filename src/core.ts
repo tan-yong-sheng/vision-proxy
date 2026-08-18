@@ -51,8 +51,8 @@ export interface VisionConfig {
 	cacheMaxAgeDays: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
-	/** Per-provider base URL overrides, e.g. { "openai": "http://localhost:8000/v1" }. */
-	baseURLs: Record<string, string>;
+	/** Optional base URL override for the current provider. */
+	baseUrl: string;
 	/**
 	 * Optional provider API key persisted as plain text. Falls back after the
 	 * CLI --api-key flag and provider-specific env vars, and before the OS
@@ -362,7 +362,7 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-2.5-pro": { format: "gemini_normalized_1000" },
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
-	baseURLs: {},
+	baseUrl: "",
 	apiKey: "",
 };
 
@@ -386,7 +386,7 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"cacheMaxAgeDays",
 	"pHashSimilarityThreshold",
 	"groundingModels",
-	"baseURLs",
+	"baseUrl",
 	"apiKey",
 ]);
 
@@ -505,24 +505,6 @@ function parseFloatOverride(
 }
 
 /**
- * Parse `VP_BASE_URLS` — a comma-separated list of `provider=url` pairs into a
- * per-provider base URL map. Invalid entries are skipped.
- */
-function parseBaseUrlsOverride(value: string | undefined): Record<string, string> | undefined {
-	if (value === undefined) return undefined;
-	const out: Record<string, string> = {};
-	for (const pair of value.split(",")) {
-		const eq = pair.indexOf("=");
-		if (eq <= 0 || eq >= pair.length - 1) continue;
-		const provider = pair.slice(0, eq).trim();
-		const url = pair.slice(eq + 1).trim();
-		if (!provider || !url || !PROVIDER_PATTERN.test(provider)) continue;
-		out[provider] = url;
-	}
-	return Object.keys(out).length > 0 ? out : undefined;
-}
-
-/**
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
@@ -554,7 +536,6 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 		"pHashSimilarityThreshold",
 		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
-	assignIfDefined(overrides, "baseURLs", parseBaseUrlsOverride(env.VP_BASE_URLS));
 
 	return overrides;
 }
@@ -568,7 +549,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxBatch: boolean;
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
-	baseURLs: boolean;
 } {
 	return {
 		mode: Boolean(env.VP_MODE),
@@ -579,7 +559,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		maxBatch: env.VP_MAX_BATCH !== undefined,
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
-		baseURLs: env.VP_BASE_URLS !== undefined,
 	};
 }
 
@@ -657,14 +636,9 @@ function fallbackGroundingModels(
 	return validated;
 }
 
-function fallbackBaseUrls(value: unknown): Record<string, string> {
-	if (!isRecord(value)) return { ...DEFAULT_CONFIG.baseURLs };
-	const out: Record<string, string> = {};
-	for (const [provider, url] of Object.entries(value)) {
-		if (typeof url !== "string" || !url || !PROVIDER_PATTERN.test(provider)) continue;
-		out[provider] = url;
-	}
-	return out;
+function fallbackBaseUrl(value: unknown): string {
+	if (typeof value === "string" && value) return value;
+	return DEFAULT_CONFIG.baseUrl;
 }
 
 export function sanitize(config: VisionConfig): VisionConfig {
@@ -697,7 +671,7 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		DEFAULT_CONFIG.pHashSimilarityThreshold,
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
-	safe.baseURLs = fallbackBaseUrls(safe.baseURLs);
+	safe.baseUrl = fallbackBaseUrl(safe.baseUrl);
 	return safe;
 }
 

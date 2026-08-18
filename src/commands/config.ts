@@ -89,15 +89,9 @@ function coerceValue(key: string, value: string): unknown {
 	if (typeof def === "boolean") {
 		return value === "true" || value === "1" || value === "on";
 	}
-	// baseURLs (object) takes a JSON literal so callers can set complex values
-	// from the CLI. On a parse failure we drop back to the default (sanitize()
-	// would otherwise reject the value anyway).
-	if (typeof def === "object" && def !== null) {
-		try {
-			return JSON.parse(value);
-		} catch {
-			return def;
-		}
+	// baseUrl (string) - just return the value as-is
+	if (key === "baseUrl") {
+		return value;
 	}
 	return value;
 }

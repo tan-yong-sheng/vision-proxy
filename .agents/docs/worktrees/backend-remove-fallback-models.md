@@ -38,7 +38,7 @@ npm test
 
 ## Status
 
-- [ ] Worktree created
+- [x] Worktree created
 - [ ] Implementation complete
 - [ ] Tests pass
 - [ ] Landed on feature branch (ready for PR/merge)

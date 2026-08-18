@@ -241,6 +241,16 @@ describe("resolveConfig", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
 		assert.equal(cfg.maxImagesPerCall, DEFAULT_CONFIG.maxImagesPerCall);
 	});
+
+	it("applies apiKey from file config", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv, { apiKey: "file-key" });
+		assert.equal(cfg.apiKey, "file-key");
+	});
+
+	it("defaults apiKey to empty string", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
+		assert.equal(cfg.apiKey, "");
+	});
 });
 
 describe("resolveConfig baseURLs / fallbackModels", () => {

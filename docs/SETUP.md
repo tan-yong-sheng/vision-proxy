@@ -52,6 +52,6 @@ See [CONFIG.md](./CONFIG.md) for the full schema and copy-paste JSON examples.
 | Symptom | Fix |
 |---------|-----|
 | `no API key for provider "openai"` | Set `OPENAI_API_KEY` or use `--api-key` |
-| `path outside allowed directories` | Use an absolute path inside tmp, cwd, or home |
+| `path is not a local absolute path` | Use an absolute path on a local drive (not a network share) |
 | `model is currently experiencing high demand` | Try a fallback model or wait |
 

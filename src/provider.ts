@@ -99,13 +99,18 @@ function envValue(name: string | undefined, env: NodeJS.ProcessEnv): string | un
 	return v && v.length > 0 ? v : undefined;
 }
 
-/** Resolve a provider + model id into a constructed LanguageModel. */
+/**
+ * Resolve a provider + model id into a constructed LanguageModel.
+ *
+ * API key precedence: explicit --api-key > env var > config.apiKey > OS keyring.
+ */
 export function resolveModel(
 	providerId: string,
 	modelId: string,
 	env: NodeJS.ProcessEnv = process.env,
 	explicitApiKey?: string,
 	explicitBaseURL?: string,
+	configApiKey?: string,
 ): ResolveModelOutcome {
 	const provider = PROVIDERS[providerId] as ApiProviderSpec | undefined;
 	if (!provider) {
@@ -117,7 +122,10 @@ export function resolveModel(
 		};
 	}
 	const apiKey =
-		explicitApiKey ?? envValue(provider.apiKeyEnv, env) ?? getStoredProviderKey(providerId);
+		explicitApiKey ??
+		envValue(provider.apiKeyEnv, env) ??
+		(configApiKey && configApiKey.length > 0 ? configApiKey : undefined) ??
+		getStoredProviderKey(providerId);
 	const baseURL = envValue(provider.baseUrlEnv, env) ?? explicitBaseURL;
 	if (!apiKey) {
 		return {

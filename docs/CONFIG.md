@@ -30,6 +30,8 @@ interface VisionConfig {
   groundingModels: Record<string, { format: string }>;
   baseURLs: Record<string, string>;
   fallbackModels: string[];
+  /** Optional provider API key persisted as plain text in config. */
+  apiKey: string;
 }
 ```
 
@@ -51,6 +53,7 @@ interface VisionConfig {
 | `groundingModels` | object | `{}` | Per-model grounding format overrides. |
 | `baseURLs` | object | `{}` | Per-provider base URL overrides, e.g. `{ "openai": "http://localhost:8000/v1" }`. |
 | `fallbackModels` | string[] | `[]` | Ordered list of `provider/model-id` strings to try when the primary model fails. |
+| `apiKey` | string | `""` | Provider API key persisted as plain text in config. Prefer `vp provider store-key` for OS keyring storage. |
 
 ## Example configs
 

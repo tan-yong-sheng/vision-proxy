@@ -16,7 +16,7 @@ import { access, mkdir, readFile, realpath, stat, writeFile } from "node:fs/prom
 import os from "node:os";
 import { basename, dirname, extname, join, parse } from "node:path";
 import { imageSize } from "image-size";
-import type { Image as ImageScriptImage } from "imagescript";
+import sharp from "sharp";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type ProxyMode = "fallback" | "always" | "off";
@@ -1303,23 +1303,31 @@ function isOversized(width: number, height: number): boolean {
 	return width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION;
 }
 
-async function safeCropImage(
-	imageBytes: Buffer,
-	crop: ResolvedCrop,
-): Promise<ImageScriptImage | null> {
+async function safeCropImage(imageBytes: Buffer, crop: ResolvedCrop): Promise<Buffer | null> {
 	const dims = extractDimensions(imageBytes);
 	if (dims && isOversized(dims.width, dims.height)) return null;
-
-	const { Image } = await import("imagescript");
-	const img = await Image.decode(new Uint8Array(imageBytes));
-	if (isOversized(img.width, img.height)) return null;
-
-	return img.crop(crop.x, crop.y, crop.width, crop.height);
+	try {
+		const { width, height } = await sharp(imageBytes).metadata();
+		if (width === undefined || height === undefined || isOversized(width, height)) return null;
+		const buf = await sharp(imageBytes)
+			.extract({
+				left: crop.x,
+				top: crop.y,
+				width: crop.width,
+				height: crop.height,
+			})
+			.toBuffer();
+		return buf;
+	} catch {
+		return null;
+	}
 }
 
-async function encodeCroppedImage(cropped: ImageScriptImage, mimeType?: string): Promise<Buffer> {
-	const encoded = mimeType === "image/png" ? await cropped.encode(1) : await cropped.encodeJPEG(90);
-	return Buffer.from(encoded);
+async function encodeCroppedImage(cropped: Buffer, mimeType?: string): Promise<Buffer> {
+	if (mimeType === "image/png") {
+		return sharp(cropped).png().toBuffer();
+	}
+	return sharp(cropped).jpeg({ quality: 90 }).toBuffer();
 }
 
 export async function cropImage(

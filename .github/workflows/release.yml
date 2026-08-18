@@ -34,20 +34,24 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: pnpm
 
       - name: Install dependencies
-        # --ignore-scripts skips the `prepare` build; we build explicitly below.
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: pnpm install --frozen-lockfile
 
       - name: Build dist
-        run: npm run build
+        run: pnpm run build
 
       - name: Prune dev dependencies
         # The tarball ships only production deps; typescript/@types are build-time only.
-        run: npm prune --omit=dev --no-audit --no-fund
+        run: pnpm prune --omit=dev --no-audit --no-fund
 
       - name: Stage release tree
         shell: bash
@@ -78,6 +82,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -88,6 +96,48 @@ jobs:
           cd artifacts
           sha256sum vision-proxy-* > sha256sum.txt
           cat sha256sum.txt
+
+      - name: Update Formula checksums
+        # Fill Formula/vision-proxy.rb with the real per-arch sha256 values from
+        # the just-generated sha256sum.txt so `brew install` works after release.
+        run: |
+          set -eu
+          sha_file="artifacts/sha256sum.txt"
+          formula="Formula/vision-proxy.rb"
+          for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            asset="vision-proxy-${target}.tar.gz"
+            sum="$(awk -v a="$asset" '$2 == a {print $1}' "$sha_file")"
+            if [ -z "$sum" ]; then
+              echo "::warning::missing checksum for $asset" >&2
+              continue
+            fi
+            # Replace the sha256 line that immediately follows the matching url line.
+            awk -v asset="$asset" -v sum="$sum" '
+              /^ *url / && $0 ~ asset { pending = 1; print; next }
+              pending && /sha256 "/ {
+                sub(/"[0-9a-f]+"/, "\"" sum "\"")
+                pending = 0
+              }
+              { print }
+            ' "$formula" > "${formula}.tmp" && mv "${formula}.tmp" "$formula"
+          done
+          echo "Updated Formula checksums:"
+          grep -A1 "vision-proxy-" "$formula" | grep sha256
+
+      - name: Commit updated Formula
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet Formula/vision-proxy.rb; then
+            echo "Formula unchanged; nothing to commit."
+            exit 0
+          fi
+          git add Formula/vision-proxy.rb
+          git commit -m "chore(formula): backfill sha256 for v${GITHUB_REF_NAME#v}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:main"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

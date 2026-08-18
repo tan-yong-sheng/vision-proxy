@@ -26,11 +26,11 @@ Replace the per-provider `baseURLs` config object with a single `baseUrl` string
 
 ## Tasks
 
-- [ ] Replace `baseURLs` with `baseUrl: string` in `VisionConfig`, `DEFAULT_CONFIG`, env parsing, and persisted keys.
-- [ ] Update `analyze.ts` to use `config.baseUrl`.
-- [ ] Update `config.ts` coercion.
-- [ ] Update unit tests.
-- [ ] Update config documentation.
+- [x] Replace `baseURLs` with `baseUrl: string` in `VisionConfig`, `DEFAULT_CONFIG`, env parsing, and persisted keys.
+- [x] Update `analyze.ts` to use `config.baseUrl`.
+- [x] Update `config.ts` coercion.
+- [x] Update unit tests.
+- [x] Update config documentation.
 
 ## Verification
 
@@ -38,7 +38,7 @@ npm test
 
 ## Status
 
-- [ ] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
-- [ ] Landed on feature branch (ready for PR/merge)
+- [x] Worktree created
+- [x] Implementation complete
+- [x] Tests pass
+- [x] Landed on feature branch (ready for PR/merge)

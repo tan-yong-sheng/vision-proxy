@@ -25,6 +25,7 @@ import {
 	readToolFilePath,
 	resolveImagePath,
 	runHook,
+	vpEntryToSpawn,
 } from "./hook.ts";
 
 /** Write a fake `vp` that emits a fenced description for any args. */
@@ -285,4 +286,58 @@ test("readEvent returns null on invalid JSON", () => {
 	// so we validate the public shape contract indirectly through runHook no-op.
 	assert.equal(typeof readEvent, "function");
 	assert.equal(typeof resolveImagePath, "function");
+});
+
+test("vpEntryToSpawn prefixes node for a .js entry path", () => {
+	const js = vpEntryToSpawn("/opt/vision-proxy/dist/cli.js");
+	assert.equal(js.command, process.execPath);
+	assert.deepEqual(js.args, ["/opt/vision-proxy/dist/cli.js"]);
+});
+
+test("vpEntryToSpawn returns the launcher as-is for non-.js paths", () => {
+	const launcher = vpEntryToSpawn("/home/me/.local/bin/vp");
+	assert.equal(launcher.command, "/home/me/.local/bin/vp");
+	assert.deepEqual(launcher.args, []);
+});
+
+/**
+ * Regression test for the Homebrew release (0644 dist/cli.js, non-PATH shebang):
+ * when the hook is launched via the compiled entry, resolveVpBin() returns a
+ * `.js` path that cannot be spawned directly (EACCES). The hook must re-exec it
+ * under process.execPath, so a UserPromptSubmit flow still produces context.
+ */
+test("UserPromptSubmit works when argv[1] is a non-executable .js entry", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vp-hook-js-"));
+	// A `.js` fake with NO exec bit, mimicking the Homebrew dist/cli.js.
+	const jsFake = join(dir, "cli.js");
+	writeFileSync(
+		jsFake,
+		[
+			"#!/usr/bin/env node",
+			'const out = "<vision_proxy_description>A red square on white.</vision_proxy_description>";',
+			'process.stdout.write(out + "\\n");',
+		].join("\n"),
+		{ mode: 0o644 },
+	);
+	const event = {
+		hook_event_name: "UserPromptSubmit",
+		prompt: "What is in /home/me/screenshot.png?",
+	};
+	const out = captureStdout(() => {
+		const prevArgv1 = process.argv[1];
+		const prevVpBin = process.env.VP_BIN;
+		process.argv[1] = jsFake;
+		delete process.env.VP_BIN;
+		try {
+			runHook(event);
+		} finally {
+			process.argv[1] = prevArgv1;
+			if (prevVpBin === undefined) delete process.env.VP_BIN;
+			else process.env.VP_BIN = prevVpBin;
+		}
+	});
+	assert.equal(out.trim() !== "", true);
+	const parsed = JSON.parse(out.trim());
+	assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+	assert.match(parsed.hookSpecificOutput.additionalContext, /red square on white/);
 });

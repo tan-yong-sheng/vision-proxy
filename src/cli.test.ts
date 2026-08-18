@@ -6,7 +6,7 @@
  */
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { main } from "./cli.ts";
+import { main, parseFlags } from "./cli.ts";
 
 let savedWrite: typeof process.stdout.write;
 let savedExitCode: number | undefined;
@@ -36,6 +36,40 @@ async function run(args: string[]): Promise<string> {
 	restore();
 	return text;
 }
+
+describe("parseFlags", () => {
+	it("keeps a positional after a boolean flag (--json before path)", () => {
+		// Regression: the pi-extension invokes `vp analyze --json <path...>`.
+		// A boolean flag must not swallow the following path as its value.
+		const { flags, positionals } = parseFlags(["--json", "image.png"]);
+		assert.deepEqual(positionals, ["image.png"]);
+		assert.equal(flags.json, true);
+	});
+
+	it("keeps every positional when a boolean flag precedes multiple paths", () => {
+		const { flags, positionals } = parseFlags(["--json", "first.png", "second.png"]);
+		assert.deepEqual(positionals, ["first.png", "second.png"]);
+		assert.equal(flags.json, true);
+	});
+
+	it("still consumes a value for flags that take one (--format)", () => {
+		const { flags, positionals } = parseFlags(["--format", "qwen_pixels", "image.png"]);
+		assert.deepEqual(positionals, ["image.png"]);
+		assert.equal(flags.format, "qwen_pixels");
+	});
+
+	it("treats --no-fence as fence=false and keeps following positionals", () => {
+		const { flags, positionals } = parseFlags(["--no-fence", "image.png"]);
+		assert.deepEqual(positionals, ["image.png"]);
+		assert.equal(flags.fence, false);
+	});
+
+	it("does not let a trailing boolean flag consume nothing", () => {
+		const { flags, positionals } = parseFlags(["image.png", "--json"]);
+		assert.deepEqual(positionals, ["image.png"]);
+		assert.equal(flags.json, true);
+	});
+});
 
 describe("cli help", () => {
 	it("prints top-level help for no args", async () => {

@@ -51,7 +51,7 @@ jobs:
 
       - name: Prune dev dependencies
         # The tarball ships only production deps; typescript/@types are build-time only.
-        run: pnpm prune --omit=dev --no-audit --no-fund
+        run: pnpm prune --prod
 
       - name: Stage release tree
         shell: bash

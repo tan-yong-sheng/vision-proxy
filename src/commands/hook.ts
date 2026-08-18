@@ -169,6 +169,15 @@ export function emit(
  * `vp analyze`, and emits the description. Returns early (fail-open) on any
  * error or when no images are found.
  */
+/** Prefix a vision-proxy description with an instruction not to read images directly. */
+function withImageInstruction(description: string): string {
+	return (
+		"vision-proxy routed the image(s) to a vision-input model. " +
+		"Do not call Read on image files directly; rely on the generated description below.\n\n" +
+		description
+	);
+}
+
 export function runHook(event: Record<string, unknown> | null): void {
 	if (!event) return;
 	const eventName = (event.hook_event_name ?? event.hookEventName) as string | undefined;
@@ -178,7 +187,7 @@ export function runHook(event: Record<string, unknown> | null): void {
 		if (images.length === 0) return;
 		const description = runAnalyze(images);
 		if (!description) return;
-		emit("UserPromptSubmit", description);
+		emit("UserPromptSubmit", withImageInstruction(description));
 		return;
 	}
 	if (eventName === "PreToolUse") {
@@ -188,13 +197,7 @@ export function runHook(event: Record<string, unknown> | null): void {
 		if (!description) return;
 		// Deny the native Read so Claude Code does not emit an "unsupported image"
 		// failure, while the description above is injected as additionalContext.
-		// Prefix the description with an explicit instruction so the model stops
-		// retrying Read and treats the vision-proxy output as the image content.
-		const context =
-			"vision-proxy intercepted this image Read and routed it to a vision-input model. " +
-			"Do not call Read on image files directly; rely on the generated description below.\n\n" +
-			description;
-		emit("PreToolUse", context, "deny");
+		emit("PreToolUse", withImageInstruction(description), "deny");
 		return;
 	}
 	// Unrecognized event type: proceed unchanged.

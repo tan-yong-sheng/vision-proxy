@@ -51,7 +51,9 @@ jobs:
 
       - name: Prune dev dependencies
         # The tarball ships only production deps; typescript/@types are build-time only.
-        run: pnpm prune --prod
+        # --ignore-scripts is required because `prepare` runs `npm run build`, which
+        # needs the dev deps we are about to remove.
+        run: pnpm prune --prod --ignore-scripts
 
       - name: Stage release tree
         shell: bash

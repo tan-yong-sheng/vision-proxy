@@ -68,45 +68,36 @@ jobs:
           # Checksum manifest.
           ( cd "${MOCK}/assets" && sha256sum "vision-proxy-${target}.tar.gz" ) > "${MOCK}/assets/sha256sum.txt"
 
-          # Minimal GitHub API mock serving /releases/latest and /releases/tags/<t>.
+          # Minimal GitHub release mock. install.sh now resolves the latest
+          # tag from a redirect on /releases/latest and downloads assets from
+          # /releases/download/<tag>/<asset>, so the mock serves those paths.
           cat > "${MOCK}/server.py" <<PY
-          import http.server, json, os, socketserver, urllib.parse
+          import http.server, os, socketserver, urllib.parse
           ASSETS = os.path.join(os.environ["MOCK_DIR"], "assets")
           VERSION = os.environ["MOCK_VERSION"]
+          PORT = int(os.environ["MOCK_PORT"])
           class H(http.server.BaseHTTPRequestHandler):
               def log_message(self, *a): pass
               def do_GET(self):
                   url = urllib.parse.urlparse(self.path).path
-                  if url in ("/releases/latest", "/releases/tags/" + VERSION):
-                      assets = []
-                      for fn in os.listdir(ASSETS):
-                          with open(os.path.join(ASSETS, fn), "rb") as f:
+                  if url == "/latest":
+                      self.send_response(302)
+                      self.send_header("Location", "http://127.0.0.1:%s/download/%s" % (PORT, VERSION))
+                      self.end_headers()
+                      return
+                  if url.startswith("/download/" + VERSION + "/"):
+                      fn = os.path.basename(url)
+                      fp = os.path.join(ASSETS, fn)
+                      if os.path.isfile(fp):
+                          with open(fp, "rb") as f:
                               data = f.read()
-                          assets.append({
-                              "name": fn,
-                              "browser_download_url": "http://127.0.0.1:%d/%s" % (PORT, fn),
-                          })
-                      body = json.dumps({"tag_name": VERSION, "name": "mock", "assets": assets}).encode()
-                      self.send_response(200)
-                      self.send_header("Content-Type", "application/json")
-                      self.send_header("Content-Length", str(len(body)))
-                      self.end_headers()
-                      self.wfile.write(body)
-                      return
-                  # Serve asset files directly.
-                  fn = os.path.basename(url)
-                  fp = os.path.join(ASSETS, fn)
-                  if os.path.isfile(fp):
-                      with open(fp, "rb") as f:
-                          data = f.read()
-                      self.send_response(200)
-                      self.send_header("Content-Length", str(len(data)))
-                      self.end_headers()
-                      self.wfile.write(data)
-                      return
+                          self.send_response(200)
+                          self.send_header("Content-Length", str(len(data)))
+                          self.end_headers()
+                          self.wfile.write(data)
+                          return
                   self.send_response(404)
                   self.end_headers()
-          PORT = int(os.environ["MOCK_PORT"])
           socketserver.TCPServer.allow_reuse_address = True
           with socketserver.TCPServer(("127.0.0.1", PORT), H) as httpd:
               httpd.serve_forever()
@@ -116,15 +107,15 @@ jobs:
           echo "MOCK_VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "MOCK_PORT=8731" >> "$GITHUB_ENV"
 
-      - name: Start mock GitHub API
+      - name: Start mock GitHub release server
         run: |
           cd "${MOCK_DIR}"
           python3 server.py &
           echo $! > "${MOCK_DIR}/server.pid"
           # Wait for the server to come up.
           for i in $(seq 1 20); do
-            if curl -fsS "http://127.0.0.1:${MOCK_PORT}/releases/latest" >/dev/null 2>&1; then
-              echo "mock API up"; break
+            if curl -fsSI "http://127.0.0.1:${MOCK_PORT}/latest" >/dev/null 2>&1; then
+              echo "mock release server up"; break
             fi
             sleep 0.5
           done
@@ -140,8 +131,8 @@ jobs:
           # proxy is overkill - we override by editing the resolved URL through
           # a HOSTS-style approach is not portable, so we patch the script copy.
           cp scripts/install.sh /tmp/install_test.sh
-          # Replace the production API host with our mock for the test run only.
-          sed -i.bak 's#https://api.github.com/repos/${REPO}/releases#http://127.0.0.1:'"${MOCK_PORT}"'/releases#g' /tmp/install_test.sh
+          # Point the installer's release base URL at the local mock for the test run only.
+          sed -i.bak 's#https://github.com/${REPO}/releases#http://127.0.0.1:'"${MOCK_PORT}"'#g' /tmp/install_test.sh
           sh /tmp/install_test.sh --add-to-path
 
       - name: Verify vp is runnable on PATH
@@ -156,6 +147,6 @@ jobs:
             *) echo "error: unexpected version output: $out" >&2; exit 1;;
           esac
 
-      - name: Stop mock GitHub API
+      - name: Stop mock release server
         if: always()
         run: kill "$(cat "${MOCK_DIR}/server.pid")" 2>/dev/null || true

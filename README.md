@@ -10,17 +10,15 @@ vision-proxy ships prebuilt per-OS/arch tarballs from [GitHub Releases](https://
 
 ### Homebrew (macOS / Linux)
 
-> Note: The Homebrew formula is not installable yet. Its per-arch `sha256`
-> hashes are placeholders that must be filled from a published release's
-> `sha256sum.txt` before `brew install` will succeed. Until then, use the
-> curl installer below.
-
 ```bash
 brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy
 brew install tan-yong-sheng/vision-proxy/vision-proxy
 ```
 
 This installs the `vp` binary and pulls in Node 22 as a dependency.
+The formula's per-arch `sha256` values are filled automatically from each
+release's `sha256sum.txt` when that release is published, so `brew install`
+always matches the published artifacts.
 
 ### curl installer (no Homebrew)
 
@@ -29,6 +27,13 @@ curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/sc
 ```
 
 The installer detects your OS/arch, downloads the matching release tarball, verifies its SHA-256 against the published `sha256sum.txt`, extracts into `~/.local/share/vision-proxy`, and symlinks `vp` into `~/.local/bin`.
+
+It depends only on POSIX tools (`curl`, `awk`, and `sha256sum`/`shasum`); `jq` is **not** required.
+If `~/.local/bin` is not already on your `PATH`, the installer prints the exact `export` line to add, or you can pass `--add-to-path` to append it to your shell profile (`.bashrc`, `.zshrc`, or `config.fish`) automatically.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh -s -- --add-to-path
+```
 
 ### Requirements
 

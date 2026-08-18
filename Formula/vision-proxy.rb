@@ -4,8 +4,10 @@
 #   brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy
 #   brew install tan-yong-sheng/vision-proxy/vision-proxy
 #
-# Before tagging a release, replace each `sha256` with the real per-arch hash
-# from the release's sha256sum.txt.
+# The `sha256` values below are filled automatically by .github/workflows/release.yml
+# at release time, read from the release's sha256sum.txt so the formula always
+# matches the published artifacts. They are placeholders until the first release
+# is cut with that workflow.
 class VisionProxy < Formula
   desc "CLI that routes images to a vision model for agent UserPromptSubmit hooks"
   homepage "https://github.com/tan-yong-sheng/vision-proxy"

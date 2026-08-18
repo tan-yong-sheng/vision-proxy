@@ -4,7 +4,7 @@ title: "— Reconcile `dev` and `main` for PR #33"
 description: "— Reconcile `dev` and `main` for PR #33 - implementation track for Resolve PR #33 merge conflicts and CodeRabbit blockers."
 area: backend
 tags: []
-status: active
+status: landed
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-09-01"

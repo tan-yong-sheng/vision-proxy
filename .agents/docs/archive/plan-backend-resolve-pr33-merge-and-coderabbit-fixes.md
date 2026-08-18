@@ -1,9 +1,9 @@
 ---
 type: plan
-title: Resolve PR #33 merge conflicts and CodeRabbit blockers
+title: "Resolve PR #33 merge conflicts and CodeRabbit blockers"
 area: backend
 tags: []
-status: active
+status: complete
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-09-17"

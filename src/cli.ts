@@ -15,6 +15,7 @@ import { basename } from "node:path";
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
 import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
+import { runHook } from "./commands/hook.ts";
 import { runIntegration } from "./commands/integration.ts";
 import {
 	providerCheck,
@@ -725,6 +726,13 @@ export async function main(argv: string[]): Promise<void> {
 			}
 			const agent = positionals[0];
 			handle(await runIntegration(sub ?? "", agent ?? ""));
+			return;
+		}
+
+		case "hook": {
+			// Phase 1 prototype: `vp hook` reads the agent hook event from stdin
+			// and emits a fake additionalContext. No subcommand routing yet.
+			runHook();
 			return;
 		}
 

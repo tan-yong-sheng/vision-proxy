@@ -151,3 +151,35 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-16: new plan plans/backend-evidence-validation-mvp-for-agents-docs.md
 - 2026-08-16: archive research/backend-allow-api-key-in-config-json.md -> archive/research-backend-allow-api-key-in-config-json.md (complete)
 - 2026-08-16: archive research/backend-rule-based-evidence-validation-for-research-docs.md -> archive/research-backend-rule-based-evidence-validation-for-research-docs.md (complete)
+- 2026-08-16: new bug bugs/backend-curl-and-homebrew-install-fail.md
+- 2026-08-16: new bug bugs/backend-claude-code-and-codex-hooks-not-working.md
+- 2026-08-16: archive plans/backend-evidence-validation-mvp-for-agents-docs.md -> archive/plan-backend-evidence-validation-mvp-for-agents-docs.md (complete)
+- 2026-08-16: new research research/backend-curl-and-homebrew-install-failure-on-tan-yong-sheng-fork.md
+- 2026-08-16: new research research/backend-claude-code-and-codex-hook-patterns.md
+- 2026-08-16: new plan plans/backend-fix-curl-and-homebrew-install.md
+- 2026-08-16: new plan plans/backend-add-pretooluse-read-hook.md
+- 2026-08-16: archive research/backend-curl-and-homebrew-install-failure-on-tan-yong-sheng-fork.md -> archive/research-backend-curl-and-homebrew-install-failure-on-tan-yong-sheng-fork.md (complete)
+- 2026-08-16: archive research/backend-claude-code-and-codex-hook-patterns.md -> archive/research-backend-claude-code-and-codex-hook-patterns.md (complete)
+- 2026-08-16: new research research/backend-codex-pretooluse-hook-feasibility-confirmation.md
+- 2026-08-16: new research research/backend-claude-code-hook-feasibility-openclaude-confirmation.md
+- 2026-08-17: sync plans/backend-add-pretooluse-read-hook.md from .lavish/backend-add-pretooluse-read-hook-plan.html (synced from lavish feedback)
+- 2026-08-17: sync plans/backend-add-pretooluse-read-hook.md from .lavish/backend-add-pretooluse-read-hook-plan.html (synced from lavish feedback)
+- 2026-08-17: scaffold-worktrees plans/backend-add-pretooluse-read-hook.md -> worktrees/backend-phase-1-prototype-spike.md
+- 2026-08-17: scaffold-worktrees plans/backend-add-pretooluse-read-hook.md -> worktrees/backend-phase-2-full-implementation.md
+- 2026-08-17: scaffold-worktrees plans/backend-fix-curl-and-homebrew-install.md -> worktrees/backend-fix-curl-and-homebrew-install.md
+- 2026-08-18: new plan plans/backend-support-apikey-in-vision-proxy-config.md
+- 2026-08-18: scaffold-worktrees plans/backend-support-apikey-in-vision-proxy-config.md -> worktrees/backend-add-apikey-string-to-visionconfig-and-default-config.md
+- 2026-08-18: scaffold-worktrees plans/backend-support-apikey-in-vision-proxy-config.md -> worktrees/backend-thread-config-apikey-into-resolvemodel.md
+- 2026-08-18: scaffold-worktrees plans/backend-support-apikey-in-vision-proxy-config.md -> worktrees/backend-pass-config-apikey-from-analyze-flags-and-validate.md
+- 2026-08-18: scaffold-worktrees plans/backend-support-apikey-in-vision-proxy-config.md -> worktrees/backend-mask-apikey-in-vp-config-get-output.md
+- 2026-08-18: scaffold-worktrees plans/backend-support-apikey-in-vision-proxy-config.md -> worktrees/backend-allow-vp-config-set-apikey-key.md
+- 2026-08-18: scaffold-worktrees plans/backend-support-apikey-in-vision-proxy-config.md -> worktrees/backend-update-config-schema-docs.md
+- 2026-08-18: scaffold-worktrees plans/backend-support-apikey-in-vision-proxy-config.md -> worktrees/backend-unit-tests-for-precedence-set-get-and-redaction.md
+- 2026-08-18: archive worktrees/backend-add-apikey-string-to-visionconfig-and-default-config.md -> archive/worktree-backend-add-apikey-string-to-visionconfig-and-default-config.md (abandoned)
+- 2026-08-18: archive worktrees/backend-allow-vp-config-set-apikey-key.md -> archive/worktree-backend-allow-vp-config-set-apikey-key.md (abandoned)
+- 2026-08-18: archive worktrees/backend-mask-apikey-in-vp-config-get-output.md -> archive/worktree-backend-mask-apikey-in-vp-config-get-output.md (abandoned)
+- 2026-08-18: archive worktrees/backend-pass-config-apikey-from-analyze-flags-and-validate.md -> archive/worktree-backend-pass-config-apikey-from-analyze-flags-and-validate.md (abandoned)
+- 2026-08-18: archive worktrees/backend-thread-config-apikey-into-resolvemodel.md -> archive/worktree-backend-thread-config-apikey-into-resolvemodel.md (abandoned)
+- 2026-08-18: archive worktrees/backend-unit-tests-for-precedence-set-get-and-redaction.md -> archive/worktree-backend-unit-tests-for-precedence-set-get-and-redaction.md (abandoned)
+- 2026-08-18: archive worktrees/backend-update-config-schema-docs.md -> archive/worktree-backend-update-config-schema-docs.md (abandoned)
+- 2026-08-18: new worktree worktrees/backend-support-apikey-in-config.md

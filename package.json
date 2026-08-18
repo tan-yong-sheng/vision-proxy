@@ -22,8 +22,8 @@
 	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "node --experimental-strip-types --no-warnings --test src/*.test.ts src/**/*.test.ts && node --test src/shims/*.e2e.mjs",
-		"build": "tsc -p tsconfig.build.json && node scripts/copy-shims.mjs",
+		"test": "node --experimental-strip-types --no-warnings --test src/*.test.ts src/**/*.test.ts",
+		"build": "tsc -p tsconfig.build.json",
 		"prepare": "npm run build",
 		"lint": "biome check",
 		"format": "biome check --write",

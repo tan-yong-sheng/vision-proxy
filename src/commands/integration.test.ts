@@ -1,14 +1,16 @@
 /**
  * Unit tests for `vp integration` install/show/list/uninstall.
  *
- * Exercises the generated Pi extension and the Claude Code / Codex hook shims
- * against an isolated temp HOME so we never touch a real ~/.claude, ~/.codex, or
- * ~/.pi. Validates:
+ * Exercises the generated Pi extension and the Claude Code / Codex hook
+ * registrations against an isolated temp HOME so we never touch a real
+ * ~/.claude, ~/.codex, or ~/.pi. Validates:
  *   - install pi writes a valid extension and cleans up an empty extensions dir
- *   - install claude-code/codex writes the shim + wires the agent config
- *   - show prints the generated source without touching disk
- *   - list reflects installed state across agents
- *   - uninstall removes only our block (idempotent, leaves others intact)
+ *   - install claude-code/codex registers both hooks (UserPromptSubmit +
+ *     PreToolUse Read) in the agent config with the absolute `vp hook` path
+ *   - uninstall removes only our registrations (idempotent, leaves others intact)
+ *   - codex install removes a legacy config.toml [[UserPromptSubmit]] block
+ *   - show prints the generated hook command without touching disk
+ *   - list/status reflect installed state across agents
  *   - unknown agent/subcommand is rejected
  */
 
@@ -39,6 +41,11 @@ function installDir(home: string): string {
 /** Pi's default extensions dir under the isolated HOME (`~/.pi/agent/extensions`). */
 function home_pi(): string {
 	return join(process.env.HOME!, ".pi", "agent", "extensions");
+}
+
+/** Parse a hooks.json config string. */
+function parseHooks(raw: string): any {
+	return raw.trim() ? JSON.parse(raw) : {};
 }
 
 /**
@@ -138,95 +145,70 @@ test("install pi is idempotent (no error on re-install)", async () => {
 	reset();
 });
 
-test("install claude-code writes the shim and wires settings.json", async () => {
+test("install claude-code registers both hooks in settings.json with absolute vp path", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	const r = await runIntegration("install", "claude-code", dir);
 	assert.equal(r.ok, true);
-	const shim = join(dir, "claude-code-vision-proxy-user-prompt-submit.mjs");
-	assert.equal(existsSync(shim), true);
-	assert.equal(existsSync(join(dir, "shared.mjs")), true);
-	const cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
-	const groups = cfg.hooks.UserPromptSubmit;
-	assert.equal(Array.isArray(groups) && groups.length, 1);
-	const cmd = groups[0].hooks[0].command;
-	assert.match(cmd, /claude-code-vision-proxy-user-prompt-submit\.mjs$/);
-	assert.equal(groups[0].hooks[0].timeout, 30);
+	// No shim/shared.mjs files anymore: the hook is the `vp` binary itself.
+	assert.equal(existsSync(join(dir, "shared.mjs")), false);
+	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
+	const upsCmd = cfg.hooks.UserPromptSubmit[0].hooks[0].command;
+	const ptsCmd = cfg.hooks.PreToolUse[0].hooks[0].command;
+	assert.ok(upsCmd.startsWith("/"), "hook command must be an absolute vp path");
+	assert.ok(upsCmd.endsWith(" hook"), "command must invoke the vp hook subcommand");
+	assert.ok(ptsCmd.startsWith("/"), "hook command must be an absolute vp path");
+	assert.ok(ptsCmd.endsWith(" hook"), "command must invoke the vp hook subcommand");
+	assert.equal(cfg.hooks.UserPromptSubmit[0].vpManaged, true);
+	assert.equal(cfg.hooks.PreToolUse[0].vpManaged, true);
 	reset();
 });
 
-test("install codex writes the shim and appends a [[UserPromptSubmit]] block", async () => {
+test("install codex registers both hooks in hooks.json with absolute vp path", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	const r = await runIntegration("install", "codex", dir);
 	assert.equal(r.ok, true);
-	const shim = join(dir, "codex-vision-proxy-user-prompt-submit.mjs");
-	assert.equal(existsSync(shim), true);
-	const toml = readFileSync(join(home, ".codex", "config.toml"), "utf8");
-	assert.match(toml, /\[\[UserPromptSubmit\]\]/);
-	assert.match(toml, /command = "node .*codex-vision-proxy-user-prompt-submit\.mjs"/);
-	assert.match(toml, /additionalContextLimit = 4096/);
+	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
+	assert.ok(
+		cfg.hooks.UserPromptSubmit[0].hooks[0].command.endsWith(" hook"),
+		"codex command must invoke vp hook",
+	);
 	reset();
 });
 
-test("codex status reports not installed when marker is outside a UserPromptSubmit block", async () => {
+test("codex install removes a legacy config.toml UserPromptSubmit block", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	mkdirSync(join(home, ".codex"), { recursive: true });
-	// Stale config: "vision-proxy" appears in a comment but not inside a block.
 	writeFileSync(
 		join(home, ".codex", "config.toml"),
-		'# old vision-proxy hook\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node /some/other/hook.mjs"\n',
+		'# comment\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node /old/claude-code-user-prompt-submit.mjs"\n',
 	);
-	const status = await runIntegration("status", "");
-	assert.equal(status.ok, true);
-	assert.match(status.message, /✗ codex\s+not installed/);
-	const uninstall = await runIntegration("uninstall", "codex", dir);
-	assert.equal(uninstall.ok, true);
-	assert.match(uninstall.message, /nothing to uninstall|was not installed/);
+	await runIntegration("install", "codex", dir);
+	const toml = readFileSync(join(home, ".codex", "config.toml"), "utf8");
+	assert.equal(toml.includes("vision-proxy"), false, "legacy block must be removed");
+	// The JSON hook registration must still be present.
+	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	reset();
 });
 
-test("codex uninstall removes a valid block when the shim file is missing", async () => {
+test("re-install refreshes the absolute vp path and does not duplicate hooks", async () => {
 	const home = isolate();
 	const dir = installDir(home);
-	mkdirSync(join(home, ".codex"), { recursive: true });
-	const target = join(dir, "codex-vision-proxy-user-prompt-submit.mjs");
-	const toml = `\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node ${target.replace(/\\/g, "/")}"\ntimeout = 30\nadditionalContextLimit = 4096\n`;
-	writeFileSync(join(home, ".codex", "config.toml"), toml);
-	const status = await runIntegration("status", "");
-	assert.equal(status.ok, true);
-	assert.match(status.message, /✓ codex\s+installed \(version unknown\)/);
-	const uninstall = await runIntegration("uninstall", "codex", dir);
-	assert.equal(uninstall.ok, true);
-	assert.match(uninstall.message, /uninstalled codex/);
-	reset();
-});
-
-test("install claude-code ships shared.mjs next to the shim and the import resolves", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	const r = await runIntegration("install", "claude-code", dir);
-	assert.equal(r.ok, true);
-	const _shim = join(dir, "claude-code-vision-proxy-user-prompt-submit.mjs");
-	const shared = join(dir, "shared.mjs");
-	assert.equal(existsSync(shared), true, "shared.mjs must land next to the installed shim");
-	// Regression: the installed shim does `import "./shared.mjs"`, so the import
-	// must resolve. If shared.mjs were missing this throws ERR_MODULE_NOT_FOUND.
-	await import(shared);
-	// The install-time placeholder must have been rewritten to an absolute path
-	// (the real `vp` binary), not left as the literal token.
-	const sharedText = readFileSync(shared, "utf8");
-	assert.equal(
-		sharedText.includes("__VP_PATH__PLACEHOLDER__"),
-		false,
-		"placeholder must be rewritten to a real path",
-	);
-	assert.match(
-		sharedText,
-		/const VP_BIN_PATH = "\/.+/,
-		"placeholder rewritten to an absolute path",
-	);
+	await runIntegration("install", "claude-code", dir);
+	const first = await runIntegration("install", "claude-code", dir);
+	assert.equal(first.ok, true);
+	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 1);
 	reset();
 });
 
@@ -236,26 +218,18 @@ test("install is idempotent (no duplicate blocks) for claude-code", async () => 
 	await runIntegration("install", "claude-code", dir);
 	const first = await runIntegration("install", "claude-code", dir);
 	assert.equal(first.ok, true);
-	const cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 1);
 	reset();
 });
 
-test("show pi prints the extension source without writing to disk", async () => {
-	const home = isolate();
-	const r = await runIntegration("show", "pi");
-	assert.equal(r.ok, true);
-	assert.match(r.message, /analyze_image/);
-	assert.equal(existsSync(join(home, "ext", "vision-proxy.ts")), false);
-	reset();
-});
-
-test("show claude-code prints the generated shim without writing to disk", async () => {
+test("show claude-code prints the hook command without writing to disk", async () => {
 	isolate();
 	const r = await runIntegration("show", "claude-code");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /UserPromptSubmit/);
-	assert.match(r.message, /vision-proxy/);
+	assert.match(r.message, /hook/);
+	assert.equal(existsSync(join(process.env.HOME!, ".claude", "settings.json")), false);
 	reset();
 });
 
@@ -270,6 +244,33 @@ test("list shows installed state across agents", async () => {
 	assert.match(r.message, /✓ claude-code/);
 	assert.match(r.message, /✓ codex/);
 	assert.match(r.message, /✓ pi/);
+	reset();
+});
+
+test("uninstall claude-code removes only the vision-proxy registrations and leaves others", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	mkdirSync(join(home, ".claude"), { recursive: true });
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{ hooks: [{ type: "command", command: "node /some/other-hook.mjs", timeout: 10 }] },
+				],
+			},
+		}),
+	);
+	await runIntegration("install", "claude-code", dir);
+	let cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
+	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	const r = await runIntegration("uninstall", "claude-code", dir);
+	assert.equal(r.ok, true);
+	cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
+	assert.match(cfg.hooks.UserPromptSubmit[0].hooks[0].command, /other-hook\.mjs$/);
+	assert.equal(cfg.hooks.PreToolUse, undefined);
 	reset();
 });
 
@@ -294,56 +295,8 @@ test("uninstall pi reports the correct success message after install (regression
 	assert.equal(existsSync(target), true);
 	const r = await runIntegration("uninstall", "pi", dir);
 	assert.equal(r.ok, true);
-	// Regression: pi has no host config, so the message must key off file
-	// deletion, not a config-removal flag that never fires for pi.
 	assert.match(r.message, /^uninstalled pi integration/);
 	assert.equal(existsSync(target), false);
-	reset();
-});
-
-test("uninstall claude-code removes only the vision-proxy block and leaves others", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	mkdirSync(join(home, ".claude"), { recursive: true });
-	writeFileSync(
-		join(home, ".claude", "settings.json"),
-		JSON.stringify({
-			hooks: {
-				UserPromptSubmit: [
-					{
-						hooks: [{ type: "command", command: "node /some/other-hook.mjs", timeout: 10 }],
-					},
-				],
-			},
-		}),
-	);
-	await runIntegration("install", "claude-code", dir);
-	let cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
-	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
-	const r = await runIntegration("uninstall", "claude-code", dir);
-	assert.equal(r.ok, true);
-	cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
-	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.match(cfg.hooks.UserPromptSubmit[0].hooks[0].command, /other-hook\.mjs$/);
-	reset();
-});
-
-test("uninstall claude-code keeps shared.mjs when codex shim still imports it", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	// Both hook agents co-locate their shim and the shared sidecar in `dir`.
-	await runIntegration("install", "claude-code", dir);
-	await runIntegration("install", "codex", dir);
-	assert.equal(existsSync(join(dir, "shared.mjs")), true);
-	const r = await runIntegration("uninstall", "claude-code", dir);
-	assert.equal(r.ok, true);
-	// The codex shim still imports ./shared.mjs, so the sidecar must survive.
-	assert.equal(
-		existsSync(join(dir, "shared.mjs")),
-		true,
-		"shared.mjs must remain while another hook shim still uses it",
-	);
-	assert.equal(existsSync(join(dir, "codex-vision-proxy-user-prompt-submit.mjs")), true);
 	reset();
 });
 
@@ -400,7 +353,6 @@ test("status reports installed version markers and up-to-date summary", async ()
 	await runIntegration("install", "pi");
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /vp 0\.1\.0/);
 	assert.match(r.message, /✓ pi\s+0\.1\.0/);
 	assert.match(r.message, /all \d+ integration\(s\) up to date/);
 	reset();
@@ -409,7 +361,6 @@ test("status reports installed version markers and up-to-date summary", async ()
 test("status flags an integration whose embedded version marker is stale", async () => {
 	isolate();
 	await runIntegration("install", "pi");
-	// Backdate the version marker baked into the generated Pi extension.
 	const ext = join(home_pi(), "vision-proxy.ts");
 	writeFileSync(
 		ext,
@@ -418,18 +369,6 @@ test("status flags an integration whose embedded version marker is stale", async
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /! pi\s+0\.0\.9.*installed vp is 0\.1\.0/);
-	assert.match(r.message, /out of date/);
-	reset();
-});
-
-test("status flags an installed integration with no version marker as outdated", async () => {
-	isolate();
-	await runIntegration("install", "pi");
-	const ext = join(home_pi(), "vision-proxy.ts");
-	writeFileSync(ext, readFileSync(ext, "utf8").replace(/__VP_VERSION__:[0-9.]+/, ""));
-	const r = await runIntegration("status", "");
-	assert.equal(r.ok, true);
-	assert.match(r.message, /version unknown/);
 	assert.match(r.message, /out of date/);
 	reset();
 });

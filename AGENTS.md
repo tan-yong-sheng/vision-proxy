@@ -19,15 +19,15 @@ Keep it short and update it when workflows change.
 | Pi-free core | `src/core.ts` | Config, env overrides, image loading/hashing, fencing, and provider dispatch. No Pi runtime deps. |
 | AI SDK adapter | `src/adapter.ts` | Vercel AI SDK `generateText` wrapper for image payloads. |
 | CLI commands | `src/commands/*.ts` | `analyze`, `config`, `provider`, `cache`, and `hook` subcommands. |
-| Hook shims | `src/shims/*.mjs` | Claude Code and Codex UserPromptSubmit hook shims. |
+| Hook dispatcher | `src/commands/hook.ts` | Claude Code and Codex hook dispatcher (`vp hook`). |
 | Keyring storage | `src/keyring.ts` | Optional `@napi-rs/keyring` OS keyring credential storage. |
 
 ## Important directories
 
 - `src/` - CLI source and Pi-free core.
 - `src/commands/` - CLI subcommands.
-- `src/shims/` - Agent hook shims (copied to `dist/` at build time).
-- `scripts/` - Build helpers (`copy-shims.mjs`).
+- `src/commands/hook.ts` - Agent hook dispatcher (`vp hook`).
+- `scripts/` - Installer and launcher helpers (`install.sh`, `vp`).
 - `.claude/hooks/` - Generated fallow gate hook.
 - `.github/workflows/` - CI workflows (ci.yml, release.yml, osv-scanner-pr.yml, osv-scanner-scheduled.yml).
 
@@ -36,10 +36,9 @@ Keep it short and update it when workflows change.
 - **Module boundary:** `src/core.ts` is the Pi-free core - pure functions and no peer-dep runtime requirements.
 `src/adapter.ts` calls the Vercel AI SDK.
 `src/commands/*.ts` wire CLI arguments to `src/core.ts` and `src/adapter.ts`.
-`src/shims/*.mjs` shell out to the `vp` binary with no runtime dependencies.
+`src/commands/hook.ts` (the `vp hook` subcommand) dispatches agent hooks with no runtime dependencies; it shells out to the `vp` binary.
 - **Generated code:** `.fallow/cache.bin` is fallow cache data - do not edit manually.
 `.claude/hooks/fallow-gate.sh` is a generated hook wrapper.
-`scripts/copy-shims.mjs` copies hook shims into `dist/` during `npm run build`.
 - **Sensitive areas:** `src/adapter.ts` and `src/commands/analyze.ts` make actual API calls to external vision models.
 `src/core.ts` handles provider API keys and image payloads.
 `src/keyring.ts` reads and writes OS keyring credentials.
@@ -47,7 +46,7 @@ Both are adjacent to real API keys and external model endpoints.
 - **Config:** The CLI uses `.vision-proxy.json` (project) and `~/.vision-proxy/config.json` (user), with a legacy fallback to `~/.pi/agent/vision-proxy.json`.
 Environment overrides use `VP_*`.
 - **Test isolation:** Tests use `mkdtemp` for isolated temp directories.
-- **Build step:** `npm run build` compiles `src/` to `dist/` and copies shims.
+- **Build step:** `npm run build` compiles `src/` to `dist/`.
 
 ## Commands
 
@@ -93,7 +92,7 @@ Runtime requirements:
 - **Do not edit:** `.fallow/cache.bin` - it's fallow binary cache data, not source.
 `.claude/hooks/fallow-gate.sh` - it's a generated hook; edit `src/core.ts` for sanitization/fencing behavior and `src/commands/analyze.ts` for analysis behavior.
 - **Always ask before:** Adding new production dependencies to `package.json` - current deps are minimal and chosen deliberately.
-Changing `VP_*` env var names - they must stay in sync with `src/core.ts`, `src/cache.ts`, `src/keyring.ts`, and `src/shims/*.mjs`.
+Changing `VP_*` env var names - they must stay in sync with `src/core.ts`, `src/cache.ts`, `src/keyring.ts`, and `src/commands/hook.ts`.
 - **Preferred style:** Pure functions in `src/core.ts` and `src/commands/*.ts` with type-only imports from peer deps.
 No side effects at module scope.
 Tests use `node:test` and `node:assert` - no test runner dependency.

@@ -5,11 +5,11 @@
  *   install <agent>   installs vision-proxy for the agent.
  *                     - pi          writes the generated `analyze_image` extension
  *                                   into Pi's global extensions directory.
- *                     - claude-code writes the UserPromptSubmit shim next to the
- *                                   vp binary and wires it into settings.json.
- *                     - codex       writes the UserPromptSubmit shim next to the
- *                                   vp binary and appends a [[UserPromptSubmit]]
- *                                   block to config.toml.
+ *                     - claude-code registers a `UserPromptSubmit` hook and a
+ *                                   `PreToolUse Read` hook in settings.json, both
+ *                                   invoking the absolute `vp hook` path.
+ *                     - codex       registers the same two hooks in hooks.json and
+ *                                   removes any legacy config.toml block.
  *   show <agent>      print what `install` would generate for manual review.
  *   list              show which agents have vision-proxy installed.
  *   status            show installed version markers per agent (flags outdated).
@@ -18,14 +18,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
 import { extractMarkerVersion, renderVersionMarker, VERSION } from "../version.ts";
 
 const SUPPORTED = ["pi", "claude-code", "codex"];
 const PI_EXTENSION_FILENAME = "vision-proxy.ts";
 const HOOK_TIMEOUT_SEC = 30;
-const HOOK_MARKER = "vision-proxy";
 
 export interface IntegrationResult {
 	ok: boolean;
@@ -36,25 +34,25 @@ export interface IntegrationResult {
 interface AgentSpec {
 	/** Human-readable name used in messages. */
 	id: string;
-	/** Where the generated file/shim is installed (abs path). */
+	/** Where the installed marker file lives (abs path). */
 	target(opts: { installDir?: string }): string;
 	/** Human-readable install location used in messages. */
 	locationLabel(opts: { installDir?: string }): string;
-	/** Produce the text `install` writes (extension source or shim contents). */
+	/** Produce the marker file content (version + absolute vp path). */
 	generate(): string;
 	/** Read + return the host config file text (empty string if absent). */
 	readConfig(): { raw: string };
-	/** Config file edited by install/uninstall (the host's settings/toml). */
+	/** Config file edited by install/uninstall (the host's settings/hooks json). */
 	configPath(): string;
-	/** Apply the generated file reference to the config; returns new serialized config. */
-	apply(targetPath: string, raw: string): string;
-	/** Remove our reference from the config; returns new serialized config + whether anything was removed. */
+	/** The hook command written into the agent config (absolute `vp hook`). */
+	hookCommand(): string;
+	/** Apply the hook registrations to the config; returns new serialized config. */
+	apply(raw: string): string;
+	/** Remove our registrations from the config; returns new serialized config + whether anything was removed. */
 	remove(raw: string): { raw: string; removed: boolean };
-	/** Whether the config currently contains our marker. */
+	/** Whether the config currently contains our hook registrations. */
 	isInstalled(raw: string): boolean;
-	/** Hook agents ship a shared.mjs next to the generated shim. */
-	sharedShim: boolean;
-	/** Version stamped into the generated file, or undefined if unstamped/unknown. */
+	/** Version stamped into the marker file, or undefined if absent/unstamped. */
 	installedVersion(opts: { installDir?: string }): string | undefined;
 }
 
@@ -67,44 +65,137 @@ function claudeCodeConfigPath(): string {
 }
 
 function codexConfigPath(): string {
-	return join(homedir(), ".codex", "config.toml");
+	return join(homedir(), ".codex", "hooks.json");
 }
 
-/** Co-locate the shims with this module (src/shims in dev, dist/shims in build). */
-function shimDir(): string {
-	const here = dirname(fileURLToPath(import.meta.url));
-	const candidates = [
-		join(here, "shims"),
-		join(here, "..", "src", "shims"),
-		join(here, "..", "shims"),
-		join(process.cwd(), "src", "shims"),
-	];
-	for (const c of candidates) {
-		if (existsSync(join(c, "claude-code-user-prompt-submit.mjs"))) return c;
-	}
-	return join(here, "..", "shims");
+/** Absolute path to the `vp` binary, used for the hook command at install time. */
+function vpBinPath(): string {
+	return resolve(process.argv[1] ?? "vp");
+}
+
+/** The hook command written into every agent config: `<abs-vp> hook`. */
+function makeHookCommand(): string {
+	return `${vpBinPath()} hook`;
 }
 
 /**
- * Resolve the `shared.mjs` that hook shims `import "./shared.mjs"` from.
+ * Build an agent hook group (one command invocation of `vp hook`).
  *
- * The build normally copies `src/shims/shared.mjs` into `dist/shims` (see
- * `scripts/copy-shims.mjs`), so `shimDir()`'s result is the first candidate.
- * If the build is stale, skipped, or changed, that file can be absent: fall
- * back to the repo source dir (`src/shims`), which always has it. Throw if no
- * candidate resolves, so we fail loudly instead of installing a shim whose
- * `import "./shared.mjs"` would throw `node:internal/modules/esm/resolve` at
- * hook runtime.
+ * `vpManaged` tags the group so install/status/uninstall can find our
+ * registration even if the absolute `vp` path changed after an upgrade. Agents
+ * ignore the extra key. `matcher` is only set for `PreToolUse`.
  */
-function resolveSharedShim(): string {
-	const candidates = [shimDir(), join(process.cwd(), "src", "shims")];
-	for (const c of candidates) {
-		const p = join(c, "shared.mjs");
-		if (existsSync(p)) return p;
+function hookGroup(command: string, matcher?: string): Record<string, unknown> {
+	const group: Record<string, unknown> = {
+		vpManaged: true,
+		hooks: [{ type: "command", command, timeout: HOOK_TIMEOUT_SEC }],
+	};
+	if (matcher) group.matcher = matcher;
+	return group;
+}
+
+function parseConfig(raw: string): Record<string, unknown> {
+	try {
+		return raw.trim() ? (JSON.parse(raw) as Record<string, unknown>) : {};
+	} catch {
+		return {};
 	}
-	throw new Error(
-		"could not locate shared.mjs for the hook shim. Looked in: " +
-			candidates.map((c) => join(c, "shared.mjs")).join(", "),
+}
+
+/** Merge `group` into a hook-event array, replacing any existing vpManaged match. */
+function mergeHookGroup(
+	existing: unknown,
+	group: Record<string, unknown>,
+): Record<string, unknown>[] {
+	const list = Array.isArray(existing) ? (existing as Record<string, unknown>[]) : [];
+	const matches = (g: Record<string, unknown>) =>
+		g.vpManaged === true && (group.matcher ? g.matcher === group.matcher : g.matcher === undefined);
+	const without = list.filter((g) => !matches(g));
+	without.push(group);
+	return without;
+}
+
+/** Drop every vpManaged group from a hook-event array. */
+function stripHookGroups(existing: unknown): {
+	groups: Record<string, unknown>[];
+	removed: boolean;
+} {
+	const list = Array.isArray(existing) ? (existing as Record<string, unknown>[]) : [];
+	const kept = list.filter((g) => g.vpManaged !== true);
+	return { groups: kept, removed: kept.length !== list.length };
+}
+
+/**
+ * Register both hook types (UserPromptSubmit + PreToolUse Read) into a hooks
+ * config object serialized as JSON. Shared by Claude Code (settings.json) and
+ * Codex (hooks.json), which use the same shape.
+ */
+function applyHooks(raw: string, command: string): string {
+	const cfg = parseConfig(raw);
+	if (!cfg.hooks) cfg.hooks = {};
+	const hooks = (cfg.hooks as Record<string, unknown>) || {};
+	hooks.UserPromptSubmit = mergeHookGroup(hooks.UserPromptSubmit, hookGroup(command));
+	hooks.PreToolUse = mergeHookGroup(hooks.PreToolUse, hookGroup(command, "Read"));
+	cfg.hooks = hooks;
+	return JSON.stringify(cfg, null, 2);
+}
+
+/** Remove both vp hook registrations from a hooks config JSON string. */
+function removeHooks(raw: string): { raw: string; removed: boolean } {
+	const cfg = parseConfig(raw);
+	const hooks = (cfg.hooks as Record<string, unknown>) || {};
+	if (!Array.isArray(hooks.UserPromptSubmit) && !Array.isArray(hooks.PreToolUse)) {
+		return { raw, removed: false };
+	}
+	const ups = stripHookGroups(hooks.UserPromptSubmit);
+	const pts = stripHookGroups(hooks.PreToolUse);
+	const removed = ups.removed || pts.removed;
+	if (ups.groups.length === 0) delete hooks.UserPromptSubmit;
+	else hooks.UserPromptSubmit = ups.groups;
+	if (pts.groups.length === 0) delete hooks.PreToolUse;
+	else hooks.PreToolUse = pts.groups;
+	if (Object.keys(hooks).length === 0) delete cfg.hooks;
+	return { raw: JSON.stringify(cfg, null, 2), removed };
+}
+
+/** Whether a hooks config JSON contains any vpManaged registration. */
+function hooksInstalled(raw: string): boolean {
+	const cfg = parseConfig(raw);
+	const hooks = (cfg.hooks as Record<string, unknown>) || {};
+	const has = (arr: unknown) =>
+		Array.isArray(arr) && (arr as Record<string, unknown>[]).some((g) => g.vpManaged === true);
+	return has(hooks.UserPromptSubmit) || has(hooks.PreToolUse);
+}
+
+/**
+ * Remove a legacy Codex `[[UserPromptSubmit]]` block from `~/.codex/config.toml`.
+ *
+ * Older installs appended a TOML block pointing at the removed `.mjs` shim. The
+ * new installer uses `~/.codex/hooks.json`; this cleans up the stale block on
+ * both install and uninstall so a fresh hooks.json isn't shadowed by it.
+ */
+function removeLegacyCodexConfigToml(): void {
+	const p = join(homedir(), ".codex", "config.toml");
+	if (!existsSync(p)) return;
+	const raw = readFileSync(p, "utf8");
+	if (!raw.includes("vision-proxy")) return;
+	const blocks = raw.split(/^\[\[UserPromptSubmit\]\]/m);
+	const kept = [blocks[0]!];
+	let removed = false;
+	for (let i = 1; i < blocks.length; i++) {
+		if (blocks[i]!.includes("vision-proxy")) {
+			removed = true;
+			continue;
+		}
+		kept.push(`[[UserPromptSubmit]]${blocks[i]!}`);
+	}
+	if (!removed) return;
+	writeFileSync(
+		p,
+		`${kept
+			.join("")
+			.replace(/\n{3,}/g, "\n\n")
+			.trimEnd()}\n`,
 	);
 }
 
@@ -115,160 +206,66 @@ const piSpec: AgentSpec = {
 	generate: () => PI_EXTENSION_SOURCE.replace("__VP_VERSION__PLACEHOLDER__", renderVersionMarker()),
 	readConfig: () => ({ raw: "" }),
 	configPath: () => "",
-	apply: (targetPath) => targetPath,
+	hookCommand: makeHookCommand,
+	apply: (raw) => raw,
 	remove: (raw) => ({ raw, removed: false }),
 	isInstalled: () => existsSync(piSpec.target({})),
-	sharedShim: false,
 	installedVersion: ({ installDir }) => {
 		const path = piSpec.target({ installDir });
 		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
 	},
 };
 
-const claudeCode: AgentSpec = {
-	id: "claude-code",
-	target: ({ installDir }) =>
-		join(
-			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
-			"claude-code-vision-proxy-user-prompt-submit.mjs",
-		),
-	locationLabel: ({ installDir }) =>
-		join(
-			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
-			"claude-code-vision-proxy-user-prompt-submit.mjs",
-		),
-	generate: () =>
-		readFileSync(join(shimDir(), "claude-code-user-prompt-submit.mjs"), "utf8").replace(
-			"__VP_VERSION__PLACEHOLDER__",
-			renderVersionMarker(),
-		),
-	readConfig() {
-		const p = claudeCodeConfigPath();
-		const raw = existsSync(p) ? readFileSync(p, "utf8") : "{}";
-		return { raw };
-	},
-	configPath: claudeCodeConfigPath,
-	apply(targetPath, raw) {
-		let cfg: Record<string, unknown>;
-		try {
-			cfg = raw.trim() ? JSON.parse(raw) : {};
-		} catch {
-			cfg = {};
-		}
-		if (!cfg.hooks) cfg.hooks = {};
-		const hooks = (cfg.hooks as Record<string, unknown>) || {};
-		const entry = {
-			hooks: [{ type: "command", command: `node ${targetPath}`, timeout: HOOK_TIMEOUT_SEC }],
-		};
-		const existing = Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
-		const filtered = (existing as any[]).filter((g) => !JSON.stringify(g).includes(HOOK_MARKER));
-		hooks.UserPromptSubmit = [...filtered, entry];
-		cfg.hooks = hooks;
-		return JSON.stringify(cfg, null, 2);
-	},
-	remove(raw) {
-		let cfg: Record<string, unknown>;
-		try {
-			cfg = raw.trim() ? JSON.parse(raw) : {};
-		} catch {
-			cfg = {};
-		}
-		const hooks = (cfg.hooks as Record<string, unknown>) || {};
-		if (!Array.isArray(hooks.UserPromptSubmit)) {
-			return { raw, removed: false };
-		}
-		const filtered = (hooks.UserPromptSubmit as any[]).filter(
-			(g) => !JSON.stringify(g).includes(HOOK_MARKER),
-		);
-		const removed = (hooks.UserPromptSubmit as any[]).length !== filtered.length;
-		if (filtered.length === 0) {
-			delete hooks.UserPromptSubmit;
-		} else {
-			hooks.UserPromptSubmit = filtered;
-		}
-		cfg.hooks = hooks;
-		return { raw: JSON.stringify(cfg, null, 2), removed };
-	},
-	isInstalled(raw) {
-		try {
-			const cfg = raw.trim() ? JSON.parse(raw) : {};
-			const groups = ((cfg.hooks || {}) as any).UserPromptSubmit || [];
-			return Array.isArray(groups)
-				? groups.some((g: unknown) => JSON.stringify(g).includes(HOOK_MARKER))
-				: false;
-		} catch {
-			return false;
-		}
-	},
-	sharedShim: true,
-	installedVersion: ({ installDir }) => {
-		const path = claudeCode.target({ installDir });
-		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
-	},
-};
-
-const codex: AgentSpec = {
-	id: "codex",
-	target: ({ installDir }) =>
-		join(
-			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
-			"codex-vision-proxy-user-prompt-submit.mjs",
-		),
-	locationLabel: ({ installDir }) =>
-		join(
-			installDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "shims"),
-			"codex-vision-proxy-user-prompt-submit.mjs",
-		),
-	generate: () =>
-		readFileSync(join(shimDir(), "codex-user-prompt-submit.mjs"), "utf8").replace(
-			"__VP_VERSION__PLACEHOLDER__",
-			renderVersionMarker(),
-		),
-	readConfig() {
-		const p = codexConfigPath();
-		const raw = existsSync(p) ? readFileSync(p, "utf8") : "";
-		return { raw };
-	},
-	configPath: codexConfigPath,
-	apply(targetPath, raw) {
-		if (raw.includes(HOOK_MARKER)) return raw; // already installed
-		const block = `\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node ${targetPath}"\ntimeout = ${HOOK_TIMEOUT_SEC}\nadditionalContextLimit = 4096\n`;
-		return raw.trim() ? `${raw.trimEnd()}\n${block}` : block.replace(/^\n/, "");
-	},
-	remove(raw) {
-		if (!raw.includes(HOOK_MARKER)) return { raw, removed: false };
-		const blocks = raw.split(/^\[\[UserPromptSubmit\]\]/m);
-		const kept = [blocks[0]!];
-		let removed = false;
-		for (let i = 1; i < blocks.length; i++) {
-			if (blocks[i]!.includes(HOOK_MARKER)) {
-				removed = true;
-				continue;
+function makeHookAgentSpec(opts: {
+	id: string;
+	markerPath: () => string;
+	configPath: () => string;
+}): AgentSpec {
+	const command = makeHookCommand();
+	return {
+		id: opts.id,
+		target: () => opts.markerPath(),
+		locationLabel: () => opts.markerPath(),
+		generate: () =>
+			JSON.stringify(
+				{ version: VERSION, vp: vpBinPath(), updatedAt: new Date().toISOString() },
+				null,
+				2,
+			),
+		readConfig() {
+			const p = opts.configPath();
+			const raw = existsSync(p) ? readFileSync(p, "utf8") : "{}";
+			return { raw };
+		},
+		configPath: opts.configPath,
+		hookCommand: () => command,
+		apply: (raw) => applyHooks(raw, command),
+		remove: (raw) => removeHooks(raw),
+		isInstalled: (raw) => hooksInstalled(raw),
+		installedVersion: () => {
+			const p = opts.markerPath();
+			if (!existsSync(p)) return undefined;
+			try {
+				const m = JSON.parse(readFileSync(p, "utf8")) as { version?: string };
+				return m.version;
+			} catch {
+				return undefined;
 			}
-			kept.push(`[[UserPromptSubmit]]${blocks[i]!}`);
-		}
-		return {
-			raw: `${kept
-				.join("")
-				.replace(/\n{3,}/g, "\n\n")
-				.trimEnd()}\n`,
-			removed,
-		};
-	},
-	isInstalled(raw) {
-		if (!raw.includes(HOOK_MARKER)) return false;
-		const blocks = raw.split(/^\[\[UserPromptSubmit\]\]/m);
-		for (let i = 1; i < blocks.length; i++) {
-			if (blocks[i]!.includes(HOOK_MARKER)) return true;
-		}
-		return false;
-	},
-	sharedShim: true,
-	installedVersion: ({ installDir }) => {
-		const path = codex.target({ installDir });
-		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
-	},
-};
+		},
+	};
+}
+
+const claudeCode: AgentSpec = makeHookAgentSpec({
+	id: "claude-code",
+	markerPath: () => join(homedir(), ".claude", "vision-proxy.hook.json"),
+	configPath: claudeCodeConfigPath,
+});
+
+const codex: AgentSpec = makeHookAgentSpec({
+	id: "codex",
+	markerPath: () => join(homedir(), ".codex", "vision-proxy.hook.json"),
+	configPath: codexConfigPath,
+});
 
 function specFor(agent: string): AgentSpec | undefined {
 	if (agent === "pi") return piSpec;
@@ -277,29 +274,12 @@ function specFor(agent: string): AgentSpec | undefined {
 	return undefined;
 }
 
-/**
- * Whether any installed hook shim other than `exclude` still imports
- * `./shared.mjs` from `dir`. Hook agents co-locate their shim and the shared
- * sidecar; when one agent is uninstalled we must not delete a sidecar another
- * still-installed agent depends on.
- */
-function sharedShimStillUsed(dir: string, exclude: string): boolean {
-	if (!existsSync(dir)) return false;
-	for (const file of readdirSync(dir)) {
-		if (!file.endsWith(".mjs") || file === "shared.mjs") continue;
-		const path = join(dir, file);
-		if (path === exclude) continue;
-		if (readFileSync(path, "utf8").includes('"./shared.mjs"')) return true;
-	}
-	return false;
-}
-
 function isAgentInstalled(spec: AgentSpec): boolean {
 	const target = spec.target({});
 	const targetExists = existsSync(target);
 	let installed = targetExists;
 	// Hook agents are "installed" when their config block is present, even if
-	// the shim file lives in a shared install dir we don't manage.
+	// the marker file lives in a shared dir we don't manage.
 	const cfgPath = spec.configPath();
 	if (cfgPath && existsSync(cfgPath)) {
 		installed = installed || spec.isInstalled(spec.readConfig().raw);
@@ -329,29 +309,18 @@ export async function integrationInstall(
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
 	mkdirSync(dirname(target), { recursive: true });
-	// Hook shims import ./shared.mjs from the same directory, so it has to land
-	// next to the shim. Resolve it first: resolveSharedShim() throws (loud
-	// failure) if no candidate resolves, so we reject before writing a shim
-	// that would fail at hook runtime with a missing `import "./shared.mjs"`.
-	if (spec.sharedShim) {
-		const sharedSrc = resolveSharedShim();
-		// Rewrite the install-time placeholder with the absolute `vp` binary path.
-		// process.argv[1] is the executed script (dist/cli.js), which resolves to
-		// the real binary for curl installs and Homebrew symlinks alike. A global
-		// replace covers every occurrence of the placeholder token.
-		const vpBin = resolve(process.argv[1] ?? "vp");
-		writeFileSync(
-			join(dirname(target), "shared.mjs"),
-			readFileSync(sharedSrc, "utf8").split("__VP_PATH__PLACEHOLDER__").join(vpBin),
-		);
-	}
+	// Always refresh the absolute `vp` path so an upgrade doesn't leave a stale
+	// command pointing at an old install location.
 	writeFileSync(target, spec.generate(), { mode: 0o644 });
 	const cfgPath = spec.configPath();
 	if (cfgPath) {
 		mkdirSync(dirname(cfgPath), { recursive: true });
 		const { raw } = spec.readConfig();
-		writeFileSync(cfgPath, spec.apply(target, raw));
+		writeFileSync(cfgPath, spec.apply(raw));
 	}
+	// Codex migrated from config.toml (legacy .mjs shim) to hooks.json; drop the
+	// stale TOML block so it can't shadow the new JSON registration.
+	if (agent === "codex") removeLegacyCodexConfigToml();
 	return {
 		ok: true,
 		message: `installed ${agent} integration -> ${spec.locationLabel({ installDir: opts.installDir })}`,
@@ -369,9 +338,16 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 			code: 1,
 		};
 	}
+	const command = spec.hookCommand();
+	const { raw } = spec.readConfig();
+	const merged = spec.apply(raw);
+	const marker = spec.generate();
 	return {
 		ok: true,
-		message: `Generated ${agent} integration (write to ${spec.locationLabel({})}):\n\n${spec.generate()}`,
+		message:
+			`hook command: ${command}\n\n` +
+			`marker file (${spec.locationLabel({})}):\n${marker}\n\n` +
+			`${spec.configPath()} (after install):\n${merged}`,
 		code: 0,
 	};
 }
@@ -389,7 +365,7 @@ export async function integrationList(): Promise<IntegrationResult> {
 
 /**
  * Report install status per agent, annotated with the vp version embedded in
- * each installed artifact, so the user can see which integrations predate the
+ * each installed marker, so the user can see which integrations predate the
  * installed `vp` and should be refreshed with `vp integration install`.
  */
 // fallow-ignore-next-line unused-export
@@ -453,9 +429,9 @@ export async function integrationUninstall(
 			code: 0,
 		};
 	}
-	// `removed` must reflect file deletion as well as host-config removal.
-	// Agents like `pi` have no host config (configPath() === ""), so the
-	// config branch never fires for them; the extension file is the signal.
+	// `removed` must reflect marker-file deletion as well as host-config removal.
+	// Agents like `pi` have no host config (configPath() === ""), so the config
+	// branch never fires for them; the extension file is the signal.
 	let fileDeleted = false;
 	if (existsSync(target)) {
 		try {
@@ -469,34 +445,22 @@ export async function integrationUninstall(
 			};
 		}
 	}
+	// Remove the legacy Codex config.toml block defensively on uninstall too.
+	if (agent === "codex") removeLegacyCodexConfigToml();
 	const removed = configRemoved || fileDeleted;
-	// Hook agents also ship shared.mjs next to the shim. Claude Code and Codex
-	// install into the same directory and both import it, so only drop it when
-	// no remaining hook shim still references it (e.g. uninstalling codex must
-	// not break a still-installed claude-code shim in the same dir).
-	if (spec.sharedShim) {
-		const sharedPath = join(dirname(target), "shared.mjs");
-		if (existsSync(sharedPath) && !sharedShimStillUsed(dirname(target), target)) {
-			try {
-				rmSync(sharedPath);
-			} catch {
-				/* ignore */
-			}
-		}
-	}
-	// If the install dir now holds only the shim + shared.mjs we just removed, clean it up.
+	// If the install dir now holds only the marker we just deleted, clean it up.
 	const dir = dirname(target);
 	if (existsSync(dir) && readdirSync(dir).length === 0) {
 		try {
 			rmSync(dir, { recursive: true });
 		} catch {
-			/* ignore: leave the empty dir if removal fails */
+			/* leave the empty dir if removal fails */
 		}
 	}
 	return {
 		ok: true,
 		message: removed
-			? `uninstalled ${agent} integration (removed ${target})`
+			? `uninstalled ${agent} integration`
 			: `${agent} integration was not installed`,
 		code: 0,
 	};

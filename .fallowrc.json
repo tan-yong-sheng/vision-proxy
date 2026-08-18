@@ -1,11 +1,5 @@
 {
-	"entry": [
-		"src/cli.ts",
-		"src/**/*.test.ts",
-		"src/shims/claude-code-hook.e2e.mjs",
-		"src/shims/claude-code-user-prompt-submit.mjs",
-		"src/shims/codex-user-prompt-submit.mjs"
-	],
+	"entry": ["src/cli.ts", "src/**/*.test.ts"],
 	"rules": {
 		"unused-exports": "off",
 		"unused-types": "off",

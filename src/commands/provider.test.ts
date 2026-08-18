@@ -73,6 +73,29 @@ describe("providerList", () => {
 		assert.equal(r.ok, true);
 		assert.match(r.message, /openai.*present/);
 	});
+
+	it("counts a config apiKey as present only for the active provider", () => {
+		const config = { apiKey: "cfg-key", provider: "google" };
+		const r = providerList(
+			{
+				OPENAI_API_KEY: "",
+				ANTHROPIC_API_KEY: "",
+				GOOGLE_API_KEY: "",
+			} as NodeJS.ProcessEnv,
+			config,
+		);
+		assert.equal(r.ok, true);
+		assert.match(r.message, /google.*present/);
+		assert.match(r.message, /openai.*missing/);
+	});
+
+	it("ignores an empty config apiKey", () => {
+		const r = providerList({ GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv, {
+			apiKey: "",
+			provider: "google",
+		});
+		assert.match(r.message, /google.*missing/);
+	});
 });
 
 describe("providerCheck", () => {
@@ -107,6 +130,24 @@ describe("providerCheck", () => {
 		} as NodeJS.ProcessEnv);
 		assert.equal(r.ok, false);
 		assert.match(r.message, /unknown provider/);
+	});
+
+	it("counts a config apiKey as present for the active provider", () => {
+		const r = providerCheck("google", { GOOGLE_API_KEY: "" } as NodeJS.ProcessEnv, {
+			apiKey: "cfg-key",
+			provider: "google",
+		});
+		assert.equal(r.ok, true);
+		assert.match(r.message, /google: OK/);
+	});
+
+	it("reports MISSING KEY for a non-active provider with only a config key", () => {
+		const r = providerCheck(undefined, { ANTHROPIC_API_KEY: "" } as NodeJS.ProcessEnv, {
+			apiKey: "cfg-key",
+			provider: "google",
+		});
+		assert.equal(r.ok, false);
+		assert.match(r.message, /anthropic: MISSING KEY/);
 	});
 });
 

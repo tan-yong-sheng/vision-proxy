@@ -147,15 +147,21 @@ export function runAnalyze(images: string[]): string | null {
 }
 
 /** Write the hook output JSON both Claude Code and Codex accept. */
-export function emit(eventName: string, description: string): void {
-	process.stdout.write(
-		`${JSON.stringify({
-			hookSpecificOutput: {
-				hookEventName: eventName,
-				additionalContext: description,
-			},
-		})}\n`,
-	);
+export function emit(
+	eventName: string,
+	description: string,
+	permissionDecision?: "allow" | "deny" | "ask",
+): void {
+	const hookSpecificOutput: Record<string, unknown> = {
+		hookEventName: eventName,
+		additionalContext: description,
+	};
+	if (permissionDecision) {
+		hookSpecificOutput.permissionDecision = permissionDecision;
+		hookSpecificOutput.permissionDecisionReason =
+			"Image read intercepted by vision-proxy; see additionalContext for the description.";
+	}
+	process.stdout.write(`${JSON.stringify({ hookSpecificOutput })}\n`);
 }
 
 /**
@@ -180,7 +186,9 @@ export function runHook(event: Record<string, unknown> | null): void {
 		if (!file) return;
 		const description = runAnalyze([file]);
 		if (!description) return;
-		emit("PreToolUse", description);
+		// Deny the native Read so Claude Code does not emit an "unsupported image"
+		// failure, while the description above is injected as additionalContext.
+		emit("PreToolUse", description, "deny");
 		return;
 	}
 	// Unrecognized event type: proceed unchanged.

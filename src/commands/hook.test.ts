@@ -153,7 +153,7 @@ test("UserPromptSubmit with no image is a no-op", () => {
 	assert.equal(out.trim(), "");
 });
 
-test("PreToolUse Read of an image emits additionalContext", () => {
+test("PreToolUse Read of an image denies the tool and emits additionalContext", () => {
 	const dir = mkdtempSync(join(tmpdir(), "vp-hook-"));
 	const vpBin = writeFakeVp(dir);
 	const event = {
@@ -174,6 +174,8 @@ test("PreToolUse Read of an image emits additionalContext", () => {
 	assert.equal(out.trim() !== "", true);
 	const parsed = JSON.parse(out.trim());
 	assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
+	assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
+	assert.ok(typeof parsed.hookSpecificOutput.permissionDecisionReason === "string");
 	assert.match(parsed.hookSpecificOutput.additionalContext, /red square on white/);
 });
 

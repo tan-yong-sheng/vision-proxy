@@ -80,9 +80,9 @@ jobs:
               def log_message(self, *a): pass
               def do_GET(self):
                   url = urllib.parse.urlparse(self.path).path
-                  if url == "/latest/download/sha256sum.txt":
+                  if url == "/releases/latest":
                       self.send_response(302)
-                      self.send_header("Location", "http://127.0.0.1:%s/download/%s/sha256sum.txt" % (PORT, VERSION))
+                      self.send_header("Location", "http://127.0.0.1:%s/releases/tag/%s" % (PORT, VERSION))
                       self.end_headers()
                       return
                   if url.startswith("/download/" + VERSION + "/"):
@@ -114,7 +114,7 @@ jobs:
           echo $! > "${MOCK_DIR}/server.pid"
           # Wait for the server to come up.
           for i in $(seq 1 20); do
-            if curl -fsSL -o /dev/null "http://127.0.0.1:${MOCK_PORT}/latest/download/sha256sum.txt" >/dev/null 2>&1; then
+            if curl -fsSI -o /dev/null "http://127.0.0.1:${MOCK_PORT}/releases/latest" >/dev/null 2>&1; then
               echo "mock release server up"; break
             fi
             sleep 0.5

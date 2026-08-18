@@ -368,6 +368,81 @@ The local merge-preview workflow mirrors GitHub's stacked pull requests feature 
 Step 10 validates code/contract integrity before merging.
 For user-perceived visual regression testing after merge, record a handoff in the dossier to `/visual-qa` with reciprocal `related:` frontmatter links.
 
+## Shipping strategy: combined PR vs individual PRs
+
+After the gate passes, recommend how to land the reviewed changes.
+This decision belongs in the QA dossier so future operators can see the rationale.
+
+### 1. Inspect branch relationships
+
+Before recommending, run:
+
+```bash
+for b in <branch-1> <branch-2> ...; do
+  echo "=== $b ==="
+  git diff --name-only <base>.."$b"
+done
+```
+
+Also verify that the branches merge cleanly with the base:
+
+```bash
+git merge-tree --write-tree <base> <branch>
+```
+
+A tree hash means the branch merges cleanly. A non-empty conflict block means the branches are already coupled and strongly point toward a combined PR.
+
+### 2. Decide combined or individual
+
+| Situation | Recommendation | Rationale |
+|---|---|---|
+| Branches touch shared files or have declared `depends_on` | **Combined PR** | Avoids merge-order conflicts and ensures the reviewed combined state is exactly what ships. |
+| One branch is a small bug fix and the others are larger features | **Individual PRs** | Bug fixes can ship fast without waiting for feature review. |
+| Branches are semantically independent and have no file overlap | **Individual PRs** | Smaller reviews are easier to revert and bisect. |
+| The stack is large and the gate already passed on a preview | Either works | Combined is lower friction; individual is cleaner history. |
+
+Default preference: **individual PRs** unless shared files or dependencies make the combined state the only honest thing to review.
+
+### 3. If individual PRs: choose merge order
+
+1. Bug fixes and security patches first.
+2. Behavior changes that other branches may depend on.
+3. Larger features last.
+
+For the current vision-proxy batch:
+
+```text
+1. fix/hook-vp-bin-0644-eacces
+2. feat/remove-image-path-restriction
+3. feat/support-apikey-in-config
+```
+
+### 4. Port auto-fix commits from the preview branch
+
+When `no-mistakes axi run` applies auto-fixes (lint, typecheck, docs), those commits live on the disposable preview branch, not on the source feature branches.
+
+- **Combined PR:** no extra work; the preview branch already contains the fixes.
+- **Individual PRs:** cherry-pick or re-apply the auto-fix commits onto the owning source branch before opening each PR.
+
+Use `git log` and `git show` on the preview branch to find the fixes, then apply them with `git cherry-pick <hash>` or a scoped patch.
+
+### 5. Record the decision in the QA dossier
+
+Add a `## PR strategy` section to the dossier:
+
+```markdown
+## PR strategy
+
+- Recommendation: individual PRs
+- Rationale: branches are semantically independent; shared files are limited to `src/core.ts` and merge cleanly
+- Merge order:
+  1. `fix/hook-vp-bin-0644-eacces`
+  2. `feat/remove-image-path-restriction`
+  3. `feat/support-apikey-in-config`
+- Auto-fix commits to port: `<hash>` (README.md/CONFIG.md doc updates)
+- Next action: open the three PRs in order and rebase each onto `main` after the previous merges
+```
+
 ## Integration with other skills
 
 | Skill                        | How /review-gate uses it                                                                                                                                                       |

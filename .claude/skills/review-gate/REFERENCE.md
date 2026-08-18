@@ -103,6 +103,17 @@ Then paste the findings into the dossier body:
 
 - <action 1>
 - <action 2>
+
+## PR strategy
+
+- Recommendation: `combined` or `individual`
+- Rationale: `<why this choice fits the reviewed branches>`
+- Merge order (if individual):
+  - `<branch-1>`
+  - `<branch-2>`
+- Auto-fix commits to port (if individual):
+  - `<hash>` `<description>`
+- Next action: `<open PRs / cherry-pick fixes / rebase>`
 ```
 
 Set the dossier frontmatter `type: coverage`.
@@ -112,6 +123,59 @@ Regenerate the index:
 
 ```bash
 bun .agents/skills/agents-docs/scripts/docs.js index
+```
+
+## Choosing a shipping strategy
+
+### Detect shared files across branches
+
+```bash
+for b in <branch-1> <branch-2> ...; do
+  echo "=== $b ==="
+  git diff --name-only <base>.."$b"
+done
+```
+
+### Check clean merges
+
+```bash
+git merge-tree --write-tree <base> <branch>
+```
+
+A printed tree hash means the branch merges cleanly with the base.
+A non-empty conflict diff means the branches are coupled and should probably ship together.
+
+### Recommend combined PR
+
+Use when:
+- branches touch the same files,
+- branches declare `depends_on` on each other, or
+- the gate was run on a merge-preview worktree because the combined state is the only honest review target.
+
+### Recommend individual PRs
+
+Use when:
+- branches are semantically independent,
+- no shared files exist, and
+- the user wants smaller reviews and cleaner revert history.
+
+Suggested merge order:
+1. bug fixes and security patches,
+2. behavior changes that others may depend on,
+3. larger features.
+
+### Port auto-fix commits
+
+When `no-mistakes` applies fixes on a disposable preview branch, find them with:
+
+```bash
+git log --oneline <base>..qa/<batch-slug>
+```
+
+Then cherry-pick onto the owning feature branch:
+
+```bash
+git -C <feature-worktree> cherry-pick <fix-hash>
 ```
 
 ## Daemon polling & JSON-RPC socket architecture

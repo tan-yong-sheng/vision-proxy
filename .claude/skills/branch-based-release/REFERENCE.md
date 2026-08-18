@@ -70,3 +70,53 @@ Use these prefixes for clarity. The automation does not enforce them.
 |---|---|---|
 | Stable | `release/` | `release/v0.1.0` |
 | Pre-release | `prerelease/` | `prerelease/v0.1.0-rc.1` |
+
+## Release PR enforcement
+
+A release or pre-release PR must only change the allowed version config files.
+
+### Allowed files
+
+| Branch type | Allowed files |
+|---|---|
+| `release/v*` | `package.json`, `Formula/<project>.rb` |
+| `prerelease/v*` | `package.json` |
+
+### Local validation
+
+```bash
+# list files changed on the release branch
+git diff --name-only main..release/v0.1.0
+```
+
+If the list includes anything outside the allowed files, revert or move it to a feature branch.
+
+### CI enforcement
+
+Add this job to `.github/workflows/ci.yml` or a dedicated `verify-release.yml`:
+
+```yaml
+verify-release-pr:
+  if: startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'prerelease/')
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Verify release PR only changes version files
+      run: |
+        changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+        if [ "${{ startsWith(github.head_ref, 'release/') }}" = "true" ]; then
+          allowed="package.json Formula/<project>.rb"
+        else
+          allowed="package.json"
+        fi
+        for f in $changed; do
+          if [[ " $allowed " != *" $f "* ]]; then
+            echo "Release PR must not change $f" >&2
+            exit 1
+          fi
+        done
+```
+
+Replace `Formula/<project>.rb` with the actual formula path, or remove it if the project has no Homebrew formula.

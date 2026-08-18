@@ -24,6 +24,7 @@ import {
 	providerListKeys,
 	providerStoreKey,
 } from "./commands/provider.ts";
+import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
 import { isKnownProvider } from "./provider.ts";
 import { VERSION } from "./version.ts";
@@ -635,12 +636,16 @@ export async function main(argv: string[]): Promise<void> {
 				return;
 			}
 			switch (sub) {
-				case "list":
-					handle(providerList(env));
+				case "list": {
+					const { config } = await loadConfig({ cwd: process.cwd(), env });
+					handle(providerList(env, config));
 					return;
-				case "check":
-					handle(providerCheck(positionals[0], env));
+				}
+				case "check": {
+					const { config } = await loadConfig({ cwd: process.cwd(), env });
+					handle(providerCheck(positionals[0], env, config));
 					return;
+				}
 				case "store-key": {
 					const name = positionals[0];
 					if (!name) {

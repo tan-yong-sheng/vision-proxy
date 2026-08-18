@@ -28,4 +28,4 @@ vp analyze screenshot.png
 ## Options
 
 - **API key:** `ANTHROPIC_API_KEY` env var, `vp provider store-key anthropic`, or `--api-key`.
-- **Custom endpoint:** `ANTHROPIC_BASE_URL` or `"baseURLs": { "anthropic": "..." }`.
+- **Custom endpoint:** `ANTHROPIC_BASE_URL` or `"baseUrl": "..."` in config.

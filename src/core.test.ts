@@ -253,34 +253,26 @@ describe("resolveConfig", () => {
 	});
 });
 
-describe("resolveConfig baseURLs", () => {
-	it("defaults to empty baseURLs", () => {
+describe("resolveConfig baseUrl", () => {
+	it("defaults to empty baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
-		assert.deepEqual(cfg.baseURLs, {});
-	});
-
-	it("parses VP_BASE_URLS into a per-provider map", () => {
-		const cfg = resolveConfig({
-			VP_BASE_URLS: "openai=http://localhost:8000/v1,google=https://g.example",
-		} as NodeJS.ProcessEnv);
-		assert.equal(cfg.baseURLs.openai, "http://localhost:8000/v1");
-		assert.equal(cfg.baseURLs.google, "https://g.example");
-	});
-
-	it("skips malformed VP_BASE_URLS pairs", () => {
-		const cfg = resolveConfig({
-			VP_BASE_URLS: "no-equals,=novalue,openai=http://x",
-		} as NodeJS.ProcessEnv);
-		assert.deepEqual(cfg.baseURLs, { openai: "http://x" });
+		assert.equal(cfg.baseUrl, "");
 	});
 });
 
-describe("sanitize baseURLs", () => {
-	it("drops unknown providers and non-string urls in baseURLs", () => {
+describe("sanitize baseUrl", () => {
+	it("defaults to empty string for non-string baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv, {
-			baseURLs: { openai: 123, "bad provider": "http://x", google: "https://y" },
+			baseUrl: 123,
 		});
-		assert.deepEqual(cfg.baseURLs, { google: "https://y" });
+		assert.equal(cfg.baseUrl, "");
+	});
+
+	it("keeps valid string baseUrl", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv, {
+			baseUrl: "https://custom.example",
+		});
+		assert.equal(cfg.baseUrl, "https://custom.example");
 	});
 });
 

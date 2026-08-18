@@ -135,6 +135,8 @@ export function resolveModel(
 			apiKeyEnv: provider.apiKeyEnv,
 		};
 	}
+	// Only pass baseURL if it's a non-empty string; AI SDK requires non-empty string
+	const effectiveBaseURL = baseURL && baseURL.length > 0 ? baseURL : undefined;
 	return {
 		ok: true,
 		missingKey: false,
@@ -142,8 +144,8 @@ export function resolveModel(
 			provider,
 			modelId,
 			apiKey,
-			baseURL,
-			model: provider.make({ apiKey, modelId, baseURL }),
+			baseURL: effectiveBaseURL,
+			model: provider.make({ apiKey, modelId, baseURL: effectiveBaseURL }),
 		},
 	};
 }

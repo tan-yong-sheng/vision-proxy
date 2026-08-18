@@ -34,7 +34,8 @@ This PR is independent of the hook work, so it is reviewed on its own feature br
 | `/review-gate` on `feat/fix-curl-homebrew-install` | failed | `no-mistakes axi run` step `review` failed with `pi reported error: The service is temporarily unavailable` |
 | `/fallow-review` on `feat/fix-curl-homebrew-install` | pass | no consequential structural decisions; high-risk surface due to install script / workflow changes |
 | PR opened | pass | https://github.com/tan-yong-sheng/vision-proxy/pull/11 |
-| Branch pushed | pass | `feat/fix-curl-homebrew-install` |
+| Symlink launcher fix | pass | commit `e8241de`: `scripts/vp` resolves symlinks so `~/.local/bin/vp` finds `dist/cli.js` |
+| Branch pushed with launcher fix | pass | `feat/fix-curl-homebrew-install` now at `e8241de` |
 
 ## Notes
 
@@ -42,6 +43,7 @@ The review-gate attempt failed inside no-mistakes because the upstream Pi servic
 Local checks (test, typecheck, fallow audit) all pass.
 Used `/fallow-review` as a fallback; it found no blocking structural issues.
 Pushed the feature branch and opened PR #11 against `dev`.
+A follow-up commit (`e8241de`) fixed the release-tarball launcher so the `~/.local/bin/vp` symlink resolves to the real install directory before locating `dist/cli.js`.
 
 ## Retirement criteria
 

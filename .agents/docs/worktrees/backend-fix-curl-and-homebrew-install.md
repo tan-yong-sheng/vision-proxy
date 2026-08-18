@@ -42,5 +42,6 @@ See plan deliverables.
 ## QA notes
 
 Curl installer and automated Homebrew `sha256` fix verified locally.
+A follow-up commit (`e8241de`) fixed the release-tarball launcher to resolve the `~/.local/bin/vp` symlink before locating `dist/cli.js`.
 This branch is a separate PR against `dev`.
 PR: https://github.com/tan-yong-sheng/vision-proxy/pull/11.

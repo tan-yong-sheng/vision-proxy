@@ -11,8 +11,8 @@ priority: medium
 entry_point: true
 stale_after: "2026-09-15"
 related:
-  - https://github.com/Dicklesworthstone/destructive_command_guard
-  - https://github.com/ogulcancelik/herdr
+  - https: //github.com/Dicklesworthstone/destructive_command_guard
+  - https: //github.com/ogulcancelik/herdr
   - ../plans/backend-add-pretooluse-read-hook.md
   - ../research/backend-codex-pretooluse-hook-feasibility-confirmation.md
   - ../research/backend-claude-code-hook-feasibility-openclaude-confirmation.md

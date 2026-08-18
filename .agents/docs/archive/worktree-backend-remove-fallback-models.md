@@ -4,7 +4,7 @@ title: Remove fallback model retry surface
 description: Implementation track for removing fallbackModels from vp analyze.
 area: backend
 tags: []
-status: active
+status: landed
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-09-01"

@@ -4,7 +4,7 @@ title: Consolidate max image limits
 description: Implementation track for collapsing maxImagesPerCall and maxBatch into one limit.
 area: backend
 tags: []
-status: active
+status: landed
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-09-01"

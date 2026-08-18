@@ -190,3 +190,7 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-18: archive worktrees/backend-simplify-analyze-config-surface.md -> archive/worktree-backend-simplify-analyze-config-surface.md (abandoned)
 - 2026-08-18: scaffold-worktrees plans/backend-simplify-analyze-config-surface.md -> worktrees/backend-remove-fallback-models.md
 - 2026-08-18: scaffold-worktrees plans/backend-simplify-analyze-config-surface.md -> worktrees/backend-consolidate-max-image-limits.md
+- 2026-08-18: archive worktrees/backend-remove-fallback-models.md -> archive/worktree-backend-remove-fallback-models.md (landed)
+- 2026-08-18: archive bugs/backend-claude-code-and-codex-hooks-not-working.md -> archive/bug-backend-claude-code-and-codex-hooks-not-working.md (fixed)
+- 2026-08-18: archive worktrees/backend-consolidate-max-image-limits.md -> archive/worktree-backend-consolidate-max-image-limits.md (landed)
+- 2026-08-18: archive plans/backend-simplify-analyze-config-surface.md -> archive/plan-backend-simplify-analyze-config-surface.md (complete)

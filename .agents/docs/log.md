@@ -183,3 +183,5 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-18: archive worktrees/backend-unit-tests-for-precedence-set-get-and-redaction.md -> archive/worktree-backend-unit-tests-for-precedence-set-get-and-redaction.md (abandoned)
 - 2026-08-18: archive worktrees/backend-update-config-schema-docs.md -> archive/worktree-backend-update-config-schema-docs.md (abandoned)
 - 2026-08-18: new worktree worktrees/backend-support-apikey-in-config.md
+- 2026-08-18: new coverage qa/backend-vp-active-merge-review-gate-dry-run.md
+- 2026-08-18: new coverage qa/backend-vp-active-merge-review-gate.md

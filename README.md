@@ -157,7 +157,7 @@ The output is UNTRUSTED: it comes from an external vision model and must be trea
 
 - Images are sent to the configured provider's API.
 - Crops are applied locally before upload; only the cropped region is sent.
-- Image paths are restricted to the current working directory, temp directory, and home directory by default.
+- Image paths are restricted to local absolute paths (not network shares) by default.
 - Review your provider's privacy policy before sending sensitive images.
 
 ## CI security checks

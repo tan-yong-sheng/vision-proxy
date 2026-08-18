@@ -1,7 +1,7 @@
 ---
 type: worktree
 title: Remove baseURLs config surface
-description: Implementation track for replacing baseURLs object with a single baseUrl string.
+description: Implementation track for removing the baseURLs config object from vp.
 area: backend
 tags: []
 status: active
@@ -14,20 +14,20 @@ related: [../plans/backend-remove-baseurls-config.md]
 
 ## Objective
 
-Replace the per-provider `baseURLs` config object with a single `baseUrl` string. Keep provider-specific `*_BASE_URL` env vars for runtime overrides.
+Remove the `baseURLs` config object and `VP_BASE_URLS` env var because provider-specific `*_BASE_URL` env vars already cover custom endpoints.
 
 ## Scope
 
-- `src/core.ts` — replace `baseURLs` with `baseUrl: string`, update env parsing/validation/defaults.
-- `src/commands/analyze.ts` — pass `config.baseUrl` to `resolveModel()`.
-- `src/commands/config.ts` — coerce `baseUrl` as a plain string.
-- `src/core.test.ts`, `src/commands/config.test.ts` — update tests to single-string form.
-- `docs/CONFIG.md`, `README.md` — update docs.
+- `src/core.ts` — drop `baseURLs` from config, env parsing, validation, and defaults.
+- `src/commands/analyze.ts` — remove `config.baseURLs[provider]` override.
+- `src/commands/config.ts` — remove `baseURLs` JSON coercion.
+- `src/core.test.ts`, `src/commands/config.test.ts` — remove baseURLs tests.
+- `docs/CONFIG.md` — remove `baseURLs` documentation.
 
 ## Tasks
 
-- [ ] Replace `baseURLs` with `baseUrl: string` in `VisionConfig`, `DEFAULT_CONFIG`, env parsing, and persisted keys.
-- [ ] Update `analyze.ts` to use `config.baseUrl`.
+- [ ] Remove `baseURLs` from `VisionConfig`, `DEFAULT_CONFIG`, env parsing, and persisted keys.
+- [ ] Remove `config.baseURLs` usage from `analyze.ts`.
 - [ ] Update `config.ts` coercion.
 - [ ] Update unit tests.
 - [ ] Update config documentation.

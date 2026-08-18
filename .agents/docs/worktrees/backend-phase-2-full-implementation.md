@@ -59,3 +59,4 @@ Implement the production `vp hook` binary and update installer/uninstaller/statu
 
 Production hook implementation and live Claude Code/Codex tests landed on `feat/add-pretooluse-read-hook-impl`.
 The branch was merged into `qa/vp-hook` and is combined with `feat/add-pretooluse-read-hook` for a single PR.
+PR: https://github.com/tan-yong-sheng/vision-proxy/pull/12 (branch `feat/add-pretooluse-read-hook-pr`).

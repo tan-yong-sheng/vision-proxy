@@ -4,7 +4,7 @@ title: "QA: curl and Homebrew install fix PR"
 description: "QA: curl and Homebrew install fix PR - one-line summary."
 area: backend
 tags: []
-status: pending
+status: active
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-11-16"
@@ -32,12 +32,16 @@ This PR is independent of the hook work, so it is reviewed on its own feature br
 | `npm run typecheck` on `feat/fix-curl-homebrew-install` | pass | no errors |
 | `fallow audit --gate-marker agent` on `feat/fix-curl-homebrew-install` | pass | verdict pass, gate new-only |
 | `/review-gate` on `feat/fix-curl-homebrew-install` | failed | `no-mistakes axi run` step `review` failed with `pi reported error: The service is temporarily unavailable` |
+| `/fallow-review` on `feat/fix-curl-homebrew-install` | pass | no consequential structural decisions; high-risk surface due to install script / workflow changes |
+| PR opened | pass | https://github.com/tan-yong-sheng/vision-proxy/pull/11 |
+| Branch pushed | pass | `feat/fix-curl-homebrew-install` |
 
 ## Notes
 
 The review-gate attempt failed inside no-mistakes because the upstream Pi service returned `The service is temporarily unavailable`.
 Local checks (test, typecheck, fallow audit) all pass.
-The next step is either a retry when the service is stable, or switching to `/fallow-review` as a fallback.
+Used `/fallow-review` as a fallback; it found no blocking structural issues.
+Pushed the feature branch and opened PR #11 against `dev`.
 
 ## Retirement criteria
 

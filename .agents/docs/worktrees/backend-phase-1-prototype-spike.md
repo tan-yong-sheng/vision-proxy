@@ -58,3 +58,4 @@ Validate that a minimal `vp hook` binary can inject `additionalContext` into bot
 
 Prototype validated that a `vp hook` binary can inject `additionalContext` into both Claude Code and Codex.
 The branch was merged into `qa/vp-hook` and is combined with `feat/add-pretooluse-read-hook-impl` for a single PR.
+PR: https://github.com/tan-yong-sheng/vision-proxy/pull/12 (branch `feat/add-pretooluse-read-hook-pr`).

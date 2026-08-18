@@ -4,7 +4,7 @@ title: "QA: combined PreToolUse Read hook PR"
 description: "QA: combined PreToolUse Read hook PR - one-line summary."
 area: backend
 tags: []
-status: pending
+status: active
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-11-16"
@@ -33,6 +33,9 @@ The combined state is the review surface because both branches share the same fe
 | `fallow audit --gate-marker agent` in `qa/vp-hook` | pass | verdict pass, gate new-only |
 | `/review-gate` on `qa/vp-hook` attempt 1 | failed | `no-mistakes axi run` step `review` failed with `agent review: pi output parse: invalid character 'L' looking for beginning of value` (internal parser error, no actionable code finding) |
 | `/review-gate` on `qa/vp-hook` attempt 2 | failed | `no-mistakes axi run` step `review` failed with `pi reported error: The service is temporarily unavailable` |
+| `/fallow-review` on `qa/vp-hook` | pass | no consequential structural decisions; 2 advisory weakening signals |
+| PR opened | pass | https://github.com/tan-yong-sheng/vision-proxy/pull/12 |
+| Branch pushed | pass | `feat/add-pretooluse-read-hook-pr` |
 
 ## Notes
 
@@ -42,7 +45,8 @@ Both review-gate attempts failed inside no-mistakes, not because of repository f
 2. Attempt 2: upstream Pi service returned `The service is temporarily unavailable`.
 
 Local checks (test, typecheck, fallow audit) all pass.
-The next step is either a third retry when the service is stable, or switching to `/fallow-review` as a fallback.
+Used `/fallow-review` as a fallback; it found no blocking structural issues.
+The PR branch `feat/add-pretooluse-read-hook-pr` was created from the validated `qa/vp-hook` merge-preview state and pushed as #12.
 
 ## Retirement criteria
 

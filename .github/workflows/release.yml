@@ -8,9 +8,9 @@ name: release
 #   - manual workflow_dispatch
 #   - workflow_call from auto-tag.yml
 #
-# Pre-releases (tag contains "-") are published with prerelease: true and do
-# not update the Homebrew formula. Stable releases backfill sha256 values in
-# Formula/vision-proxy.rb on main.
+# Tag conventions:
+#   - v0.1.0, v0.1.1 -> stable release; also backfills Formula/vision-proxy.rb sha256.
+#   - v0.1.0-rc.1, v0.1.0-beta.2, etc. -> GitHub pre-release; formula is NOT updated.
 
 on:
   push:
@@ -35,6 +35,9 @@ on:
       prerelease:
         required: true
         type: boolean
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -75,21 +78,21 @@ jobs:
       - name: Build dist
         run: pnpm run build
 
-      - name: Prune dev dependencies
-        # The tarball ships only production deps; typescript/@types are build-time only.
-        run: pnpm prune --prod
-
       - name: Stage release tree
         shell: bash
         run: |
           mkdir -p stage/vision-proxy
-          cp -R dist node_modules package.json stage/vision-proxy/
+          cp -R dist package.json stage/vision-proxy/
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp scripts/vp.cmd stage/vision-proxy/vp.cmd
           else
             cp scripts/vp stage/vision-proxy/vp
             chmod +x stage/vision-proxy/vp
           fi
+          cd stage/vision-proxy
+          # Install production deps directly in the stage directory so we do not
+          # have to copy pnpm's symlink-heavy node_modules across platforms.
+          pnpm install --prod --ignore-scripts --node-linker=hoisted --ignore-workspace
 
       - name: Package
         shell: bash
@@ -110,6 +113,7 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
+      final: ${{ steps.meta.outputs.final }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,24 +121,23 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Resolve tag and prerelease
+      - name: Determine release kind
         id: meta
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
           if [ "${{ inputs.prerelease }}" = "true" ] || [[ "${tag}" == *-* ]]; then
-            prerelease="true"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "final=false" >> "$GITHUB_OUTPUT"
           else
-            prerelease="false"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "final=true" >> "$GITHUB_OUTPUT"
           fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
-          echo "tag: ${tag}"
-          echo "prerelease: ${prerelease}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
       - name: Generate checksums
         run: |
@@ -143,10 +146,8 @@ jobs:
           cat sha256sum.txt
 
       - name: Update Formula checksums
-        # Skip pre-releases: do not mutate the stable Homebrew formula.
-        if: steps.meta.outputs.prerelease != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Only do this for stable (non-prerelease) tags.
+        if: steps.meta.outputs.final == 'true'
         run: |
           set -eu
           sha_file="artifacts/sha256sum.txt"
@@ -172,7 +173,7 @@ jobs:
           grep -A1 "vision-proxy-" "$formula" | grep sha256
 
       - name: Commit updated Formula
-        if: steps.meta.outputs.prerelease != 'true'
+        if: steps.meta.outputs.final == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -191,8 +192,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           files: |
             artifacts/vision-proxy-*.tar.gz
             artifacts/sha256sum.txt
           generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}

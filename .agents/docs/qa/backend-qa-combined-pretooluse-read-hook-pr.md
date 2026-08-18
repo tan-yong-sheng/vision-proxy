@@ -42,6 +42,7 @@ The combined state is the review surface because both branches share the same fe
 | Branch pushed with UserPromptSubmit instruction | pass | `feat/add-pretooluse-read-hook-pr` now at `eb2ab5b` |
 | UserPromptSubmit forwards prompt as `--question` | pass | commit `3f57102`: `npm test` 158/0, `npm run typecheck` pass, `fallow audit` pass |
 | Strengthened hook instruction | pass | commit `3f57102`: explicit Read-tool prohibition + follow-up guidance |
+| Legacy hook entry dedup/cleanup | pass | commit `57b0d7f`: `npm test` 160/0, `npm run typecheck` pass, `fallow audit` pass |
 
 ## Notes
 
@@ -57,6 +58,7 @@ A follow-up commit (`3104038`) changed PreToolUse Read of an image from `allow` 
 Commit `ebac8ff` further prepends an instruction to the injected context telling the agent that the image was already routed through vision-proxy and not to retry Read on image files.
 Commit `eb2ab5b` applies the same instruction prefix to `UserPromptSubmit` so both hook paths consistently tell the agent not to call Read on image files.
 Commit `3f57102` forwards the user's prompt as `--question` to `vp analyze` for `UserPromptSubmit` hooks and rewrites the injected instruction to explicitly tell the agent not to use the Read tool on image files, to treat the generated description as the image content, and to ask follow-up questions in the prompt instead of reading the file.
+Commit `57b0d7f` makes `vp integration install` replace legacy pre-`vpManaged` hook entries (old `.mjs` shims and earlier binary installs) instead of appending duplicates, and `vp integration uninstall` now removes those legacy entries too. The install message now names both the marker file and the hooks config file.
 
 ## Retirement criteria
 

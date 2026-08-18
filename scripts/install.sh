@@ -123,7 +123,7 @@ if [ -z "$VERSION" ]; then
 	probe_url="https://github.com/${REPO}/releases/latest/download/sha256sum.txt"
 	effective_url=""
 	for attempt in 1 2 3; do
-		effective_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "$probe_url" 2>/dev/null)"
+		effective_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "$probe_url" 2>/dev/null || true)"
 		[ -n "$effective_url" ] && break
 		sleep 2
 	done

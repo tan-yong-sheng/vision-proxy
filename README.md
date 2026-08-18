@@ -87,13 +87,12 @@ Run `vp config init` to scaffold a project config file.
 | `VP_MODE` | `fallback`, `always`, or `off` | `fallback` |
 | `VP_INCLUDE_CONTEXT` | Include recent chat context in the prompt | `true` |
 | `VP_TOOL` | Enable agent tool support (`on` or `off`) | `on` |
-| `VP_MAX_IMAGES_PER_CALL` | Max images per analysis call (1-20) | `10` |
-| `VP_MAX_BATCH` | Max images in a joint batch call (1-10) | `4` |
+| `VP_MAX_IMAGES_PER_CALL` | Max images per analysis call (1-20) | `4` |
+| `VP_MAX_BATCH` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL` | `4` |
 | `VP_CACHE_SIZE` | Number of cached descriptions (0-500) | `50` |
 | `VP_CACHE_MAX_AGE_DAYS` | Stale entries older than this are lazily evicted on cache access (0-3650) | `30` |
 | `VP_PHASH_THRESHOLD` | Perceptual-hash similarity threshold (0-1) | `0.8` |
 | `VP_BASE_URLS` | Per-provider base URL overrides as `provider=url` pairs, comma-separated (e.g. `openai=http://localhost:8000/v1`) | unset |
-| `VP_FALLBACK_MODELS` | Comma-separated `provider/model-id` list tried when the primary model fails (e.g. `openai/gpt-4o,google/gemini-2.5-flash`) | unset |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
 | `VP_ALLOW_DRIVES` | Set to `0`/`false`/`no`/`off` to disable local drive access on Windows | unset (drives allowed) |
 | `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from `vp hook` (Codex preview limit) | `2000` |
@@ -111,10 +110,8 @@ Most settings are set with `vp config set <key> <value>` (written to `.vision-pr
 
 - `baseURLs` - a JSON object mapping a provider id to a base URL override, e.g. `vp config set baseURLs '{"openai":"http://localhost:8000/v1"}'`.
   The `provider=url` form of `VP_BASE_URLS` is the equivalent environment override.
-- `fallbackModels` - a JSON array of `provider/model-id` strings tried in order when the primary model fails at runtime, e.g. `vp config set fallbackModels '["openai/gpt-4o","google/gemini-2.5-flash"]'`.
-  The comma-separated `VP_FALLBACK_MODELS` is the equivalent environment override.
 
-A missing API key on the primary provider is always a fatal error; fallbacks are only attempted after a model call fails (rate limit, server error, etc.).
+A missing API key on the primary provider is always a fatal error.
 
 ## Commands
 

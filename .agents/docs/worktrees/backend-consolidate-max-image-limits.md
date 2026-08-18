@@ -25,19 +25,20 @@ Make `maxImagesPerCall` the single canonical limit for how many images one `vp a
 
 ## Tasks
 
-- [ ] Make `maxImagesPerCall` the canonical limit with default `4`.
-- [ ] Support `maxBatch` / `VP_MAX_BATCH` as a fallback alias with a deprecation warning.
-- [ ] Update `analyze.ts` limit checks and error messages.
-- [ ] Update unit tests.
-- [ ] Update config documentation.
+- [x] Make `maxImagesPerCall` the canonical limit with default `4`.
+- [x] Support `maxBatch` / `VP_MAX_BATCH` as a fallback alias with a deprecation warning.
+- [x] Update `analyze.ts` limit checks and error messages.
+- [x] Update unit tests.
+- [x] Update config documentation.
 
 ## Verification
 
 npm test
+npm run typecheck
 
 ## Status
 
 - [x] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
-- [ ] Landed on feature branch (ready for PR/merge)
+- [x] Implementation complete
+- [x] Tests pass
+- [x] Landed on feature branch (ready for PR/merge)

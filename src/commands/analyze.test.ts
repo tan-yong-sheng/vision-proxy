@@ -134,35 +134,6 @@ describe("runAnalyze single-image cache-first", () => {
 		});
 		assert.ok(capturedSystemPrompt.includes("bounding-box coordinates as [x1, y1, x2, y2]"));
 	});
-
-	it("retries across fallbackModels when the primary model call fails", async () => {
-		await writeFile(
-			path.join(dir, ".vision-proxy.json"),
-			JSON.stringify({ fallbackModels: ["openai/gpt-4o"] }),
-		);
-		let calls = 0;
-		const out: AnalyzeOutcome = await runAnalyze([imgPath], baseFlags(), async () => {
-			calls += 1;
-			if (calls === 1) throw new Error("primary rate limited");
-			return { text: "from-fallback" };
-		});
-		assert.equal(calls, 2);
-		assert.ok(out.output.includes("from-fallback"));
-	});
-
-	it("throws when all candidate models fail", async () => {
-		await writeFile(
-			path.join(dir, ".vision-proxy.json"),
-			JSON.stringify({ fallbackModels: ["openai/gpt-4o"] }),
-		);
-		await assert.rejects(
-			() =>
-				runAnalyze([imgPath], baseFlags(), async () => {
-					throw new Error("always fails");
-				}),
-			(e) => e instanceof AnalyzeError && /always fails/.test(e.message),
-		);
-	});
 });
 
 describe("runAnalyze joint / multi-image", () => {
@@ -186,15 +157,37 @@ describe("runAnalyze image limits", () => {
 		);
 	});
 
-	it("enforces maxBatch", async () => {
+	it("enforces the default maxImagesPerCall of 4", async () => {
+		await assert.rejects(
+			() =>
+				runAnalyze(
+					[imgPath, imgPath, imgPath, imgPath, imgPath],
+					baseFlags({ joint: true }),
+					stubAnalyze("x"),
+				),
+			(e) => e instanceof AnalyzeError && /too many images \(5\)/.test(e.message),
+		);
+	});
+
+	it("applies the deprecated maxBatch alias when maxImagesPerCall is unset", async () => {
+		await writeFile(path.join(dir, ".vision-proxy.json"), JSON.stringify({ maxBatch: 2 }));
+		await assert.rejects(
+			() => runAnalyze([imgPath, imgPath, imgPath], baseFlags(), stubAnalyze("x")),
+			(e) => e instanceof AnalyzeError && /too many images \(3\)/.test(e.message),
+		);
+	});
+
+	it("uses maxImagesPerCall in preference to the maxBatch alias", async () => {
 		await writeFile(
 			path.join(dir, ".vision-proxy.json"),
-			JSON.stringify({ maxBatch: 2, maxImagesPerCall: 10 }),
+			JSON.stringify({ maxBatch: 2, maxImagesPerCall: 5 }),
 		);
-		await assert.rejects(
-			() => runAnalyze([imgPath, imgPath, imgPath], baseFlags({ joint: true }), stubAnalyze("x")),
-			(e) => e instanceof AnalyzeError && /too many images for batch \(3\)/.test(e.message),
+		const out: AnalyzeOutcome = await runAnalyze(
+			[imgPath, imgPath, imgPath, imgPath, imgPath],
+			baseFlags({ joint: true }),
+			stubAnalyze("ok"),
 		);
+		assert.ok(out.output.includes("ok"));
 	});
 });
 

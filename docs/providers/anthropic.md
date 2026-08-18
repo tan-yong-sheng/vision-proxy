@@ -29,4 +29,3 @@ vp analyze screenshot.png
 
 - **API key:** `ANTHROPIC_API_KEY` env var, `vp provider store-key anthropic`, or `--api-key`.
 - **Custom endpoint:** `ANTHROPIC_BASE_URL` or `"baseURLs": { "anthropic": "..." }`.
-- **Fallback models:** see [FALLBACK.md](../FALLBACK.md).

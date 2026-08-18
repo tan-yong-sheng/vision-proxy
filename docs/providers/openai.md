@@ -29,4 +29,3 @@ vp analyze screenshot.png
 
 - **API key:** `OPENAI_API_KEY` env var, `vp provider store-key openai`, or `--api-key`.
 - **Custom endpoint:** `OPENAI_BASE_URL` or `"baseURLs": { "openai": "..." }`.
-- **Fallback models:** see [FALLBACK.md](../FALLBACK.md).

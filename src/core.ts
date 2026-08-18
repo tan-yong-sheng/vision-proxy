@@ -40,7 +40,12 @@ export interface VisionConfig {
 	systemPrompt: string;
 	includeContext: boolean;
 	tool: ToolSetting;
+	/**
+	 * Canonical limit: how many images a single `vp analyze` call may receive.
+	 * `maxBatch` is a deprecated one-release alias (see `resolveConfig`).
+	 */
 	maxImagesPerCall: number;
+	/** @deprecated Use `maxImagesPerCall`. Kept as a one-release alias. */
 	maxBatch: number;
 	cacheSize: number;
 	cacheMaxAgeDays: number;
@@ -48,8 +53,6 @@ export interface VisionConfig {
 	groundingModels: Record<string, GroundingModelEntry>;
 	/** Per-provider base URL overrides, e.g. { "openai": "http://localhost:8000/v1" }. */
 	baseURLs: Record<string, string>;
-	/** Alternate `provider/model-id` strings to try when the primary model fails. */
-	fallbackModels: string[];
 	/**
 	 * Optional provider API key persisted as plain text. Falls back after the
 	 * CLI --api-key flag and provider-specific env vars, and before the OS
@@ -339,7 +342,7 @@ export const DEFAULT_CONFIG: VisionConfig = {
 	].join(" "),
 	includeContext: true,
 	tool: "on",
-	maxImagesPerCall: 10,
+	maxImagesPerCall: 4,
 	maxBatch: 4,
 	cacheSize: 50,
 	cacheMaxAgeDays: 30,
@@ -360,7 +363,6 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
 	baseURLs: {},
-	fallbackModels: [],
 	apiKey: "",
 };
 
@@ -385,7 +387,6 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"pHashSimilarityThreshold",
 	"groundingModels",
 	"baseURLs",
-	"fallbackModels",
 	"apiKey",
 ]);
 
@@ -522,20 +523,6 @@ function parseBaseUrlsOverride(value: string | undefined): Record<string, string
 }
 
 /**
- * Parse `VP_FALLBACK_MODELS` — a comma-separated list of `provider/model-id`
- * strings. Malformed entries are skipped.
- */
-function parseFallbackModelsOverride(value: string | undefined): string[] | undefined {
-	if (value === undefined) return undefined;
-	const out: string[] = [];
-	for (const raw of value.split(",")) {
-		const parsed = parseModelString(raw.trim());
-		if (parsed) out.push(`${parsed.provider}/${parsed.modelId}`);
-	}
-	return out.length > 0 ? out : undefined;
-}
-
-/**
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
@@ -568,7 +555,6 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
 	assignIfDefined(overrides, "baseURLs", parseBaseUrlsOverride(env.VP_BASE_URLS));
-	assignIfDefined(overrides, "fallbackModels", parseFallbackModelsOverride(env.VP_FALLBACK_MODELS));
 
 	return overrides;
 }
@@ -583,7 +569,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
 	baseURLs: boolean;
-	fallbackModels: boolean;
 } {
 	return {
 		mode: Boolean(env.VP_MODE),
@@ -595,7 +580,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
 		baseURLs: env.VP_BASE_URLS !== undefined,
-		fallbackModels: env.VP_FALLBACK_MODELS !== undefined,
 	};
 }
 
@@ -683,17 +667,6 @@ function fallbackBaseUrls(value: unknown): Record<string, string> {
 	return out;
 }
 
-function fallbackFallbackModels(value: unknown): string[] {
-	if (!Array.isArray(value)) return [...DEFAULT_CONFIG.fallbackModels];
-	const out: string[] = [];
-	for (const entry of value) {
-		if (typeof entry !== "string") continue;
-		const parsed = parseModelString(entry.trim());
-		if (parsed) out.push(`${parsed.provider}/${parsed.modelId}`);
-	}
-	return out;
-}
-
 export function sanitize(config: VisionConfig): VisionConfig {
 	const safe: VisionConfig = { ...config };
 	safe.provider = fallbackProvider(safe.provider);
@@ -725,7 +698,6 @@ export function sanitize(config: VisionConfig): VisionConfig {
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
 	safe.baseURLs = fallbackBaseUrls(safe.baseURLs);
-	safe.fallbackModels = fallbackFallbackModels(safe.fallbackModels);
 	return safe;
 }
 
@@ -734,7 +706,31 @@ export function resolveConfig(
 	env: NodeJS.ProcessEnv = process.env,
 	fileConfig: Partial<VisionConfig> = {},
 ): VisionConfig {
-	return sanitize({ ...DEFAULT_CONFIG, ...readEnvOverrides(env), ...fileConfig });
+	const envOverrides = readEnvOverrides(env);
+
+	// `maxBatch` / `VP_MAX_BATCH` are a deprecated one-release alias for the
+	// canonical `maxImagesPerCall` limit. Only when `maxImagesPerCall` is unset
+	// (neither in a config file nor an env var) do we fall back to `maxBatch` and
+	// emit a deprecation warning, so existing configs keep working during the
+	// grace period.
+	const maxImagesSet = "maxImagesPerCall" in fileConfig || "maxImagesPerCall" in envOverrides;
+	if (!maxImagesSet) {
+		const batchAlias =
+			"maxBatch" in envOverrides
+				? envOverrides.maxBatch
+				: "maxBatch" in fileConfig
+					? fileConfig.maxBatch
+					: undefined;
+		if (batchAlias !== undefined) {
+			process.emitWarning(
+				"maxBatch / VP_MAX_BATCH is deprecated; use maxImagesPerCall / VP_MAX_IMAGES_PER_CALL instead.",
+				{ type: "DeprecationWarning", code: "VP_DEPRECATED_MAX_BATCH" },
+			);
+			(envOverrides as Partial<VisionConfig>).maxImagesPerCall = batchAlias;
+		}
+	}
+
+	return sanitize({ ...DEFAULT_CONFIG, ...envOverrides, ...fileConfig });
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────

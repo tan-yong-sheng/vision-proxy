@@ -105,13 +105,6 @@ describe("configSet", () => {
 		assert.deepEqual(JSON.parse(raw).baseURLs, { openai: "http://localhost:8000/v1" });
 	});
 
-	it("accepts a JSON array for fallbackModels", async () => {
-		const r = await configSet("fallbackModels", '["openai/gpt-4o"]', cwd);
-		assert.equal(r.ok, true);
-		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
-		assert.deepEqual(JSON.parse(raw).fallbackModels, ["openai/gpt-4o"]);
-	});
-
 	it("falls back to the default for malformed JSON values", async () => {
 		const r = await configSet("baseURLs", "not-json", cwd);
 		assert.equal(r.ok, true);

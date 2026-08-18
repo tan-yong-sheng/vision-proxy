@@ -32,9 +32,10 @@ export const HOOK_USAGE_ERROR = 2;
 export function resolveVpBin(): string {
 	const env = process.env.VP_BIN;
 	if (env?.trim()) return env;
-	// `vp` invoked via the shim-less hook is always the real binary. Fall back to
-	// PATH so a dev run (`node src/cli.ts hook`) without VP_BIN still works.
-	return "vp";
+	// The hook is invoked as the `vp` binary itself, so re-run the same
+	// executable for `vp analyze`. This avoids requiring `vp` to be on PATH at
+	// hook runtime. Falls back to `vp` only when argv[1] is unavailable.
+	return process.argv[1] ?? "vp";
 }
 
 /** Whether a file path ends in a known image extension. */

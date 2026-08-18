@@ -1,9 +1,9 @@
 #!/bin/sh
 # vision-proxy curl installer.
 #
-# Downloads the latest GitHub Release tarball for the current OS/arch, verifies
-# its SHA-256 against the published checksum manifest, extracts it into
-# ~/.local/share/vision-proxy, and symlinks `vp` into ~/.local/bin.
+# Downloads the requested GitHub Release tarball for the current OS/arch,
+# verifies its SHA-256 against the published checksum manifest, extracts it
+# into ~/.local/share/vision-proxy, and symlinks `vp` into ~/.local/bin.
 #
 # Requires only POSIX tools: curl, awk, a SHA-256 tool (sha256sum or
 # shasum -a 256), and node >= 22 on PATH. jq is NOT required.
@@ -17,7 +17,6 @@
 set -eu
 
 REPO="tan-yong-sheng/vision-proxy"
-API="https://api.github.com/repos/${REPO}/releases"
 RAW="https://raw.githubusercontent.com/${REPO}"
 INSTALL_ROOT="${HOME}/.local/share/vision-proxy"
 BIN_DIR="${HOME}/.local/bin"
@@ -117,147 +116,51 @@ asset="vision-proxy-${target}.tar.gz"
 # --- resolve release ------------------------------------------------------
 if [ -z "$VERSION" ]; then
 	echo "Resolving latest release..."
-	release_url="${API}/latest"
+	# GitHub redirects /releases/latest to /releases/tag/<tag>. Avoid the
+	# GitHub API so this works even when the unauthenticated API rate limit
+	# has been exhausted.
+	location=""
+	for attempt in 1 2 3; do
+		location="$(curl -fsSL -I "https://github.com/${REPO}/releases/latest" 2>/dev/null | awk -F': ' 'tolower($1) == "location" {print $2}' | tr -d '\r')"
+		[ -n "$location" ] && break
+		sleep 2
+	done
+	if [ -z "$location" ]; then
+		echo "error: could not resolve latest release from https://github.com/${REPO}/releases/latest" >&2
+		echo "Check your network and that a release exists." >&2
+		exit 1
+	fi
+	# location ends with /releases/tag/<tag>
+	VERSION="${location##*/}"
 else
 	echo "Resolving release ${VERSION}..."
-	release_url="${API}/tags/${VERSION}"
 fi
 
-# Retry the GitHub API a couple of times; it occasionally rate-limits.
-release_json=""
-for attempt in 1 2 3; do
-	if release_json="$(curl -fsSL "$release_url" 2>/dev/null)"; then
-		break
-	fi
-	echo "warning: failed to fetch release metadata (attempt ${attempt}/3)" >&2
-	sleep 2
-done
-if [ -z "$release_json" ]; then
-	echo "error: could not fetch release metadata from ${release_url}" >&2
-	echo "Check your network, the repo name, and that a release exists:" >&2
-	echo "  https://github.com/${REPO}/releases" >&2
-	exit 1
-fi
-
-# Parse a JSON string value for a given key. Works for both pretty-printed and
-# compact (single-line) JSON using POSIX awk. No jq required.
-json_value() {
-	key="$1"
-	printf '%s\n' "$release_json" | awk -v k="\"$key\"" '
-		function clean(s,   i, ch, prev, run, started, len) {
-			# strip surrounding whitespace and the quotes
-			gsub(/^[ \t]+/, "", s); gsub(/[ \t\r]+$/, "", s)
-			gsub(/^"/, "", s); gsub(/"$/, "", s)
-			# unescape common sequences (order matters: backslash first)
-			gsub(/\\"/, "\"", s); gsub(/\\\\/, "\\", s)
-			return s
-		}
-		{
-			line = $0
-			# find the key followed by a colon anywhere on the line
-			idx = index(line, k)
-			while (idx > 0) {
-				rest = substr(line, idx + length(k))
-				if (substr(rest, 1, 1) == ":" || substr(rest, 1, 1) ~ /[ \t]/) {
-					# move to the first quote after the colon
-					c = index(rest, "\"")
-					if (c > 0) {
-						start = idx + length(k) + c
-						val = substr(line, start)
-						# find the closing quote (not preceded by backslash)
-						end = 0; len = length(val)
-						for (j = 1; j <= len; j++) {
-							ch = substr(val, j, 1)
-							prev = (j > 1) ? substr(val, j - 1, 1) : ""
-							if (ch == "\"" && prev != "\\") { end = j; break }
-						}
-						if (end > 0) { print clean(substr(val, 1, end - 1)); exit }
-					}
-				}
-				idx = index(substr(line, idx + 1), k)
-			}
-		}
-	'
-}
-
-VERSION="$(json_value tag_name)"
 if [ -z "$VERSION" ]; then
-	echo "error: could not parse tag_name from release metadata" >&2
+	echo "error: could not determine release tag" >&2
 	exit 1
 fi
+
 echo "Found ${VERSION}"
 
-# Extract the browser_download_url for a given asset name from the JSON.
-# Walks the payload as a single logical string (compact or pretty) and pairs
-# each "name" with the "browser_download_url" that follows it in the assets
-# array. No jq required.
-asset_url() {
-	want="$1"
-	printf '%s\n' "$release_json" | awk -v want="$want" '
-		function unq(s,   c, v, out, len, q, ch, prev) {
-			# extract the string value starting at the first quote
-			c = index(s, "\"")
-			if (c == 0) return ""
-			v = substr(s, c + 1)
-			out = ""; len = length(v)
-			for (q = 1; q <= len; q++) {
-				ch = substr(v, q, 1)
-				prev = (q > 1) ? substr(v, q - 1, 1) : ""
-				if (ch == "\"" && prev != "\\") break
-				out = out ch
-			}
-			return out
-		}
-		{
-			buf = buf $0
-		}
-		END {
-			# scan for "name" tokens, then find the following "browser_download_url"
-			i = 1; n = length(buf)
-			while (i <= n) {
-				if (substr(buf, i, 6) == "\"name\"") {
-					# advance to the next quote pair after the colon
-					j = index(substr(buf, i + 6), "\"")
-					name = unq(substr(buf, i + 6 + j - 1))
-					# search forward for the next browser_download_url
-					k = index(substr(buf, i + 6), "\"browser_download_url\"")
-					if (k > 0) {
-						base = i + 6 + k - 1
-						m = index(substr(buf, base + 23), "\"")
-						url = unq(substr(buf, base + 23 + m - 1))
-						if (name == want) { print url; exit }
-					}
-					i = i + 6
-				} else {
-					i++
-				}
-			}
-		}
-	'
-}
-
-download_url="$(asset_url "$asset")"
-checksum_url="$(asset_url "sha256sum.txt")"
-
-if [ -z "$download_url" ]; then
-	echo "error: no asset '$asset' for ${VERSION}" >&2
-	echo "This platform may be unsupported, or the release is still building." >&2
-	echo "Supported platforms: linux-x64, linux-arm64, darwin-x64, darwin-arm64." >&2
-	echo "See: https://github.com/${REPO}/releases" >&2
-	exit 1
-fi
-if [ -z "$checksum_url" ]; then
-	echo "error: no sha256sum.txt for ${VERSION}" >&2
-	exit 1
-fi
+base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+download_url="${base_url}/${asset}"
+checksum_url="${base_url}/sha256sum.txt"
 
 # --- download + verify ----------------------------------------------------
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading ${asset}..."
-curl -fSL "$download_url" -o "$tmp/$asset"
-curl -fSL "$checksum_url" -o "$tmp/sha256sum.txt"
+if ! curl -fSL "$download_url" -o "$tmp/$asset" 2>/dev/null; then
+	echo "error: failed to download ${asset} from ${download_url}" >&2
+	echo "Check that release ${VERSION} exists and has assets for ${target}." >&2
+	exit 1
+fi
+if ! curl -fSL "$checksum_url" -o "$tmp/sha256sum.txt" 2>/dev/null; then
+	echo "error: failed to download sha256sum.txt from ${checksum_url}" >&2
+	exit 1
+fi
 
 expected="$(grep " $asset\$" "$tmp/sha256sum.txt" | awk '{print $1}')"
 if [ -z "$expected" ]; then
@@ -306,7 +209,7 @@ fi
 # --- PATH guidance --------------------------------------------------------
 on_path=0
 case ":$PATH:" in
-	*":$BIN_DIR:"*) on_path=1 ;;
+	*":$BIN_DIR:") on_path=1 ;;
 esac
 
 if [ "$on_path" -eq 0 ]; then

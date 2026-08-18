@@ -6,7 +6,7 @@ area: backend
 tags: []
 status: active
 created: "2026-08-17"
-updated: "2026-08-17"
+updated: "2026-08-18"
 stale_after: "2026-08-31"
 branch: feat/add-pretooluse-read-hook
 pr_strategy: combined
@@ -33,21 +33,28 @@ Validate that a minimal `vp hook` binary can inject `additionalContext` into bot
 
 ## Tasks
 
-- [ ] Create a throwaway `vp hook` prototype in `src/commands/hook.ts` that emits a static/fake `additionalContext` string (no real `vp analyze` call yet).
-- [ ] Wire it temporarily into `src/cli.ts`.
-- [ ] Manually install the hook in Claude Code `~/.claude/settings.json` with the absolute `vp` path.
-- [ ] Manually install the hook in Codex `~/.codex/hooks.json` with the absolute `vp` path.
-- [ ] Test `UserPromptSubmit`: submit a prompt mentioning an image path; verify the fake context appears in the agent's context.
-- [ ] Test `PreToolUse Read`: ask the agent to read an image file; verify the fake context appears before/after the tool result.
-- [ ] Record results in a QA dossier or update this plan.
+- [x] Create a throwaway `vp hook` prototype in `src/commands/hook.ts` that emits a static/fake `additionalContext` string (no real `vp analyze` call yet).
+- [x] Wire it temporarily into `src/cli.ts`.
+- [x] Manually install the hook in Claude Code `~/.claude/settings.json` with the absolute `vp` path.
+- [x] Manually install the hook in Codex `~/.codex/hooks.json` with the absolute `vp` path.
+- [x] Test `UserPromptSubmit`: submit a prompt mentioning an image path; verify the fake context appears in the agent's context.
+- [x] Test `PreToolUse Read`: ask the agent to read an image file; verify the fake context appears before/after the tool result.
+- [x] Record results in a QA dossier or update this plan.
 
 ## Verification
 
-npm test
+- `npm test`: 157 pass / 0 fail in `qa/vp-hook` merge preview.
+- `npm run typecheck`: pass.
+- `fallow audit --gate-marker agent`: pass.
 
 ## Status
 
-- [ ] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
-- [ ] Landed on feature branch (ready for PR/merge)
+- [x] Worktree created
+- [x] Implementation complete
+- [x] Tests pass
+- [x] Landed on feature branch (ready for PR/merge)
+
+## QA notes
+
+Prototype validated that a `vp hook` binary can inject `additionalContext` into both Claude Code and Codex.
+The branch was merged into `qa/vp-hook` and is combined with `feat/add-pretooluse-read-hook-impl` for a single PR.

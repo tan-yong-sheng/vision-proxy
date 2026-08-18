@@ -6,7 +6,7 @@ area: backend
 tags: []
 status: active
 created: "2026-08-17"
-updated: "2026-08-17"
+updated: "2026-08-18"
 stale_after: "2026-08-31"
 branch: feat/add-pretooluse-read-hook-impl
 pr_strategy: combined
@@ -33,22 +33,29 @@ Implement the production `vp hook` binary and update installer/uninstaller/statu
 
 ## Tasks
 
-- [ ] Implement production `src/commands/hook.ts` with real `vp analyze` dispatch for `UserPromptSubmit` / `PreToolUse Read`.
-- [ ] Wire `vp hook` into `src/cli.ts`.
-- [ ] Update `src/commands/integration.ts` `claudeCode` spec to register/uninstall/status both hook types with absolute `vp` path.
-- [ ] Update `src/commands/integration.ts` `codex` spec to use `~/.codex/hooks.json` and register/uninstall/status both hook types; also remove any legacy `config.toml` `[[UserPromptSubmit]]` block on install/uninstall.
-- [ ] Remove `src/shims/*.mjs` and `scripts/copy-shims.mjs`; update build scripts.
-- [ ] Update `vp integration status` to report both hooks per agent.
-- [ ] Add unit tests for `vp hook` output and integration install/uninstall round-trips.
-- [ ] Run the full manual verification against Claude Code and Codex after the installer is updated.
+- [x] Implement production `src/commands/hook.ts` with real `vp analyze` dispatch for `UserPromptSubmit` / `PreToolUse Read`.
+- [x] Wire `vp hook` into `src/cli.ts`.
+- [x] Update `src/commands/integration.ts` `claudeCode` spec to register/uninstall/status both hook types with absolute `vp` path.
+- [x] Update `src/commands/integration.ts` `codex` spec to use `~/.codex/hooks.json` and register/uninstall/status both hook types; also remove any legacy `config.toml` `[[UserPromptSubmit]]` block on install/uninstall.
+- [x] Remove `src/shims/*.mjs` and `scripts/copy-shims.mjs`; update build scripts.
+- [x] Update `vp integration status` to report both hooks per agent.
+- [x] Add unit tests for `vp hook` output and integration install/uninstall round-trips.
+- [x] Run the full manual verification against Claude Code and Codex after the installer is updated.
 
 ## Verification
 
-npm test
+- `npm test`: 157 pass / 0 fail in `qa/vp-hook` merge preview.
+- `npm run typecheck`: pass.
+- `fallow audit --gate-marker agent`: pass.
 
 ## Status
 
-- [ ] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
-- [ ] Landed on feature branch (ready for PR/merge)
+- [x] Worktree created
+- [x] Implementation complete
+- [x] Tests pass
+- [x] Landed on feature branch (ready for PR/merge)
+
+## QA notes
+
+Production hook implementation and live Claude Code/Codex tests landed on `feat/add-pretooluse-read-hook-impl`.
+The branch was merged into `qa/vp-hook` and is combined with `feat/add-pretooluse-read-hook` for a single PR.

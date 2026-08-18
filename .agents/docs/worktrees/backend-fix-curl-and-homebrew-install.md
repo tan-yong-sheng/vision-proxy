@@ -6,7 +6,7 @@ area: backend
 tags: []
 status: active
 created: "2026-08-17"
-updated: "2026-08-17"
+updated: "2026-08-18"
 stale_after: "2026-08-31"
 branch: feat/fix-curl-homebrew-install
 pr_strategy: separate
@@ -24,15 +24,22 @@ See plan deliverables.
 
 ## Tasks
 
-- [ ] Implement fix curl and homebrew install per plan
+- [x] Implement fix curl and homebrew install per plan
 
 ## Verification
 
-npm test
+- `npm test`: 152 pass / 0 fail on feature branch.
+- `npm run typecheck`: pass.
+- `fallow audit --gate-marker agent`: pass.
 
 ## Status
 
-- [ ] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
-- [ ] Landed on feature branch (ready for PR/merge)
+- [x] Worktree created
+- [x] Implementation complete
+- [x] Tests pass
+- [x] Landed on feature branch (ready for PR/merge)
+
+## QA notes
+
+Curl installer and automated Homebrew `sha256` fix verified locally.
+This branch is a separate PR against `dev`.

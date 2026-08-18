@@ -7,6 +7,7 @@
  * per-part `providerOptions` (e.g. OpenAI `imageDetail`) pass through.
  */
 import {
+	APICallError,
 	generateText,
 	type LanguageModel,
 	type ModelMessage,
@@ -68,6 +69,22 @@ function buildPromptText(imagePayloads: ImagePayload[], question: string): strin
 }
 
 /**
+ * Wrap an error from the Vercel AI SDK into a user-facing message.
+ * Exposed for testing.
+ */
+export function wrapAnalyzeError(err: unknown): unknown {
+	if (err instanceof APICallError) {
+		const status = err.statusCode;
+		const url = err.url ? ` (${err.url})` : "";
+		if (status === 404) {
+			return new Error(`Model endpoint returned 404 (model not found)${url}`);
+		}
+		return new Error(`Model endpoint returned ${status ?? "an error"}${url}: ${err.message}`);
+	}
+	return err;
+}
+
+/**
  * Run a single vision analysis call via the Vercel AI SDK.
  *
  * Returns the model text. The caller owns caching and fence emission.
@@ -89,13 +106,16 @@ export async function analyzeImagesWithModel(req: AnalyzeRequest): Promise<Analy
 
 	const userMessage: ModelMessage = { role: "user", content };
 
-	const result = await generateText({
-		model,
-		system: systemPrompt,
-		messages: [userMessage],
-		...(signal ? { abortSignal: signal } : {}),
-		...(maxOutputTokens ? { maxOutputTokens } : {}),
-	});
-
-	return { text: result.text.trim() };
+	try {
+		const result = await generateText({
+			model,
+			system: systemPrompt,
+			messages: [userMessage],
+			...(signal ? { abortSignal: signal } : {}),
+			...(maxOutputTokens ? { maxOutputTokens } : {}),
+		});
+		return { text: result.text.trim() };
+	} catch (err) {
+		throw wrapAnalyzeError(err);
+	}
 }

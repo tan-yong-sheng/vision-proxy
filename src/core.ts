@@ -834,6 +834,109 @@ function mimeTypeForExt(filePath: string): string | undefined {
 	return EXT_TO_MIME[extname(filePath).toLowerCase()];
 }
 
+function sniffMimeType(content: Buffer): string | undefined {
+	try {
+		const m = sharp(content).metadataSync();
+		if (m.mediaType && /^image\//.test(m.mediaType)) return m.mediaType;
+	} catch {
+		// Not an image or not parseable — fall through
+	}
+	return undefined;
+}
+
+async function downloadImageFromUrl(
+	url: string,
+): Promise<{ content: Buffer; mimeType: string; filename: string } | null> {
+	try {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 30000);
+
+		const response = await fetch(url, {
+			redirect: "follow",
+			signal: controller.signal,
+			headers: {
+				"User-Agent": "vision-proxy/0.1.0",
+			},
+		});
+
+		clearTimeout(timeout);
+
+		if (!response.ok) {
+			return null;
+		}
+
+		// Check content-length if available
+		const contentLength = response.headers.get("content-length");
+		const maxBytes = maxImageFileBytes();
+		if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+			return null;
+		}
+
+		// Stream with size limit
+		const chunks: Uint8Array[] = [];
+		let totalBytes = 0;
+
+		if (!response.body) {
+			return null;
+		}
+
+		const reader = response.body.getReader();
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+
+			totalBytes += value.length;
+			if (totalBytes > maxBytes) {
+				return null;
+			}
+			chunks.push(value);
+		}
+
+		const content = Buffer.concat(chunks);
+
+		// Determine mime type from content-type header or URL
+		let mimeType = response.headers.get("content-type") || "";
+		mimeType = mimeType.split(";")[0].trim().toLowerCase();
+
+		if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+			// Try to guess from URL extension
+			const urlPath = new URL(url).pathname;
+			mimeType = mimeTypeForExt(urlPath) || "";
+		}
+
+		if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+			// Default to sniffing
+			const detected = sniffMimeType(content);
+			if (!detected) return null;
+			mimeType = detected;
+		}
+
+		// Extract filename from URL
+		const urlPath = new URL(url).pathname;
+		const filename = basename(urlPath) || "download";
+
+		return { content, mimeType, filename };
+	} catch {
+		return null;
+	}
+}
+
+function isUrl(str: string): boolean {
+	try {
+		const u = new URL(str);
+		return u.protocol === "http:" || u.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
+function strictMimeEnabled(): boolean {
+	const raw = process.env.VP_STRICT_MIME;
+	if (raw === undefined) return false;
+	const v = raw.toLowerCase();
+	return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 function maxImageFileBytes(): number {
 	const raw = process.env.VP_MAX_IMAGE_BYTES;
 	if (raw) {
@@ -849,13 +952,15 @@ export type ReadImageReason =
 	| "not-found"
 	| "unreadable"
 	| "empty"
-	| "too-large";
+	| "too-large"
+	| "mime-mismatch";
 
 export interface ReadImageResult {
 	image: ImageContent | null;
 	reason?: ReadImageReason;
 	bytes?: number;
 	filename?: string;
+	detectedMimeType?: string;
 }
 
 function isLocalAbsolutePath(resolved: string): boolean {
@@ -931,9 +1036,43 @@ async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 }
 
 export async function readImageFileWithReason(rawPath: string): Promise<ReadImageResult> {
+	// Handle URLs
+	if (isUrl(rawPath)) {
+		const downloaded = await downloadImageFromUrl(rawPath);
+		if (!downloaded) {
+			return { image: null, reason: "unreadable" };
+		}
+
+		let { content, mimeType, filename } = downloaded;
+
+		// Content sniffing on downloaded content
+		const detectedMimeType = sniffMimeType(content);
+		if (detectedMimeType && detectedMimeType !== mimeType) {
+			if (strictMimeEnabled()) {
+				return {
+					image: null,
+					reason: "mime-mismatch",
+					bytes: content.length,
+					filename,
+				};
+			}
+			if (detectedMimeType) {
+				mimeType = detectedMimeType;
+			}
+		}
+
+		return {
+			image: { type: "image", data: content.toString("base64"), mimeType },
+			bytes: content.length,
+			filename,
+			detectedMimeType,
+		};
+	}
+
+	// Local file path handling
 	const filePath = cleanFilePath(rawPath);
 
-	const mimeType = mimeTypeForExt(filePath);
+	let mimeType = mimeTypeForExt(filePath);
 	if (!mimeType) return { image: null, reason: "not-an-image" };
 
 	try {
@@ -957,10 +1096,24 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 	}
 
 	const content = bytesResult.content;
+
+	// Content-sniff the actual format via sharp to detect extension/mime mismatches.
+	const detectedMimeType = sniffMimeType(content);
+	if (detectedMimeType && detectedMimeType !== mimeType) {
+		if (strictMimeEnabled()) {
+			return { image: null, reason: "mime-mismatch" };
+		}
+		// In non-strict mode, prefer the content-detected type but still return.
+		if (detectedMimeType) {
+			mimeType = detectedMimeType;
+		}
+	}
+
 	return {
 		image: { type: "image", data: content.toString("base64"), mimeType },
 		bytes: content.length,
 		filename: basename(filePath),
+		detectedMimeType,
 	};
 }
 
@@ -972,6 +1125,8 @@ const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
 	"not-an-image": "unsupported extension",
 	"not-found": "file not found",
 	"too-large": "",
+	"mime-mismatch":
+		"file extension does not match actual image content (set VP_STRICT_MIME=1 to reject)",
 };
 
 export function describeReadReason(reason: ReadImageReason, bytes?: number): string {

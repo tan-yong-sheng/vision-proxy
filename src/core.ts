@@ -50,6 +50,12 @@ export interface VisionConfig {
 	baseURLs: Record<string, string>;
 	/** Alternate `provider/model-id` strings to try when the primary model fails. */
 	fallbackModels: string[];
+	/**
+	 * Optional provider API key persisted as plain text. Falls back after the
+	 * CLI --api-key flag and provider-specific env vars, and before the OS
+	 * keyring. Prefer `vp provider store-key` for safer credential storage.
+	 */
+	apiKey: string;
 }
 
 export interface ImageMeta {
@@ -355,6 +361,7 @@ export const DEFAULT_CONFIG: VisionConfig = {
 	},
 	baseURLs: {},
 	fallbackModels: [],
+	apiKey: "",
 };
 
 // ── Persistent file storage ────────────────────────────────────────────────
@@ -379,6 +386,7 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"groundingModels",
 	"baseURLs",
 	"fallbackModels",
+	"apiKey",
 ]);
 
 function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
@@ -633,6 +641,10 @@ function fallbackTool(tool: ToolSetting): ToolSetting {
 	return VALID_TOOLS.includes(tool) ? tool : DEFAULT_CONFIG.tool;
 }
 
+function fallbackApiKey(value: unknown): string {
+	return typeof value === "string" ? value : DEFAULT_CONFIG.apiKey;
+}
+
 function fallbackRange(value: number, min: number, max: number, fallback: number): number {
 	if (!Number.isFinite(value)) return fallback;
 	if (value < min) return fallback;
@@ -690,6 +702,7 @@ export function sanitize(config: VisionConfig): VisionConfig {
 	safe.includeContext = fallbackBoolean(safe.includeContext);
 	safe.systemPrompt = fallbackString(safe.systemPrompt);
 	safe.tool = fallbackTool(safe.tool);
+	safe.apiKey = fallbackApiKey(safe.apiKey);
 	safe.maxImagesPerCall = fallbackRange(
 		safe.maxImagesPerCall,
 		1,

@@ -13,7 +13,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -34,6 +34,27 @@ function writeFakeVp(dir: string): string {
 		fake,
 		[
 			"#!/usr/bin/env node",
+			'const out = "<vision_proxy_description>A red square on white.</vision_proxy_description>";',
+			'process.stdout.write(out + "\\n");',
+		].join("\n"),
+		{ mode: 0o755 },
+	);
+	return fake;
+}
+
+/**
+ * Write a fake `vp` that records its argv to `<dir>/args.json` and emits a
+ * fenced description. Used to assert that the hook forwards `--question`.
+ */
+function writeRecordingFakeVp(dir: string): string {
+	const fake = join(dir, "vp");
+	const argsPath = join(dir, "args.json").replace(/\\/g, "\\\\");
+	writeFileSync(
+		fake,
+		[
+			"#!/usr/bin/env node",
+			'const fs = require("fs");',
+			`fs.writeFileSync("${argsPath}", JSON.stringify(process.argv));`,
 			'const out = "<vision_proxy_description>A red square on white.</vision_proxy_description>";',
 			'process.stdout.write(out + "\\n");',
 		].join("\n"),
@@ -144,12 +165,42 @@ test("UserPromptSubmit with an image path emits additionalContext", () => {
 	assert.equal(out.trim() !== "", true);
 	const parsed = JSON.parse(out.trim());
 	assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
-	assert.match(parsed.hookSpecificOutput.additionalContext, /vision-proxy routed the image/);
 	assert.match(
 		parsed.hookSpecificOutput.additionalContext,
-		/Do not call Read on image files directly/,
+		/Do not use the Read tool on image files/,
+	);
+	assert.match(
+		parsed.hookSpecificOutput.additionalContext,
+		/vision-proxy has already routed the image/,
+	);
+	assert.match(
+		parsed.hookSpecificOutput.additionalContext,
+		/ask in the prompt instead of reading the file/,
 	);
 	assert.match(parsed.hookSpecificOutput.additionalContext, /red square on white/);
+});
+
+test("UserPromptSubmit forwards the prompt as --question to vp analyze", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vp-hook-"));
+	const vpBin = writeRecordingFakeVp(dir);
+	const event = {
+		hook_event_name: "UserPromptSubmit",
+		prompt: "What is in /home/me/screenshot.png?",
+	};
+	captureStdout(() => {
+		const prev = process.env.VP_BIN;
+		process.env.VP_BIN = vpBin;
+		try {
+			runHook(event);
+		} finally {
+			if (prev === undefined) delete process.env.VP_BIN;
+			else process.env.VP_BIN = prev;
+		}
+	});
+	const args = JSON.parse(readFileSync(join(dir, "args.json"), "utf8")) as string[];
+	const questionIdx = args.indexOf("--question");
+	assert.ok(questionIdx !== -1, "expected --question in vp analyze args");
+	assert.equal(args[questionIdx + 1], event.prompt);
 });
 
 test("UserPromptSubmit with no image is a no-op", () => {
@@ -181,10 +232,17 @@ test("PreToolUse Read of an image denies the tool and emits additionalContext", 
 	assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
 	assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
 	assert.ok(typeof parsed.hookSpecificOutput.permissionDecisionReason === "string");
-	assert.match(parsed.hookSpecificOutput.additionalContext, /vision-proxy routed the image/);
 	assert.match(
 		parsed.hookSpecificOutput.additionalContext,
-		/Do not call Read on image files directly/,
+		/Do not use the Read tool on image files/,
+	);
+	assert.match(
+		parsed.hookSpecificOutput.additionalContext,
+		/vision-proxy has already routed the image/,
+	);
+	assert.match(
+		parsed.hookSpecificOutput.additionalContext,
+		/ask in the prompt instead of reading the file/,
 	);
 	assert.match(parsed.hookSpecificOutput.additionalContext, /red square on white/);
 });

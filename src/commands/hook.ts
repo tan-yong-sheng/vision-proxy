@@ -121,12 +121,18 @@ export function readToolFilePath(event: Record<string, unknown>): string | null 
 	return resolveImagePath(file, event.cwd as string | undefined);
 }
 
-/** Run `vp analyze <images>` and return the fenced description, or null on failure. */
-export function runAnalyze(images: string[]): string | null {
+/**
+ * Run `vp analyze <images>` and return the fenced description, or null on failure.
+ * An optional `question` is forwarded as `--question` so the vision model can
+ * tailor the description.
+ */
+export function runAnalyze(images: string[], question?: string): string | null {
 	if (images.length === 0) return null;
 	const vp = resolveVpBin();
 	const codexCap = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
-	const result = spawnSync(vp, ["analyze", ...images, "--max-output-tokens", String(codexCap)], {
+	const args = ["analyze", ...images, "--max-output-tokens", String(codexCap)];
+	if (question?.trim()) args.push("--question", question.trim());
+	const result = spawnSync(vp, args, {
 		encoding: "utf8",
 		timeout: Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000),
 		maxBuffer: MAX_BUFFER_BYTES,
@@ -169,11 +175,19 @@ export function emit(
  * `vp analyze`, and emits the description. Returns early (fail-open) on any
  * error or when no images are found.
  */
-/** Prefix a vision-proxy description with an instruction not to read images directly. */
+/**
+ * Prefix a vision-proxy description with an explicit instruction telling the
+ * agent not to use the Read tool on image files and to use the description as
+ * the image content. For follow-up questions, the agent should ask in the
+ * prompt instead of reading the file again.
+ */
 function withImageInstruction(description: string): string {
 	return (
-		"vision-proxy routed the image(s) to a vision-input model. " +
-		"Do not call Read on image files directly; rely on the generated description below.\n\n" +
+		"Do not use the Read tool on image files. " +
+		"vision-proxy has already routed the image(s) through a vision-input model " +
+		"and produced the description below. " +
+		"Treat that description as the image content. " +
+		"If you need a more specific or detailed analysis, ask in the prompt instead of reading the file.\n\n" +
 		description
 	);
 }
@@ -185,7 +199,9 @@ export function runHook(event: Record<string, unknown> | null): void {
 		const prompt = typeof event.prompt === "string" ? event.prompt : "";
 		const images = extractImagePaths(prompt);
 		if (images.length === 0) return;
-		const description = runAnalyze(images);
+		// Pass the user's prompt as the analysis question so the vision model
+		// can tailor the description to what the user is asking.
+		const description = runAnalyze(images, prompt);
 		if (!description) return;
 		emit("UserPromptSubmit", withImageInstruction(description));
 		return;

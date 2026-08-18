@@ -35,6 +35,17 @@ If `~/.local/bin` is not already on your `PATH`, the installer prints the exact 
 curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh -s -- --add-to-path
 ```
 
+### Pre-releases
+
+The default curl installer follows the latest **stable** GitHub release, and the Homebrew formula always tracks stable releases.
+To test a pre-release (for example `v0.1.0-rc.1`), pin the tag with `--version`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh -s -- --version v0.1.0-rc.1
+```
+
+Pre-release tarballs are also available directly from the [GitHub Releases](https://github.com/tan-yong-sheng/vision-proxy/releases) page.
+
 ### Requirements
 
 Requires Node 22 or later on `PATH` (the Homebrew formula satisfies this automatically; the curl installer prints a warning if your system Node is older).

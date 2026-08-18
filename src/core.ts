@@ -834,9 +834,9 @@ function mimeTypeForExt(filePath: string): string | undefined {
 	return EXT_TO_MIME[extname(filePath).toLowerCase()];
 }
 
-function sniffMimeType(content: Buffer): string | undefined {
+async function sniffMimeType(content: Buffer): Promise<string | undefined> {
 	try {
-		const m = sharp(content).metadataSync();
+		const m = await sharp(content).metadata();
 		if (m.mediaType && /^image\//.test(m.mediaType)) return m.mediaType;
 	} catch {
 		// Not an image or not parseable — fall through
@@ -906,7 +906,7 @@ async function downloadImageFromUrl(
 
 		if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
 			// Default to sniffing
-			const detected = sniffMimeType(content);
+			const detected = await sniffMimeType(content);
 			if (!detected) return null;
 			mimeType = detected;
 		}
@@ -1046,7 +1046,7 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 		let { content, mimeType, filename } = downloaded;
 
 		// Content sniffing on downloaded content
-		const detectedMimeType = sniffMimeType(content);
+		const detectedMimeType = await sniffMimeType(content);
 		if (detectedMimeType && detectedMimeType !== mimeType) {
 			if (strictMimeEnabled()) {
 				return {
@@ -1098,7 +1098,7 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 	const content = bytesResult.content;
 
 	// Content-sniff the actual format via sharp to detect extension/mime mismatches.
-	const detectedMimeType = sniffMimeType(content);
+	const detectedMimeType = await sniffMimeType(content);
 	if (detectedMimeType && detectedMimeType !== mimeType) {
 		if (strictMimeEnabled()) {
 			return { image: null, reason: "mime-mismatch" };

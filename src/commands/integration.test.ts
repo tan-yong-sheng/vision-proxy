@@ -469,7 +469,7 @@ test("status reports installed version markers and up-to-date summary", async ()
 	await runIntegration("install", "pi");
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /✓ pi\s+0\.1\.0/);
+	assert.match(r.message, new RegExp(`✓ pi\\s+${VERSION.replace(/\./g, "\\.")}`));
 	assert.match(r.message, /all \d+ integration\(s\) up to date/);
 	reset();
 });
@@ -484,7 +484,10 @@ test("status flags an integration whose embedded version marker is stale", async
 	);
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /! pi\s+0\.0\.9.*installed vp is 0\.1\.0/);
+	assert.match(
+		r.message,
+		new RegExp(`! pi\\s+0\\.0\\.9.*installed vp is ${VERSION.replace(/\./g, "\\.")}`),
+	);
 	assert.match(r.message, /out of date/);
 	reset();
 });
@@ -495,7 +498,7 @@ test("status reads claude-code version from the hooks config, not a marker file"
 	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /✓ claude-code\s+0\.1\.0/);
+	assert.match(r.message, new RegExp(`✓ claude-code\\s+${VERSION.replace(/\./g, "\\.")}`));
 	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
 	reset();
 });

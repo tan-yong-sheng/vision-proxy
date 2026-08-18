@@ -28,6 +28,8 @@ interface VisionConfig {
   pHashSimilarityThreshold: number;
   groundingModels: Record<string, { format: string }>;
   baseURLs: Record<string, string>;
+  /** Optional provider API key persisted as plain text in config. */
+  apiKey: string;
 }
 ```
 
@@ -48,6 +50,7 @@ interface VisionConfig {
 | `pHashSimilarityThreshold` | number | `0.9` | pHash similarity threshold for cache hits. |
 | `groundingModels` | object | `{}` | Per-model grounding format overrides. |
 | `baseURLs` | object | `{}` | Per-provider base URL overrides, e.g. `{ "openai": "http://localhost:8000/v1" }`. |
+| `apiKey` | string | `""` | Provider API key persisted as plain text in config. Prefer `vp provider store-key` for OS keyring storage. |
 
 ## Example configs
 

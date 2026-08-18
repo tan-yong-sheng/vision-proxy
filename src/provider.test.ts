@@ -55,4 +55,64 @@ describe("resolveModel", () => {
 			assert.equal(result.provider, "unknown");
 		}
 	});
+
+	it("falls back to configApiKey when no explicit key or env var is set", () => {
+		const result = resolveModel(
+			"openai",
+			"gpt-4o",
+			{} as NodeJS.ProcessEnv,
+			undefined,
+			undefined,
+			"cfg-key",
+		);
+		assert.equal(result.ok, true);
+		if (result.ok) {
+			assert.equal(result.model.apiKey, "cfg-key");
+		}
+	});
+
+	it("prefers explicit apiKey over env and config", () => {
+		const result = resolveModel(
+			"openai",
+			"gpt-4o",
+			{ OPENAI_API_KEY: "env-key" } as NodeJS.ProcessEnv,
+			"explicit-key",
+			undefined,
+			"cfg-key",
+		);
+		assert.equal(result.ok, true);
+		if (result.ok) {
+			assert.equal(result.model.apiKey, "explicit-key");
+		}
+	});
+
+	it("prefers env apiKey over config apiKey", () => {
+		const result = resolveModel(
+			"openai",
+			"gpt-4o",
+			{ OPENAI_API_KEY: "env-key" } as NodeJS.ProcessEnv,
+			undefined,
+			undefined,
+			"cfg-key",
+		);
+		assert.equal(result.ok, true);
+		if (result.ok) {
+			assert.equal(result.model.apiKey, "env-key");
+		}
+	});
+
+	it("ignores empty config apiKey and falls through to missing key", () => {
+		const result = resolveModel(
+			"openai",
+			"gpt-4o",
+			{} as NodeJS.ProcessEnv,
+			undefined,
+			undefined,
+			"",
+		);
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.equal(result.apiKeyEnv, "OPENAI_API_KEY");
+		}
+	});
 });

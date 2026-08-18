@@ -213,6 +213,16 @@ describe("resolveConfig", () => {
 		const cfg = resolveConfig({ VP_CACHE_MAX_AGE_DAYS: "99999" } as NodeJS.ProcessEnv);
 		assert.equal(cfg.cacheMaxAgeDays, DEFAULT_CONFIG.cacheMaxAgeDays);
 	});
+
+	it("applies apiKey from file config", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv, { apiKey: "file-key" });
+		assert.equal(cfg.apiKey, "file-key");
+	});
+
+	it("defaults apiKey to empty string", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
+		assert.equal(cfg.apiKey, "");
+	});
 });
 
 describe("resolveConfig baseURLs", () => {

@@ -28,6 +28,21 @@ const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 /** Exit code emitted on a hard (non-fail-open) usage error. */
 export const HOOK_USAGE_ERROR = 2;
 
+/**
+ * When the hook runs as `vp hook`, `process.argv[1]` is the `dist/cli.js`
+ * compiled entry, not the `vp` launcher. Some installs (e.g. Homebrew) ship
+ * that file without the exec bit and with a non-PATH shebang, so spawning it
+ * directly fails with EACCES. Re-run it under `process.execPath` (the node
+ * already running this process) instead. For any other path (the `vp` launcher
+ * wrapper or symlink) return it as-is so it can be spawned directly.
+ */
+export function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
+	if (/\.js$/i.test(cmd)) {
+		return { command: process.execPath, args: [cmd] };
+	}
+	return { command: cmd, args: [] };
+}
+
 /** Resolve the `vp` binary path, preferring an explicit override/env. */
 export function resolveVpBin(): string {
 	const env = process.env.VP_BIN;
@@ -132,10 +147,11 @@ export function readToolFilePath(event: Record<string, unknown>): string | null 
 export function runAnalyze(images: string[], question?: string): string | null {
 	if (images.length === 0) return null;
 	const vp = resolveVpBin();
+	const { command, args: prefix } = vpEntryToSpawn(vp);
 	const codexCap = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
-	const args = ["analyze", ...images, "--max-output-tokens", String(codexCap)];
+	const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(codexCap)];
 	if (question?.trim()) args.push("--question", question.trim());
-	const result = spawnSync(vp, args, {
+	const result = spawnSync(command, args, {
 		encoding: "utf8",
 		timeout: Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000),
 		maxBuffer: MAX_BUFFER_BYTES,

@@ -154,6 +154,7 @@ export async function runAnalyze(
 		env,
 		flags.apiKey,
 		config.baseURLs[provider],
+		config.apiKey,
 	);
 	if (!modelOutcome.ok) {
 		throw new AnalyzeError(

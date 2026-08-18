@@ -53,9 +53,11 @@ export async function configGet(opts: {
 		cwd: opts.cwd,
 		env: opts.env,
 	});
+	// Redact the API key before printing so `config get` does not leak secrets.
+	const displayConfig = { ...config, apiKey: config.apiKey ? "***" : "" };
 	return {
 		ok: true,
-		message: `resolved from: ${resolvedFrom}\n${JSON.stringify(config, null, 2)}`,
+		message: `resolved from: ${resolvedFrom}\n${JSON.stringify(displayConfig, null, 2)}`,
 		code: 0,
 	};
 }
@@ -121,7 +123,14 @@ export async function configValidate(opts: {
 	}
 
 	// Reachability: does the provider have a key?
-	const probe = resolveModel(sanitized.provider, sanitized.modelId, opts.env ?? process.env);
+	const probe = resolveModel(
+		sanitized.provider,
+		sanitized.modelId,
+		opts.env ?? process.env,
+		undefined,
+		undefined,
+		sanitized.apiKey,
+	);
 	const authNote = probe.ok
 		? `provider "${sanitized.provider}" reachable (key present)`
 		: `provider "${probe.provider}" missing key ${probe.apiKeyEnv}`;

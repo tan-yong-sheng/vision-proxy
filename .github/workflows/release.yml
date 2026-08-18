@@ -186,6 +186,10 @@ jobs:
           fi
           git add Formula/vision-proxy.rb
           git commit -m "chore(formula): backfill sha256 for ${{ steps.meta.outputs.tag }}"
+          # main may have moved on since the release tag was created; rebase the
+          # formula commit on top of the current remote main before pushing.
+          git fetch origin main
+          git rebase origin/main
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:main"
 
       - name: Publish GitHub release

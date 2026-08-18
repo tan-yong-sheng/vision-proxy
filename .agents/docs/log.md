@@ -194,3 +194,5 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-18: archive bugs/backend-claude-code-and-codex-hooks-not-working.md -> archive/bug-backend-claude-code-and-codex-hooks-not-working.md (fixed)
 - 2026-08-18: archive worktrees/backend-consolidate-max-image-limits.md -> archive/worktree-backend-consolidate-max-image-limits.md (landed)
 - 2026-08-18: archive plans/backend-simplify-analyze-config-surface.md -> archive/plan-backend-simplify-analyze-config-surface.md (complete)
+- 2026-08-18: new plan plans/backend-remove-baseurls-config.md
+- 2026-08-18: scaffold-worktrees plans/backend-remove-baseurls-config.md -> worktrees/backend-remove-base-urls-config.md

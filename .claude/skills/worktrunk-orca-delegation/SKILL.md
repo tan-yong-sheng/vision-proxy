@@ -64,17 +64,16 @@ wt switch --create <branch> --base <base> --no-cd
 
 Prime fresh worktrees once to skip first-run screens. See [REFERENCE.md](REFERENCE.md).
 
-**Overlay skills into the worktree:** After creating the worktree, copy over any orchestrator skills with `--ignore-existing`. `.claude/skills` should be a tracked relative symlink to `.agents/skills`; do not rsync into it or you will write through the symlink into `.agents/skills`.
+**Overlay skills into the worktree:** After creating the worktree, copy over any orchestrator skills with `--ignore-existing`. Claude Code does not follow a symlinked `.claude/skills` directory, so copy the directory contents instead of symlinking.
 
 ```bash
 if [ -d <source-worktree>/.agents/skills ]; then
   mkdir -p <worktree>/.agents/skills
   rsync -au --ignore-existing <source-worktree>/.agents/skills/ <worktree>/.agents/skills/
 fi
-# Ensure .claude/skills is a relative symlink to .agents/skills in the worktree.
-if [ ! -L <worktree>/.claude/skills ]; then
-  rm -rf <worktree>/.claude/skills
-  ln -s .agents/skills <worktree>/.claude/skills
+if [ -d <source-worktree>/.claude/skills ]; then
+  mkdir -p <worktree>/.claude/skills
+  rsync -au --ignore-existing <source-worktree>/.claude/skills/ <worktree>/.claude/skills/
 fi
 ```
 

@@ -164,6 +164,10 @@ test("install claude-code registers both hooks in settings.json with absolute vp
 	assert.ok(ptsCmd.endsWith(" hook"), "command must invoke the vp hook subcommand");
 	assert.equal(cfg.hooks.UserPromptSubmit[0].vpManaged, true);
 	assert.equal(cfg.hooks.PreToolUse[0].vpManaged, true);
+	// Version is embedded in the hook group; no separate marker file is created.
+	assert.equal(typeof cfg.hooks.UserPromptSubmit[0].version, "string");
+	assert.equal(typeof cfg.hooks.PreToolUse[0].version, "string");
+	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
 	reset();
 });
 
@@ -430,5 +434,16 @@ test("status flags an integration whose embedded version marker is stale", async
 	assert.equal(r.ok, true);
 	assert.match(r.message, /! pi\s+0\.0\.9.*installed vp is 0\.1\.0/);
 	assert.match(r.message, /out of date/);
+	reset();
+});
+
+test("status reads claude-code version from the hooks config, not a marker file", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "claude-code", dir);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /✓ claude-code\s+0\.1\.0/);
+	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
 	reset();
 });

@@ -83,11 +83,14 @@ function makeHookCommand(): string {
  *
  * `vpManaged` tags the group so install/status/uninstall can find our
  * registration even if the absolute `vp` path changed after an upgrade. Agents
- * ignore the extra key. `matcher` is only set for `PreToolUse`.
+ * ignore the extra key. `version` lets `vp integration status` detect outdated
+ * installs without a separate marker file. `matcher` is only set for
+ * `PreToolUse`.
  */
 function hookGroup(command: string, matcher?: string): Record<string, unknown> {
 	const group: Record<string, unknown> = {
 		vpManaged: true,
+		version: VERSION,
 		hooks: [{ type: "command", command, timeout: HOOK_TIMEOUT_SEC }],
 	};
 	if (matcher) group.matcher = matcher;
@@ -264,6 +267,27 @@ function makeHookAgentSpec(opts: {
 		remove: (raw) => removeHooks(raw),
 		isInstalled: (raw) => hooksInstalled(raw),
 		installedVersion: () => {
+			const cfgPath = opts.configPath();
+			// Hook agents (claude-code, codex) store their version inside the host
+			// hooks config. Pi stores it in the extension marker file.
+			if (cfgPath) {
+				if (!existsSync(cfgPath)) return undefined;
+				try {
+					const cfg = parseConfig(readFileSync(cfgPath, "utf8"));
+					const hooks = (cfg.hooks as Record<string, unknown>) || {};
+					for (const event of ["UserPromptSubmit", "PreToolUse"]) {
+						const arr = hooks[event];
+						if (!Array.isArray(arr)) continue;
+						const group = arr.find(
+							(g: Record<string, unknown>) => g.vpManaged === true && typeof g.version === "string",
+						);
+						if (group) return group.version as string;
+					}
+				} catch {
+					return undefined;
+				}
+				return undefined;
+			}
 			const p = opts.markerPath();
 			if (!existsSync(p)) return undefined;
 			try {
@@ -296,16 +320,13 @@ function specFor(agent: string): AgentSpec | undefined {
 }
 
 function isAgentInstalled(spec: AgentSpec): boolean {
-	const target = spec.target({});
-	const targetExists = existsSync(target);
-	let installed = targetExists;
-	// Hook agents are "installed" when their config block is present, even if
-	// the marker file lives in a shared dir we don't manage.
 	const cfgPath = spec.configPath();
-	if (cfgPath && existsSync(cfgPath)) {
-		installed = installed || spec.isInstalled(spec.readConfig().raw);
+	// Hook agents are "installed" when their config block is present.
+	if (cfgPath) {
+		return existsSync(cfgPath) && spec.isInstalled(spec.readConfig().raw);
 	}
-	return installed;
+	// Pi has no host config; the extension file is the install signal.
+	return existsSync(spec.target({}));
 }
 
 function rejectUnknownAgent(agent: string): IntegrationResult {
@@ -329,24 +350,34 @@ export async function integrationInstall(
 	const spec = specFor(agent);
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
-	mkdirSync(dirname(target), { recursive: true });
-	// Always refresh the absolute `vp` path so an upgrade doesn't leave a stale
-	// command pointing at an old install location.
-	writeFileSync(target, spec.generate(), { mode: 0o644 });
 	const cfgPath = spec.configPath();
 	if (cfgPath) {
+		// Hook agents: write hooks directly into the host config. No separate
+		// marker file is needed because the version is embedded in the hook group.
 		mkdirSync(dirname(cfgPath), { recursive: true });
 		const { raw } = spec.readConfig();
 		writeFileSync(cfgPath, spec.apply(raw));
+		// Clean up any legacy marker file left by older installs.
+		if (existsSync(target)) {
+			try {
+				rmSync(target);
+			} catch {
+				/* leave the stale marker if removal fails */
+			}
+		}
+	} else {
+		// Pi: the install target is the generated extension file.
+		mkdirSync(dirname(target), { recursive: true });
+		writeFileSync(target, spec.generate(), { mode: 0o644 });
 	}
 	// Codex migrated from config.toml (legacy .mjs shim) to hooks.json; drop the
 	// stale TOML block so it can't shadow the new JSON registration.
 	if (agent === "codex") removeLegacyCodexConfigToml();
 	return {
 		ok: true,
-		message: `installed ${agent} integration (marker -> ${spec.locationLabel({
-			installDir: opts.installDir,
-		})}, hooks -> ${cfgPath})`,
+		message: cfgPath
+			? `installed ${agent} integration -> ${cfgPath}`
+			: `installed ${agent} extension -> ${spec.locationLabel({ installDir: opts.installDir })}`,
 		code: 0,
 	};
 }
@@ -364,13 +395,15 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 	const command = spec.hookCommand();
 	const { raw } = spec.readConfig();
 	const merged = spec.apply(raw);
-	const marker = spec.generate();
+	const cfgPath = spec.configPath();
+	let message = `hook command: ${command}\n\n`;
+	if (!cfgPath) {
+		message += `extension file (${spec.locationLabel({})}):\n${spec.generate()}\n\n`;
+	}
+	message += `${cfgPath ?? spec.locationLabel({})} (after install):\n${merged}`;
 	return {
 		ok: true,
-		message:
-			`hook command: ${command}\n\n` +
-			`marker file (${spec.locationLabel({})}):\n${marker}\n\n` +
-			`${spec.configPath()} (after install):\n${merged}`,
+		message,
 		code: 0,
 	};
 }
@@ -388,8 +421,9 @@ export async function integrationList(): Promise<IntegrationResult> {
 
 /**
  * Report install status per agent, annotated with the vp version embedded in
- * each installed marker, so the user can see which integrations predate the
- * installed `vp` and should be refreshed with `vp integration install`.
+ * each installed hook group or Pi extension marker, so the user can see which
+ * integrations predate the installed `vp` and should be refreshed with
+ * `vp integration install`.
  */
 // fallow-ignore-next-line unused-export
 export async function integrationStatus(): Promise<IntegrationResult> {

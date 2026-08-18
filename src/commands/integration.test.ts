@@ -224,6 +224,66 @@ test("install is idempotent (no duplicate blocks) for claude-code", async () => 
 	reset();
 });
 
+test("install claude-code replaces legacy pre-vpManaged shim entries", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	mkdirSync(join(home, ".claude"), { recursive: true });
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{
+						hooks: [
+							{
+								type: "command",
+								command: "node /old/claude-code-user-prompt-submit.mjs",
+								timeout: 10,
+							},
+						],
+					},
+				],
+			},
+		}),
+	);
+	const r = await runIntegration("install", "claude-code", dir);
+	assert.equal(r.ok, true);
+	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.UserPromptSubmit[0].vpManaged, true);
+	reset();
+});
+
+test("uninstall claude-code removes legacy pre-vpManaged shim entries", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	mkdirSync(join(home, ".claude"), { recursive: true });
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{
+						hooks: [
+							{
+								type: "command",
+								command: "node /old/claude-code-user-prompt-submit.mjs",
+								timeout: 10,
+							},
+						],
+					},
+				],
+			},
+		}),
+	);
+	const r = await runIntegration("uninstall", "claude-code", dir);
+	assert.equal(r.ok, true);
+	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal(cfg.hooks, undefined);
+	reset();
+});
+
 test("show claude-code prints the hook command without writing to disk", async () => {
 	isolate();
 	const r = await runIntegration("show", "claude-code");

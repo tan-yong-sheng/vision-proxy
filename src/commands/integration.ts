@@ -102,7 +102,28 @@ function parseConfig(raw: string): Record<string, unknown> {
 	}
 }
 
-/** Merge `group` into a hook-event array, replacing any existing vpManaged match. */
+/**
+ * Detect stale vision-proxy hook registrations that predate the `vpManaged`
+ * tagging scheme (e.g. old `.mjs` shims or earlier binary installs).
+ */
+function isLegacyVisionProxyGroup(group: Record<string, unknown>): boolean {
+	if (group.vpManaged === true) return false;
+	const hooks = (group.hooks as Array<{ command?: string }> | undefined) ?? [];
+	return hooks.some((h) => {
+		if (typeof h.command !== "string") return false;
+		const cmd = h.command;
+		// Old `.mjs` shims that shipped before the binary-as-hook rewrite.
+		if (/\b(claude-code-user-prompt-submit|codex-user-prompt-submit|shared)\.mjs\b/.test(cmd))
+			return true;
+		// Older binary-as-hook installs that didn't tag groups with vpManaged.
+		if (/\b(vp|vision-proxy|cli\.js)\s+hook$/.test(cmd)) return true;
+		// Any command explicitly mentioning the vision-proxy package/repository path.
+		if (/\bvision-proxy\b/.test(cmd)) return true;
+		return false;
+	});
+}
+
+/** Merge `group` into a hook-event array, replacing any existing vpManaged or legacy match. */
 function mergeHookGroup(
 	existing: unknown,
 	group: Record<string, unknown>,
@@ -110,18 +131,18 @@ function mergeHookGroup(
 	const list = Array.isArray(existing) ? (existing as Record<string, unknown>[]) : [];
 	const matches = (g: Record<string, unknown>) =>
 		g.vpManaged === true && (group.matcher ? g.matcher === group.matcher : g.matcher === undefined);
-	const without = list.filter((g) => !matches(g));
+	const without = list.filter((g) => !isLegacyVisionProxyGroup(g) && !matches(g));
 	without.push(group);
 	return without;
 }
 
-/** Drop every vpManaged group from a hook-event array. */
+/** Drop every vpManaged or legacy vision-proxy group from a hook-event array. */
 function stripHookGroups(existing: unknown): {
 	groups: Record<string, unknown>[];
 	removed: boolean;
 } {
 	const list = Array.isArray(existing) ? (existing as Record<string, unknown>[]) : [];
-	const kept = list.filter((g) => g.vpManaged !== true);
+	const kept = list.filter((g) => g.vpManaged !== true && !isLegacyVisionProxyGroup(g));
 	return { groups: kept, removed: kept.length !== list.length };
 }
 
@@ -323,7 +344,9 @@ export async function integrationInstall(
 	if (agent === "codex") removeLegacyCodexConfigToml();
 	return {
 		ok: true,
-		message: `installed ${agent} integration -> ${spec.locationLabel({ installDir: opts.installDir })}`,
+		message: `installed ${agent} integration (marker -> ${spec.locationLabel({
+			installDir: opts.installDir,
+		})}, hooks -> ${cfgPath})`,
 		code: 0,
 	};
 }

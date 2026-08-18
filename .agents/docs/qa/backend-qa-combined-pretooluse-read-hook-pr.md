@@ -36,6 +36,8 @@ The combined state is the review surface because both branches share the same fe
 | `/fallow-review` on `qa/vp-hook` | pass | no consequential structural decisions; 2 advisory weakening signals |
 | PR opened | pass | https://github.com/tan-yong-sheng/vision-proxy/pull/12 |
 | Branch pushed | pass | `feat/add-pretooluse-read-hook-pr` |
+| PreToolUse deny change verification | pass | commit `3104038`: `npm test` 157/0, `npm run typecheck` pass, `fallow audit` pass |
+| Branch pushed with deny change | pass | `feat/add-pretooluse-read-hook-pr` now at `3104038` |
 
 ## Notes
 
@@ -47,6 +49,7 @@ Both review-gate attempts failed inside no-mistakes, not because of repository f
 Local checks (test, typecheck, fallow audit) all pass.
 Used `/fallow-review` as a fallback; it found no blocking structural issues.
 The PR branch `feat/add-pretooluse-read-hook-pr` was created from the validated `qa/vp-hook` merge-preview state and pushed as #12.
+A follow-up commit (`3104038`) changed PreToolUse Read of an image from `allow` to `deny` so the agent skips the native Read and receives the vision-proxy description as `additionalContext`.
 
 ## Retirement criteria
 

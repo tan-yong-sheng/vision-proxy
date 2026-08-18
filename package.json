@@ -1,6 +1,6 @@
 {
 	"name": "vision-proxy",
-	"version": "0.1.0",
+	"version": "0.1.0-rc.1",
 	"description": "Standalone CLI that routes images to a vision model and prints a fenced, UNTRUSTED description. Drives agent UserPromptSubmit hooks so any coding agent can get image context.",
 	"keywords": [
 		"vision",
@@ -22,8 +22,8 @@
 	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "node --experimental-strip-types --no-warnings --test src/*.test.ts src/**/*.test.ts && node --test src/shims/*.e2e.mjs",
-		"build": "tsc -p tsconfig.build.json && node scripts/copy-shims.mjs",
+		"test": "node --experimental-strip-types --no-warnings --test src/*.test.ts src/**/*.test.ts",
+		"build": "tsc -p tsconfig.build.json",
 		"prepare": "npm run build",
 		"lint": "biome check",
 		"format": "biome check --write",

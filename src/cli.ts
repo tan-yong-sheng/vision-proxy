@@ -15,6 +15,7 @@ import { basename } from "node:path";
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
 import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
+import { readEvent, runHook } from "./commands/hook.ts";
 import { runIntegration } from "./commands/integration.ts";
 import {
 	providerCheck,
@@ -26,8 +27,7 @@ import {
 import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
 import { isKnownProvider } from "./provider.ts";
-
-const VERSION = "0.1.0";
+import { VERSION } from "./version.ts";
 
 interface FlagParse {
 	flags: Record<string, string | boolean | string[]>;
@@ -461,68 +461,25 @@ Output:
   marker embedded in the installed artifact. Outdated integrations are
   flagged with a refresh hint.`,
 
-	hook: `vp hook <subcommand> <agent>
+	hook: `vp hook
 
-Install, inspect, or remove a per-agent UserPromptSubmit hook.
+Agent hook dispatcher. Read a hook event JSON from stdin and emit
+hookSpecificOutput.additionalContext with an image description.
+
+Events:
+  UserPromptSubmit   image paths in the prompt are analyzed
+  PreToolUse Read    an image file_path read by the Read tool is analyzed
 
 Usage:
-  vp hook install <agent>     wire the shim into the agent config
-  vp hook show <agent>        print shim + config block for manual install
-  vp hook list                show installed shims
-  vp hook uninstall <agent>   remove the shim from the agent config
+  vp hook < event.json
 
-Subcommands:
-  install <agent>     install the UserPromptSubmit shim for an agent
-  show <agent>        print the shim + config block
-  list                show installed shims (detected from agent configs)
-  uninstall <agent>   remove the shim from the agent config
-
-Agents:
-  claude-code         Claude Code (settings.json)
-  codex               Codex (config.toml)
+The agent invokes this command directly as its hook. It reads the event from
+stdin, and on a recognized image event runs 'vp analyze' and prints the
+fenced description as additional context. On any error it exits 0 with no
+output (fail-open), so the agent proceeds unchanged.
 
 Options:
   -h, --help          show this help`,
-
-	"hook install": `vp hook install <agent>
-
-Install the UserPromptSubmit shim for an agent.
-
-Usage:
-  vp hook install <agent>
-
-Arguments:
-  <agent>            claude-code | codex
-
-This wires the shim into the agent config and copies the shim files next
-to the vp binary.`,
-
-	"hook show": `vp hook show <agent>
-
-Print the shim path and the config block for manual install.
-
-Usage:
-  vp hook show <agent>
-
-Arguments:
-  <agent>            claude-code | codex`,
-
-	"hook list": `vp hook list
-
-Show installed shims detected from agent configs.
-
-Usage:
-  vp hook list`,
-
-	"hook uninstall": `vp hook uninstall <agent>
-
-Remove the shim from an agent's config.
-
-Usage:
-  vp hook uninstall <agent>
-
-Arguments:
-  <agent>            claude-code | codex`,
 };
 
 function print(msg: string): void {
@@ -730,6 +687,16 @@ export async function main(argv: string[]): Promise<void> {
 			}
 			const agent = positionals[0];
 			handle(await runIntegration(sub ?? "", agent ?? ""));
+			return;
+		}
+
+		case "hook": {
+			const { flags } = parseFlags(rest);
+			if (wantsHelp(flags, rest)) {
+				print(renderHelp(["hook"]));
+				return;
+			}
+			runHook(readEvent());
 			return;
 		}
 

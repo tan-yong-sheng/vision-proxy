@@ -2,11 +2,39 @@ name: release
 
 # Build per-OS/arch tarballs of the compiled CLI (Track A: JS dist + Node 22)
 # and publish them to GitHub Releases alongside a sha256 manifest.
+#
+# Triggered by:
+#   - tag pushes (v*)
+#   - manual workflow_dispatch
+#   - workflow_call from auto-tag.yml
+#
+# Tag conventions:
+#   - v0.1.0, v0.1.1 -> stable release; also backfills Formula/vision-proxy.rb sha256.
+#   - v0.1.0-rc.1, v0.1.0-beta.2, etc. -> GitHub pre-release; formula is NOT updated.
+
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to release (e.g. v0.1.0-rc.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: boolean
 
 permissions:
   contents: read
@@ -32,34 +60,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref_name }}
           persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: pnpm
 
       - name: Install dependencies
-        # --ignore-scripts skips the `prepare` build; we build explicitly below.
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: pnpm install --frozen-lockfile
 
       - name: Build dist
-        run: npm run build
-
-      - name: Prune dev dependencies
-        # The tarball ships only production deps; typescript/@types are build-time only.
-        run: npm prune --omit=dev --no-audit --no-fund
+        run: pnpm run build
 
       - name: Stage release tree
         shell: bash
         run: |
           mkdir -p stage/vision-proxy
-          cp -R dist node_modules package.json stage/vision-proxy/
+          cp -R dist package.json stage/vision-proxy/
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp scripts/vp.cmd stage/vision-proxy/vp.cmd
           else
             cp scripts/vp stage/vision-proxy/vp
             chmod +x stage/vision-proxy/vp
           fi
+          cd stage/vision-proxy
+          # Install production deps directly in the stage directory so we do not
+          # have to copy pnpm's symlink-heavy node_modules across platforms.
+          pnpm install --prod --ignore-scripts --node-linker=hoisted --ignore-workspace
 
       - name: Package
         shell: bash
@@ -77,7 +110,30 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      final: ${{ steps.meta.outputs.final }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine release kind
+        id: meta
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          if [ "${{ inputs.prerelease }}" = "true" ] || [[ "${tag}" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "final=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "final=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -89,10 +145,59 @@ jobs:
           sha256sum vision-proxy-* > sha256sum.txt
           cat sha256sum.txt
 
+      - name: Update Formula checksums
+        # Only do this for stable (non-prerelease) tags.
+        if: steps.meta.outputs.final == 'true'
+        run: |
+          set -eu
+          sha_file="artifacts/sha256sum.txt"
+          formula="Formula/vision-proxy.rb"
+          for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            asset="vision-proxy-${target}.tar.gz"
+            sum="$(awk -v a="$asset" '$2 == a {print $1}' "$sha_file")"
+            if [ -z "$sum" ]; then
+              echo "::warning::missing checksum for $asset" >&2
+              continue
+            fi
+            # Replace the sha256 line that immediately follows the matching url line.
+            awk -v asset="$asset" -v sum="$sum" '
+              /^ *url / && $0 ~ asset { pending = 1; print; next }
+              pending && /sha256 "/ {
+                sub(/"[0-9a-f]+"/, "\"" sum "\"")
+                pending = 0
+              }
+              { print }
+            ' "$formula" > "${formula}.tmp" && mv "${formula}.tmp" "$formula"
+          done
+          echo "Updated Formula checksums:"
+          grep -A1 "vision-proxy-" "$formula" | grep sha256
+
+      - name: Commit updated Formula
+        if: steps.meta.outputs.final == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet Formula/vision-proxy.rb; then
+            echo "Formula unchanged; nothing to commit."
+            exit 0
+          fi
+          git add Formula/vision-proxy.rb
+          git commit -m "chore(formula): backfill sha256 for ${{ steps.meta.outputs.tag }}"
+          # main may have moved on since the release tag was created; rebase the
+          # formula commit on top of the current remote main before pushing.
+          git fetch origin main
+          git rebase origin/main
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:main"
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.meta.outputs.tag }}
           files: |
             artifacts/vision-proxy-*.tar.gz
             artifacts/sha256sum.txt
           generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}

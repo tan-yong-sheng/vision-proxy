@@ -213,6 +213,34 @@ describe("resolveConfig", () => {
 		const cfg = resolveConfig({ VP_CACHE_MAX_AGE_DAYS: "99999" } as NodeJS.ProcessEnv);
 		assert.equal(cfg.cacheMaxAgeDays, DEFAULT_CONFIG.cacheMaxAgeDays);
 	});
+
+	it("defaults maxImagesPerCall to 4", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
+		assert.equal(cfg.maxImagesPerCall, 4);
+	});
+
+	it("applies the deprecated maxBatch alias when maxImagesPerCall is unset", () => {
+		const cfg = resolveConfig({ VP_MAX_BATCH: "2" } as NodeJS.ProcessEnv, { maxBatch: 2 });
+		assert.equal(cfg.maxImagesPerCall, 2);
+	});
+
+	it("reads maxBatch from a config file as an alias", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv, { maxBatch: 2 });
+		assert.equal(cfg.maxImagesPerCall, 2);
+	});
+
+	it("prefers maxImagesPerCall over the maxBatch alias", () => {
+		const cfg = resolveConfig({
+			VP_MAX_IMAGES_PER_CALL: "5",
+			VP_MAX_BATCH: "2",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.maxImagesPerCall, 5);
+	});
+
+	it("leaves the canonical default when only the alias is absent", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
+		assert.equal(cfg.maxImagesPerCall, DEFAULT_CONFIG.maxImagesPerCall);
+	});
 });
 
 describe("resolveConfig baseURLs / fallbackModels", () => {

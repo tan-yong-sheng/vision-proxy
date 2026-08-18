@@ -87,8 +87,8 @@ Run `vp config init` to scaffold a project config file.
 | `VP_MODE` | `fallback`, `always`, or `off` | `fallback` |
 | `VP_INCLUDE_CONTEXT` | Include recent chat context in the prompt | `true` |
 | `VP_TOOL` | Enable agent tool support (`on` or `off`) | `on` |
-| `VP_MAX_IMAGES_PER_CALL` | Max images per analysis call (1-20) | `10` |
-| `VP_MAX_BATCH` | Max images in a joint batch call (1-10) | `4` |
+| `VP_MAX_IMAGES_PER_CALL` | Max images per analysis call (1-20) | `4` |
+| `VP_MAX_BATCH` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL` | `4` |
 | `VP_CACHE_SIZE` | Number of cached descriptions (0-500) | `50` |
 | `VP_CACHE_MAX_AGE_DAYS` | Stale entries older than this are lazily evicted on cache access (0-3650) | `30` |
 | `VP_PHASH_THRESHOLD` | Perceptual-hash similarity threshold (0-1) | `0.8` |

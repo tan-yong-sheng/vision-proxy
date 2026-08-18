@@ -169,11 +169,6 @@ export async function runAnalyze(
 			`too many images (${imagePaths.length}). Maximum is ${config.maxImagesPerCall}.`,
 		);
 	}
-	if (imagePaths.length > config.maxBatch) {
-		throw new AnalyzeError(
-			`too many images for batch (${imagePaths.length}). Maximum is ${config.maxBatch}.`,
-		);
-	}
 
 	const provider = flags.provider ?? config.provider;
 	const modelId = flags.model ?? config.modelId;

@@ -22,6 +22,7 @@ interface VisionConfig {
   includeContext: boolean;
   tool: "on" | "off";
   maxImagesPerCall: number;
+  /** @deprecated Use `maxImagesPerCall`. One-release alias. */
   maxBatch: number;
   cacheSize: number;
   cacheMaxAgeDays: number;
@@ -42,8 +43,8 @@ interface VisionConfig {
 | `systemPrompt` | string | built-in | System prompt sent to the model. |
 | `includeContext` | boolean | `false` | Whether to include extra context in the prompt. |
 | `tool` | string | `on` | Enable/disable the tool-mode proxy: `on` or `off`. |
-| `maxImagesPerCall` | number | `4` | Max images per single `vp analyze` call. |
-| `maxBatch` | number | `4` | Max images in a batch request. |
+| `maxImagesPerCall` | number | `4` | Max images a single `vp analyze` call may receive. This is the canonical, single image limit. |
+| `maxBatch` | number | `4` | **Deprecated.** One-release alias for `maxImagesPerCall`. Set `maxImagesPerCall` instead. |
 | `cacheSize` | number | `100` | Max number of cached descriptions. |
 | `cacheMaxAgeDays` | number | `30` | Days before a cache entry is considered stale. |
 | `pHashSimilarityThreshold` | number | `0.9` | pHash similarity threshold for cache hits. |
@@ -110,7 +111,7 @@ Every config key can be overridden by an environment variable. Provider env vars
 | `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=true` |
 | `VP_TOOL` | `tool` | `VP_TOOL=off` |
 | `VP_MAX_IMAGES_PER_CALL` | `maxImagesPerCall` | `VP_MAX_IMAGES_PER_CALL=2` |
-| `VP_MAX_BATCH` | `maxBatch` | `VP_MAX_BATCH=2` |
+| `VP_MAX_BATCH` | `maxBatch` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL`. |
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
 | `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |

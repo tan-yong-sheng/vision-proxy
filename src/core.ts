@@ -40,7 +40,12 @@ export interface VisionConfig {
 	systemPrompt: string;
 	includeContext: boolean;
 	tool: ToolSetting;
+	/**
+	 * Canonical limit: how many images a single `vp analyze` call may receive.
+	 * `maxBatch` is a deprecated one-release alias (see `resolveConfig`).
+	 */
 	maxImagesPerCall: number;
+	/** @deprecated Use `maxImagesPerCall`. Kept as a one-release alias. */
 	maxBatch: number;
 	cacheSize: number;
 	cacheMaxAgeDays: number;
@@ -333,7 +338,7 @@ export const DEFAULT_CONFIG: VisionConfig = {
 	].join(" "),
 	includeContext: true,
 	tool: "on",
-	maxImagesPerCall: 10,
+	maxImagesPerCall: 4,
 	maxBatch: 4,
 	cacheSize: 50,
 	cacheMaxAgeDays: 30,
@@ -721,7 +726,31 @@ export function resolveConfig(
 	env: NodeJS.ProcessEnv = process.env,
 	fileConfig: Partial<VisionConfig> = {},
 ): VisionConfig {
-	return sanitize({ ...DEFAULT_CONFIG, ...readEnvOverrides(env), ...fileConfig });
+	const envOverrides = readEnvOverrides(env);
+
+	// `maxBatch` / `VP_MAX_BATCH` are a deprecated one-release alias for the
+	// canonical `maxImagesPerCall` limit. Only when `maxImagesPerCall` is unset
+	// (neither in a config file nor an env var) do we fall back to `maxBatch` and
+	// emit a deprecation warning, so existing configs keep working during the
+	// grace period.
+	const maxImagesSet = "maxImagesPerCall" in fileConfig || "maxImagesPerCall" in envOverrides;
+	if (!maxImagesSet) {
+		const batchAlias =
+			"maxBatch" in envOverrides
+				? envOverrides.maxBatch
+				: "maxBatch" in fileConfig
+					? fileConfig.maxBatch
+					: undefined;
+		if (batchAlias !== undefined) {
+			process.emitWarning(
+				"maxBatch / VP_MAX_BATCH is deprecated; use maxImagesPerCall / VP_MAX_IMAGES_PER_CALL instead.",
+				{ type: "DeprecationWarning", code: "VP_DEPRECATED_MAX_BATCH" },
+			);
+			(envOverrides as Partial<VisionConfig>).maxImagesPerCall = batchAlias;
+		}
+	}
+
+	return sanitize({ ...DEFAULT_CONFIG, ...envOverrides, ...fileConfig });
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────

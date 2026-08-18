@@ -167,3 +167,5 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-17: scaffold-worktrees plans/backend-add-pretooluse-read-hook.md -> worktrees/backend-phase-1-prototype-spike.md
 - 2026-08-17: scaffold-worktrees plans/backend-add-pretooluse-read-hook.md -> worktrees/backend-phase-2-full-implementation.md
 - 2026-08-17: scaffold-worktrees plans/backend-fix-curl-and-homebrew-install.md -> worktrees/backend-fix-curl-and-homebrew-install.md
+- 2026-08-18: new coverage qa/backend-qa-combined-pretooluse-read-hook-pr.md
+- 2026-08-18: new coverage qa/backend-qa-curl-and-homebrew-install-fix-pr.md

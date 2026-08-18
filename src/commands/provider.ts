@@ -6,6 +6,7 @@
  *   check [<name>]       verify an API key is configured for a provider (or all)
  */
 
+import type { VisionConfig } from "../core.ts";
 import {
 	deleteProviderKey,
 	getStoredProviderKey,
@@ -14,16 +15,35 @@ import {
 } from "../keyring.ts";
 import { type ApiProviderSpec, getProvider, listProviders } from "../provider.ts";
 
+/** Config slice needed to evaluate key presence from a plain-text config key. */
+type ConfigApiKey = Pick<VisionConfig, "apiKey" | "provider">;
+
 export interface ProviderResult {
 	ok: boolean;
 	message: string;
 	code: number;
 }
 
-export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResult {
+/**
+ * A provider has a key when its env var, OS keyring, or (for the active
+ * provider only) the config file's plain-text `apiKey` is set. The config key
+ * is bound to `config.provider` in `resolveModel`'s precedence order, so it
+ * only satisfies the active provider's check.
+ */
+function hasProviderKey(p: ApiProviderSpec, env: NodeJS.ProcessEnv, config: ConfigApiKey): boolean {
+	if (env[p.apiKeyEnv]) return true;
+	if (getStoredProviderKey(p.id)) return true;
+	if (config.provider === p.id && config.apiKey.length > 0) return true;
+	return false;
+}
+
+export function providerList(
+	env: NodeJS.ProcessEnv = process.env,
+	config: ConfigApiKey = { apiKey: "", provider: "" },
+): ProviderResult {
 	const lines: string[] = [];
 	for (const p of listProviders()) {
-		const hasKey = Boolean(env[p.apiKeyEnv]) || Boolean(getStoredProviderKey(p.id));
+		const hasKey = hasProviderKey(p, env, config);
 		lines.push(
 			`${p.id}  (${p.label})${p.supportsImage ? " [image]" : ""}  key: ${hasKey ? "present" : `missing (${p.apiKeyEnv})`}`,
 		);
@@ -34,6 +54,7 @@ export function providerList(env: NodeJS.ProcessEnv = process.env): ProviderResu
 export function providerCheck(
 	name: string | undefined,
 	env: NodeJS.ProcessEnv = process.env,
+	config: ConfigApiKey = { apiKey: "", provider: "" },
 ): ProviderResult {
 	const allSpecs = listProviders();
 	const specs = name ? allSpecs.filter((p) => p.id === name) : allSpecs;
@@ -43,7 +64,7 @@ export function providerCheck(
 	const lines: string[] = [];
 	let allOk = true;
 	for (const spec of specs) {
-		const hasKey = Boolean(env[spec.apiKeyEnv]) || Boolean(getStoredProviderKey(spec.id));
+		const hasKey = hasProviderKey(spec, env, config);
 		if (hasKey) {
 			lines.push(`${spec.id}: OK (key present)`);
 		} else {

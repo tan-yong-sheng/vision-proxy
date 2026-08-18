@@ -24,6 +24,7 @@ import {
 	providerListKeys,
 	providerStoreKey,
 } from "./commands/provider.ts";
+import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
 import { isKnownProvider } from "./provider.ts";
 import { VERSION } from "./version.ts";
@@ -50,7 +51,28 @@ function collectFlag(
 	}
 }
 
-function parseFlags(args: string[]): FlagParse {
+/**
+ * Flags that consume a following value (e.g. `--format qwen_pixels`,
+ * `--crop i:form`, `-q "what?"`). Every other `--flag` / `-x` is boolean and
+ * must NOT consume the next positional argument, otherwise a boolean flag
+ * placed before a positional (e.g. `vp analyze --json "image.png"`) would
+ * swallow the positional as its value and leave the command with no inputs.
+ */
+const VALUE_FLAGS = new Set([
+	"format",
+	"provider",
+	"model",
+	"config",
+	"max-output-tokens",
+	"question",
+	"q",
+	"api-key",
+	"apiKey",
+	"older",
+	"crop",
+]);
+
+export function parseFlags(args: string[]): FlagParse {
 	const flags: Record<string, string | boolean | string[]> = {};
 	const positionals: string[] = [];
 	for (let i = 0; i < args.length; i++) {
@@ -62,12 +84,13 @@ function parseFlags(args: string[]): FlagParse {
 			} else if (a === "--no-fence") {
 				flags.fence = false;
 			} else {
+				const name = a.slice(2);
 				const next = args[i + 1];
-				if (next !== undefined && !next.startsWith("--")) {
-					collectFlag(flags, a.slice(2), next);
+				if (VALUE_FLAGS.has(name) && next !== undefined && !next.startsWith("--")) {
+					collectFlag(flags, name, next);
 					i++;
 				} else {
-					collectFlag(flags, a.slice(2), true);
+					collectFlag(flags, name, true);
 				}
 			}
 		} else if (a.startsWith("-") && a.length > 1) {
@@ -78,7 +101,7 @@ function parseFlags(args: string[]): FlagParse {
 				collectFlag(flags, body.slice(0, eq), body.slice(eq + 1));
 			} else {
 				const next = args[i + 1];
-				if (next !== undefined && !next.startsWith("-")) {
+				if (VALUE_FLAGS.has(body) && next !== undefined && !next.startsWith("-")) {
 					collectFlag(flags, body, next);
 					i++;
 				} else {
@@ -613,12 +636,16 @@ export async function main(argv: string[]): Promise<void> {
 				return;
 			}
 			switch (sub) {
-				case "list":
-					handle(providerList(env));
+				case "list": {
+					const { config } = await loadConfig({ cwd: process.cwd(), env });
+					handle(providerList(env, config));
 					return;
-				case "check":
-					handle(providerCheck(positionals[0], env));
+				}
+				case "check": {
+					const { config } = await loadConfig({ cwd: process.cwd(), env });
+					handle(providerCheck(positionals[0], env, config));
 					return;
+				}
 				case "store-key": {
 					const name = positionals[0];
 					if (!name) {

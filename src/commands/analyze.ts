@@ -126,11 +126,12 @@ async function generateWithFallback(
 	req: Omit<AnalyzeRequest, "model">,
 	env: NodeJS.ProcessEnv,
 	apiKey: string | undefined,
+	configApiKey: string | undefined,
 	analyzeImpl: typeof analyzeImagesWithModel,
 ): Promise<{ text: string; usedProvider: string; usedModel: string }> {
 	let lastError: unknown;
 	for (const c of candidates) {
-		const resolved = resolveModel(c.provider, c.modelId, env, apiKey, c.baseURL);
+		const resolved = resolveModel(c.provider, c.modelId, env, apiKey, c.baseURL, configApiKey);
 		if (!resolved.ok) continue; // can't construct this candidate; try next
 		try {
 			const resp = await analyzeImpl({
@@ -207,6 +208,7 @@ export async function runAnalyze(
 		env,
 		flags.apiKey,
 		config.baseURLs[provider],
+		config.apiKey,
 	);
 	if (!modelOutcome.ok) {
 		throw new AnalyzeError(
@@ -268,6 +270,7 @@ export async function runAnalyze(
 			},
 			env,
 			flags.apiKey,
+			config.apiKey,
 			analyzeImpl,
 		);
 		const description = resp.text;
@@ -319,6 +322,7 @@ export async function runAnalyze(
 		},
 		env,
 		flags.apiKey,
+		config.apiKey,
 		analyzeImpl,
 	);
 	const description = resp.text;

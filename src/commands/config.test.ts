@@ -63,6 +63,19 @@ describe("configGet", () => {
 		assert.equal(cfg.provider, "openai");
 		assert.equal(cfg.modelId, "gpt-4o");
 	});
+
+	it("redacts apiKey in printed output", async () => {
+		const explicit = path.join(cwd, "explicit.json");
+		await writeFile(
+			explicit,
+			JSON.stringify({ provider: "openai", modelId: "gpt-4o", apiKey: "secret-key" }),
+			"utf8",
+		);
+		const r = await configGet({ configPath: explicit, cwd, env: {} as NodeJS.ProcessEnv });
+		assert.equal(r.ok, true);
+		assert.doesNotMatch(r.message, /secret-key/);
+		assert.match(r.message, /"apiKey": "\*\*\*"/);
+	});
 });
 
 describe("configSet", () => {
@@ -105,6 +118,13 @@ describe("configSet", () => {
 		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
 		assert.deepEqual(JSON.parse(raw).baseURLs, {});
 	});
+
+	it("sets apiKey as a plain string", async () => {
+		const r = await configSet("apiKey", "my-secret-key", cwd);
+		assert.equal(r.ok, true);
+		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
+		assert.equal(JSON.parse(raw).apiKey, "my-secret-key");
+	});
 });
 
 describe("configValidate", () => {
@@ -117,6 +137,14 @@ describe("configValidate", () => {
 	it("reports reachable when the key is present", async () => {
 		const env = { ANTHROPIC_API_KEY: "sk-test", OPENAI_API_KEY: "x" } as NodeJS.ProcessEnv;
 		const r = await configValidate({ cwd, env });
+		assert.equal(r.ok, true);
+		assert.match(r.message, /reachable/);
+	});
+
+	it("reports reachable when only config.apiKey is set", async () => {
+		await configSet("provider", "openai", cwd);
+		await configSet("apiKey", "cfg-secret-key", cwd);
+		const r = await configValidate({ cwd, env: {} as NodeJS.ProcessEnv });
 		assert.equal(r.ok, true);
 		assert.match(r.message, /reachable/);
 	});

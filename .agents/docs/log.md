@@ -185,3 +185,8 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-18: new worktree worktrees/backend-support-apikey-in-config.md
 - 2026-08-18: new coverage qa/backend-vp-active-merge-review-gate-dry-run.md
 - 2026-08-18: new coverage qa/backend-vp-active-merge-review-gate.md
+- 2026-08-18: new plan plans/backend-simplify-analyze-config-surface.md
+- 2026-08-18: scaffold-worktrees plans/backend-simplify-analyze-config-surface.md -> worktrees/backend-simplify-analyze-config-surface.md
+- 2026-08-18: archive worktrees/backend-simplify-analyze-config-surface.md -> archive/worktree-backend-simplify-analyze-config-surface.md (abandoned)
+- 2026-08-18: scaffold-worktrees plans/backend-simplify-analyze-config-surface.md -> worktrees/backend-remove-fallback-models.md
+- 2026-08-18: scaffold-worktrees plans/backend-simplify-analyze-config-surface.md -> worktrees/backend-consolidate-max-image-limits.md

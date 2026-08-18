@@ -103,6 +103,18 @@ test("extractImagePaths finds absolute, tilde, relative, and pi-clipboard paths"
 	assert.ok(!got.some((p) => p.includes("notes.txt")));
 });
 
+test("extractImagePaths handles paths containing spaces", () => {
+	const prompt =
+		"what about /home/tys203831/Pictures/Screenshot from 2026-08-13 00-09-08.png and " +
+		"~/Pictures/my holiday/photo 1.jpg or ./vacation pics/beach.png?";
+	const got = extractImagePaths(prompt);
+	assert.deepEqual(got, [
+		"/home/tys203831/Pictures/Screenshot from 2026-08-13 00-09-08.png",
+		"~/Pictures/my holiday/photo 1.jpg",
+		"./vacation pics/beach.png",
+	]);
+});
+
 test("readToolFilePath returns resolved image path for PreToolUse Read", () => {
 	const event = {
 		hook_event_name: "PreToolUse",

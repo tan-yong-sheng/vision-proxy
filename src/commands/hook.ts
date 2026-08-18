@@ -56,14 +56,16 @@ export function extractImagePaths(text: string): string[] {
 		/(?:^|[\s"'])([a-zA-Z]:[/\\][^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+|\/[^\s"'*?|]*?pi-clipboard-[a-f0-9-]+\.[a-zA-Z0-9]+)/gim;
 	for (const m of text.matchAll(re1)) add(m[1]);
 	// Pass 2: image paths with a recognized prefix (absolute, ~, drive).
+	// Allow spaces in directory/file names while stopping at quotes, wildcards,
+	// pipes, and newlines so one prompt can safely mention multiple images.
 	const re2 = new RegExp(
-		`(?:^|[\\s"'(])((?:[a-zA-Z]:[/\\\\]|/|~)[\\w./\\\\+-]*[/\\\\][\\w.+-]+\\.(?:${IMAGE_EXT.join("|")}))\\b`,
+		`(?:^|[\\s"'(])((?:[a-zA-Z]:[/\\\\]|/|~)[^"'*?|\\n]*?[/\\\\][^"'*?|\\n]*?\\.(?:${IMAGE_EXT.join("|")}))\\b`,
 		"gi",
 	);
 	for (const m of text.matchAll(re2)) add(m[1]);
 	// Pass 3: relative ./ and ../ paths.
 	const re3 = new RegExp(
-		`(?:^|[\\s"'(])(\\.\\.?/[\\w./\\\\+-]+\\.(?:${IMAGE_EXT.join("|")}))\\b`,
+		`(?:^|[\\s"'(])(\\.\\.?/[^"'*?|\\n]*?\\.(?:${IMAGE_EXT.join("|")}))\\b`,
 		"gi",
 	);
 	for (const m of text.matchAll(re3)) add(m[1]);

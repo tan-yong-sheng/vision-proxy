@@ -199,3 +199,5 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-18: archive plans/backend-remove-baseurls-config.md -> archive/plan-backend-remove-baseurls-config.md (complete)
 - 2026-08-18: archive worktrees/backend-remove-base-urls-config.md -> archive/worktree-backend-remove-base-urls-config.md (landed)
 - 2026-08-18: scaffold-worktrees plans/backend-resolve-pr33-merge-and-coderabbit-fixes.md -> worktrees/backend-dev-main-merge.md
+- 2026-08-18: archive plans/backend-resolve-pr33-merge-and-coderabbit-fixes.md -> archive/plan-backend-resolve-pr33-merge-and-coderabbit-fixes.md (complete)
+- 2026-08-18: archive worktrees/backend-dev-main-merge.md -> archive/worktree-backend-dev-main-merge.md (landed)

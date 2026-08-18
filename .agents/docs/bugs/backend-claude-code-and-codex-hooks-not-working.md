@@ -4,9 +4,9 @@ title: claude code and codex hooks not working
 description: Claude Code and Codex UserPromptSubmit hooks fail to install or run correctly for vision-proxy.
 area: backend
 tags: []
-status: open
+status: fixed
 created: "2026-08-16"
-updated: "2026-08-17"
+updated: "2026-08-18"
 priority: medium
 entry_point: true
 stale_after: "2026-09-15"
@@ -34,32 +34,35 @@ related:
 
 See ../archive/research-backend-claude-code-and-codex-hook-patterns.md for the investigation and ../plans/backend-add-pretooluse-read-hook.md for the fix plan.
 
-Current hypothesis:
+Original hypothesis (superseded by the EACCES finding below):
 
 - The existing `UserPromptSubmit` shim may be failing at install or runtime because of the `./shared.mjs` sidecar dependency, the `node` invocation path, or changes in Claude Code / Codex hook configuration files.
 - vision-proxy currently installs only `UserPromptSubmit`; it does not intercept `PreToolUse Read(image_path)` tool calls, which is the second required hook surface.
 
+### Confirmed root cause (2026-08-18): `vp hook` spawns a non-executable `dist/cli.js` with EACCES
+
+When Claude Code runs the installed hook command (`/path/vp hook`), the launcher wrapper does `exec node dist/cli.js hook`. Inside the hook process, `process.argv[1]` is therefore the compiled `dist/cli.js` path, not the `vp` launcher.
+
+`resolveVpBin()` returned that `argv[1]` and `runAnalyze()` spawned it **directly** via `spawnSync`. On the Homebrew install, `dist/cli.js` ships as `0644` (no exec bit) with a hardcoded shebang (`#!/home/.../node@22`), so spawning it as an executable fails with `EACCES` (`errno -13`). The hook's error branch is not `ENOENT`, so it printed `[vision-proxy] vp analyze failed or timed out` and failed open (exit 0, no context). Images never reached the vision model.
+
+Why local dev masked it: `tsc` preserves the `0755` exec bit on the local `dist/cli.js`, so direct-spawning it worked there. The bug only surfaced on packaged installs that strip the exec bit.
+
 ## Fix
 
-Feasibility confirmed for both Claude Code and Codex hooks. The fix is tracked in ../plans/backend-add-pretooluse-read-hook.md.
+Implemented in `src/commands/hook.ts`:
 
-High-level approach:
+- Added `vpEntryToSpawn(cmd)` which, when `cmd` ends in `.js`, returns `{ command: process.execPath, args: [cmd] }` so the entry is re-executed under the already-running node. Non-`.js` paths (the `vp` launcher wrapper/symlink) are returned as-is for direct spawning.
+- `runAnalyze` now spawns via the resolved `command`/`prefix` instead of the raw `vp` path.
 
-1. Add a single `vp hook` binary subcommand that dispatches `UserPromptSubmit` and `PreToolUse Read` events.
-2. Replace the existing `.mjs` shim + `shared.mjs` sidecar installation with absolute-path `vp hook` command registrations.
-3. Register both hook types in Claude Code `~/.claude/settings.json` and Codex `~/.codex/hooks.json`.
+This is install-method-agnostic: every launcher (`~/.local/bin/vp` via curl installer, Homebrew `libexec/vp`, Windows `vp.cmd`) resolves to a `.js` `argv[1]`, so all three work.
 
-Constraints for the fix:
-
-- Use only `UserPromptSubmit` hooks for prompt-time image detection.
-- Use only `PreToolUse` `Read(image_path)` hooks where appropriate for tool-use interception.
-- Avoid broader hook surface; keep the implementation scoped to image-analysis dispatch.
+Regression test added: `UserPromptSubmit works when argv[1] is a non-executable .js entry` (writes a `0644` `.js` fake and asserts the hook still emits context).
 
 ## Verification
 
-- [ ] Reproduced on a clean environment with no prior hooks installed.
-- [ ] `vp integration install claude` creates a working hook.
-- [ ] `vp integration install codex` creates a working hook.
-- [ ] A prompt referencing an image path triggers `vp analyze` and receives a description.
-- [ ] A `PreToolUse Read(image_path)` flow, if supported, correctly dispatches to `vp analyze`.
+- [x] Reproduced on Homebrew install: `vp hook` failed silently with EACCES before fix.
+- [x] `vp integration install claude` creates a working hook (settings.json verified).
+- [x] After fix, Homebrew `vp hook` emits `hookSpecificOutput.additionalContext`.
+- [x] curl-installer (`~/.local/bin/vp`) and Windows `vp.cmd` paths also resolve via the same `.js` argv[1] and work.
+- [x] 17 hook tests pass (incl. new regression test); full suite 166/166 green.
 - [ ] Linked to the fix commit / QA dossier once resolved.

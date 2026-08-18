@@ -3,14 +3,38 @@ name: release
 # Build per-OS/arch tarballs of the compiled CLI (Track A: JS dist + Node 22)
 # and publish them to GitHub Releases alongside a sha256 manifest.
 #
+# Triggered by:
+#   - tag pushes (v*)
+#   - manual workflow_dispatch
+#   - workflow_call from auto-tag.yml
+#
 # Tag conventions:
-#   - v0.1.0, v0.1.1  -> stable release; also backfills Formula/vision-proxy.rb sha256.
-#   - v0.1.0-rc.1, v0.1.0-ac.1, etc. -> GitHub pre-release; formula is NOT updated.
+#   - v0.1.0, v0.1.1 -> stable release; also backfills Formula/vision-proxy.rb sha256.
+#   - v0.1.0-rc.1, v0.1.0-beta.2, etc. -> GitHub pre-release; formula is NOT updated.
+
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to release (e.g. v0.1.0-rc.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: boolean
 
 permissions:
   contents: read
@@ -36,6 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref_name }}
           persist-credentials: false
 
       - uses: pnpm/action-setup@v4
@@ -85,21 +110,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      final: ${{ steps.meta.outputs.final }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Determine release kind
         id: meta
         run: |
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+          tag="${{ inputs.tag || github.ref_name }}"
+          if [ "${{ inputs.prerelease }}" = "true" ] || [[ "${tag}" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "final=false" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             echo "final=true" >> "$GITHUB_OUTPUT"
           fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4
         with:
@@ -113,8 +146,6 @@ jobs:
           cat sha256sum.txt
 
       - name: Update Formula checksums
-        # Fill Formula/vision-proxy.rb with the real per-arch sha256 values from
-        # the just-generated sha256sum.txt so `brew install` works after release.
         # Only do this for stable (non-prerelease) tags.
         if: steps.meta.outputs.final == 'true'
         run: |
@@ -154,12 +185,13 @@ jobs:
             exit 0
           fi
           git add Formula/vision-proxy.rb
-          git commit -m "chore(formula): backfill sha256 for v${GITHUB_REF_NAME#v}"
+          git commit -m "chore(formula): backfill sha256 for ${{ steps.meta.outputs.tag }}"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:main"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.meta.outputs.tag }}
           files: |
             artifacts/vision-proxy-*.tar.gz
             artifacts/sha256sum.txt

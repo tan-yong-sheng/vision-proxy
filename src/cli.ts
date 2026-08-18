@@ -26,8 +26,7 @@ import {
 } from "./commands/provider.ts";
 import type { GroundingFormat } from "./core.ts";
 import { isKnownProvider } from "./provider.ts";
-
-const VERSION = "0.1.0";
+import { VERSION } from "./version.ts";
 
 interface FlagParse {
 	flags: Record<string, string | boolean | string[]>;

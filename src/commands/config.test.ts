@@ -111,6 +111,13 @@ describe("configSet", () => {
 		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
 		assert.equal(JSON.parse(raw).apiKey, "my-secret-key");
 	});
+
+	it("sets apiKey as a plain string", async () => {
+		const r = await configSet("apiKey", "my-secret-key", cwd);
+		assert.equal(r.ok, true);
+		const raw = await readFile(path.join(cwd, ".vision-proxy.json"), "utf8");
+		assert.equal(JSON.parse(raw).apiKey, "my-secret-key");
+	});
 });
 
 describe("configValidate", () => {

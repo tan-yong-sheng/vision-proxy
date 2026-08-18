@@ -48,8 +48,6 @@ export interface VisionConfig {
 	groundingModels: Record<string, GroundingModelEntry>;
 	/** Per-provider base URL overrides, e.g. { "openai": "http://localhost:8000/v1" }. */
 	baseURLs: Record<string, string>;
-	/** Alternate `provider/model-id` strings to try when the primary model fails. */
-	fallbackModels: string[];
 }
 
 export interface ImageMeta {
@@ -354,7 +352,6 @@ export const DEFAULT_CONFIG: VisionConfig = {
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},
 	baseURLs: {},
-	fallbackModels: [],
 };
 
 // ── Persistent file storage ────────────────────────────────────────────────
@@ -378,7 +375,6 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"pHashSimilarityThreshold",
 	"groundingModels",
 	"baseURLs",
-	"fallbackModels",
 ]);
 
 function filterKnownConfigKeys(parsed: object): Partial<VisionConfig> {
@@ -514,20 +510,6 @@ function parseBaseUrlsOverride(value: string | undefined): Record<string, string
 }
 
 /**
- * Parse `VP_FALLBACK_MODELS` — a comma-separated list of `provider/model-id`
- * strings. Malformed entries are skipped.
- */
-function parseFallbackModelsOverride(value: string | undefined): string[] | undefined {
-	if (value === undefined) return undefined;
-	const out: string[] = [];
-	for (const raw of value.split(",")) {
-		const parsed = parseModelString(raw.trim());
-		if (parsed) out.push(`${parsed.provider}/${parsed.modelId}`);
-	}
-	return out.length > 0 ? out : undefined;
-}
-
-/**
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
@@ -560,7 +542,6 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
 	assignIfDefined(overrides, "baseURLs", parseBaseUrlsOverride(env.VP_BASE_URLS));
-	assignIfDefined(overrides, "fallbackModels", parseFallbackModelsOverride(env.VP_FALLBACK_MODELS));
 
 	return overrides;
 }
@@ -575,7 +556,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
 	baseURLs: boolean;
-	fallbackModels: boolean;
 } {
 	return {
 		mode: Boolean(env.VP_MODE),
@@ -587,7 +567,6 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
 		baseURLs: env.VP_BASE_URLS !== undefined,
-		fallbackModels: env.VP_FALLBACK_MODELS !== undefined,
 	};
 }
 
@@ -671,17 +650,6 @@ function fallbackBaseUrls(value: unknown): Record<string, string> {
 	return out;
 }
 
-function fallbackFallbackModels(value: unknown): string[] {
-	if (!Array.isArray(value)) return [...DEFAULT_CONFIG.fallbackModels];
-	const out: string[] = [];
-	for (const entry of value) {
-		if (typeof entry !== "string") continue;
-		const parsed = parseModelString(entry.trim());
-		if (parsed) out.push(`${parsed.provider}/${parsed.modelId}`);
-	}
-	return out;
-}
-
 export function sanitize(config: VisionConfig): VisionConfig {
 	const safe: VisionConfig = { ...config };
 	safe.provider = fallbackProvider(safe.provider);
@@ -712,7 +680,6 @@ export function sanitize(config: VisionConfig): VisionConfig {
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
 	safe.baseURLs = fallbackBaseUrls(safe.baseURLs);
-	safe.fallbackModels = fallbackFallbackModels(safe.fallbackModels);
 	return safe;
 }
 

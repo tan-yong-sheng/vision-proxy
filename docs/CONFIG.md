@@ -28,7 +28,6 @@ interface VisionConfig {
   pHashSimilarityThreshold: number;
   groundingModels: Record<string, { format: string }>;
   baseURLs: Record<string, string>;
-  fallbackModels: string[];
 }
 ```
 
@@ -49,7 +48,6 @@ interface VisionConfig {
 | `pHashSimilarityThreshold` | number | `0.9` | pHash similarity threshold for cache hits. |
 | `groundingModels` | object | `{}` | Per-model grounding format overrides. |
 | `baseURLs` | object | `{}` | Per-provider base URL overrides, e.g. `{ "openai": "http://localhost:8000/v1" }`. |
-| `fallbackModels` | string[] | `[]` | Ordered list of `provider/model-id` strings to try when the primary model fails. |
 
 ## Example configs
 
@@ -61,10 +59,7 @@ interface VisionConfig {
   "modelId": "gpt-4o",
   "baseURLs": {
     "openai": "https://api.openai.com/v1"
-  },
-  "fallbackModels": [
-    "openai/gpt-4o-mini"
-  ]
+  }
 }
 ```
 
@@ -73,10 +68,7 @@ interface VisionConfig {
 ```json
 {
   "provider": "anthropic",
-  "modelId": "claude-sonnet-4-5",
-  "fallbackModels": [
-    "anthropic/claude-sonnet-4-opus"
-  ]
+  "modelId": "claude-sonnet-4-5"
 }
 ```
 
@@ -85,10 +77,7 @@ interface VisionConfig {
 ```json
 {
   "provider": "google",
-  "modelId": "gemini-2.5-pro",
-  "fallbackModels": [
-    "google/gemini-2.5-flash"
-  ]
+  "modelId": "gemini-2.5-pro"
 }
 ```
 
@@ -114,7 +103,6 @@ Every config key can be overridden by an environment variable. Provider env vars
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
 | `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |
-| `VP_FALLBACK_MODELS` | `fallbackModels` | `VP_FALLBACK_MODELS="openai/gpt-4o,openai/gpt-4o-mini"` |
 | `VP_BASE_URLS` | `baseURLs` | `VP_BASE_URLS='openai=http://localhost:8000/v1'` |
 
 ### Example

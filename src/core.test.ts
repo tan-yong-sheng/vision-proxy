@@ -215,11 +215,10 @@ describe("resolveConfig", () => {
 	});
 });
 
-describe("resolveConfig baseURLs / fallbackModels", () => {
-	it("defaults to empty baseURLs and fallbackModels", () => {
+describe("resolveConfig baseURLs", () => {
+	it("defaults to empty baseURLs", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
 		assert.deepEqual(cfg.baseURLs, {});
-		assert.deepEqual(cfg.fallbackModels, []);
 	});
 
 	it("parses VP_BASE_URLS into a per-provider map", () => {
@@ -236,28 +235,14 @@ describe("resolveConfig baseURLs / fallbackModels", () => {
 		} as NodeJS.ProcessEnv);
 		assert.deepEqual(cfg.baseURLs, { openai: "http://x" });
 	});
-
-	it("parses VP_FALLBACK_MODELS into provider/model strings", () => {
-		const cfg = resolveConfig({
-			VP_FALLBACK_MODELS: "openai/gpt-4o, google/gemini-2.5-flash , garbage",
-		} as NodeJS.ProcessEnv);
-		assert.deepEqual(cfg.fallbackModels, ["openai/gpt-4o", "google/gemini-2.5-flash"]);
-	});
 });
 
-describe("sanitize baseURLs / fallbackModels", () => {
+describe("sanitize baseURLs", () => {
 	it("drops unknown providers and non-string urls in baseURLs", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv, {
 			baseURLs: { openai: 123, "bad provider": "http://x", google: "https://y" },
 		});
 		assert.deepEqual(cfg.baseURLs, { google: "https://y" });
-	});
-
-	it("drops non-model entries from fallbackModels", () => {
-		const cfg = resolveConfig({} as NodeJS.ProcessEnv, {
-			fallbackModels: ["openai/gpt-4o", 7, "not-a-model"] as unknown as string[],
-		});
-		assert.deepEqual(cfg.fallbackModels, ["openai/gpt-4o"]);
 	});
 });
 

@@ -134,35 +134,6 @@ describe("runAnalyze single-image cache-first", () => {
 		});
 		assert.ok(capturedSystemPrompt.includes("bounding-box coordinates as [x1, y1, x2, y2]"));
 	});
-
-	it("retries across fallbackModels when the primary model call fails", async () => {
-		await writeFile(
-			path.join(dir, ".vision-proxy.json"),
-			JSON.stringify({ fallbackModels: ["openai/gpt-4o"] }),
-		);
-		let calls = 0;
-		const out: AnalyzeOutcome = await runAnalyze([imgPath], baseFlags(), async () => {
-			calls += 1;
-			if (calls === 1) throw new Error("primary rate limited");
-			return { text: "from-fallback" };
-		});
-		assert.equal(calls, 2);
-		assert.ok(out.output.includes("from-fallback"));
-	});
-
-	it("throws when all candidate models fail", async () => {
-		await writeFile(
-			path.join(dir, ".vision-proxy.json"),
-			JSON.stringify({ fallbackModels: ["openai/gpt-4o"] }),
-		);
-		await assert.rejects(
-			() =>
-				runAnalyze([imgPath], baseFlags(), async () => {
-					throw new Error("always fails");
-				}),
-			(e) => e instanceof AnalyzeError && /always fails/.test(e.message),
-		);
-	});
 });
 
 describe("runAnalyze joint / multi-image", () => {

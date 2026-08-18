@@ -176,6 +176,14 @@ test("PreToolUse Read of an image denies the tool and emits additionalContext", 
 	assert.equal(parsed.hookSpecificOutput.hookEventName, "PreToolUse");
 	assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
 	assert.ok(typeof parsed.hookSpecificOutput.permissionDecisionReason === "string");
+	assert.match(
+		parsed.hookSpecificOutput.additionalContext,
+		/vision-proxy intercepted this image Read/,
+	);
+	assert.match(
+		parsed.hookSpecificOutput.additionalContext,
+		/Do not call Read on image files directly/,
+	);
 	assert.match(parsed.hookSpecificOutput.additionalContext, /red square on white/);
 });
 

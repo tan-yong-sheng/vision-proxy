@@ -188,7 +188,13 @@ export function runHook(event: Record<string, unknown> | null): void {
 		if (!description) return;
 		// Deny the native Read so Claude Code does not emit an "unsupported image"
 		// failure, while the description above is injected as additionalContext.
-		emit("PreToolUse", description, "deny");
+		// Prefix the description with an explicit instruction so the model stops
+		// retrying Read and treats the vision-proxy output as the image content.
+		const context =
+			"vision-proxy intercepted this image Read and routed it to a vision-input model. " +
+			"Do not call Read on image files directly; rely on the generated description below.\n\n" +
+			description;
+		emit("PreToolUse", context, "deny");
 		return;
 	}
 	// Unrecognized event type: proceed unchanged.

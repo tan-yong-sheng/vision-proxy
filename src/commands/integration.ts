@@ -15,9 +15,10 @@
  *   status            show installed version markers per agent (flags outdated).
  *   uninstall <agent> removes vision-proxy from the agent.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
 import { extractMarkerVersion, renderVersionMarker, VERSION } from "../version.ts";
 
@@ -68,9 +69,51 @@ function codexConfigPath(): string {
 	return join(homedir(), ".codex", "hooks.json");
 }
 
+/**
+ * Search `PATH` for an executable named `vp` or `vision-proxy` whose
+ * `--version` output matches the running vision-proxy version. This lets a
+ * source/build invocation (`node dist/cli.js` / `node src/cli.ts`) install
+ * hooks that point at the globally-available `vp` binary instead of the
+ * transient script path.
+ */
+function findVpOnPath(): string | null {
+	const pathEnv = process.env.PATH;
+	if (!pathEnv) return null;
+	for (const dir of pathEnv.split(delimiter)) {
+		for (const name of ["vp", "vision-proxy"]) {
+			const candidate = join(dir, name);
+			try {
+				const out = execFileSync(candidate, ["--version"], {
+					encoding: "utf8",
+					timeout: 2000,
+					stdio: ["ignore", "pipe", "ignore"],
+				})
+					.trim()
+					.split(/\r?\n/)[0];
+				if (out === VERSION) return resolve(candidate);
+			} catch {
+				/* not a matching vp binary */
+			}
+		}
+	}
+	return null;
+}
+
 /** Absolute path to the `vp` binary, used for the hook command at install time. */
 function vpBinPath(): string {
-	return resolve(process.argv[1] ?? "vp");
+	const invoked = process.argv[1] ?? "";
+	const invokedName = basename(invoked);
+	// If the user already invoked us as `vp`/`vision-proxy`, record that exact
+	// path (which may be a symlink such as `~/.local/bin/vp`).
+	if (invokedName === "vp" || invokedName === "vision-proxy") {
+		return resolve(invoked);
+	}
+	// When running from source or a built script, prefer a matching `vp` on
+	// PATH so the installed hook survives worktree moves and upgrades.
+	const pathVp = findVpOnPath();
+	if (pathVp) return pathVp;
+	// Last resort: use the script that is currently executing.
+	return resolve(invoked || "vp");
 }
 
 /** The hook command written into every agent config: `<abs-vp> hook`. */
@@ -245,7 +288,6 @@ function makeHookAgentSpec(opts: {
 	markerPath: () => string;
 	configPath: () => string;
 }): AgentSpec {
-	const command = makeHookCommand();
 	return {
 		id: opts.id,
 		target: () => opts.markerPath(),
@@ -262,8 +304,8 @@ function makeHookAgentSpec(opts: {
 			return { raw };
 		},
 		configPath: opts.configPath,
-		hookCommand: () => command,
-		apply: (raw) => applyHooks(raw, command),
+		hookCommand: makeHookCommand,
+		apply: (raw) => applyHooks(raw, makeHookCommand()),
 		remove: (raw) => removeHooks(raw),
 		isInstalled: (raw) => hooksInstalled(raw),
 		installedVersion: () => {

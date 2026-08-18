@@ -17,9 +17,10 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { runIntegration } from "../commands/integration.ts";
+import { VERSION } from "../version.ts";
 
 const ORIG_HOME = process.env.HOME;
 
@@ -36,6 +37,31 @@ function reset() {
 
 function installDir(home: string): string {
 	return join(home, "ext");
+}
+
+/**
+ * Create a fake `vp` binary under `<home>/bin` that prints the current
+ * VERSION, prepend it to `PATH`, run `fn`, then restore `PATH`. This lets
+ * install tests exercise the PATH-resolution path deterministically.
+ */
+function withVpOnPath<T>(home: string, fn: () => T): T {
+	const binDir = join(home, "bin");
+	mkdirSync(binDir, { recursive: true });
+	const vp = join(binDir, "vp");
+	writeFileSync(vp, `#!/bin/sh\necho "${VERSION}"\n`, { mode: 0o755 });
+	const origPath = process.env.PATH;
+	process.env.PATH = `${binDir}${delimiter}${origPath ?? ""}`;
+	try {
+		return fn();
+	} finally {
+		if (origPath === undefined) delete process.env.PATH;
+		else process.env.PATH = origPath;
+	}
+}
+
+/** Return the absolute path to the fake `vp` created by `withVpOnPath`. */
+function vpPath(home: string): string {
+	return join(home, "bin", "vp");
 }
 
 /** Pi's default extensions dir under the isolated HOME (`~/.pi/agent/extensions`). */
@@ -148,7 +174,7 @@ test("install pi is idempotent (no error on re-install)", async () => {
 test("install claude-code registers both hooks in settings.json with absolute vp path", async () => {
 	const home = isolate();
 	const dir = installDir(home);
-	const r = await runIntegration("install", "claude-code", dir);
+	const r = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
 	assert.equal(r.ok, true);
 	// No shim/shared.mjs files anymore: the hook is the `vp` binary itself.
 	assert.equal(existsSync(join(dir, "shared.mjs")), false);
@@ -158,10 +184,9 @@ test("install claude-code registers both hooks in settings.json with absolute vp
 	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
 	const upsCmd = cfg.hooks.UserPromptSubmit[0].hooks[0].command;
 	const ptsCmd = cfg.hooks.PreToolUse[0].hooks[0].command;
-	assert.ok(upsCmd.startsWith("/"), "hook command must be an absolute vp path");
-	assert.ok(upsCmd.endsWith(" hook"), "command must invoke the vp hook subcommand");
-	assert.ok(ptsCmd.startsWith("/"), "hook command must be an absolute vp path");
-	assert.ok(ptsCmd.endsWith(" hook"), "command must invoke the vp hook subcommand");
+	const expected = `${vpPath(home)} hook`;
+	assert.equal(upsCmd, expected, "UserPromptSubmit hook command must use the PATH-resolved vp");
+	assert.equal(ptsCmd, expected, "PreToolUse hook command must use the PATH-resolved vp");
 	assert.equal(cfg.hooks.UserPromptSubmit[0].vpManaged, true);
 	assert.equal(cfg.hooks.PreToolUse[0].vpManaged, true);
 	// Version is embedded in the hook group; no separate marker file is created.
@@ -171,18 +196,41 @@ test("install claude-code registers both hooks in settings.json with absolute vp
 	reset();
 });
 
+test("install falls back to the invoked script when no vp binary is on PATH", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	const emptyBin = join(home, "empty-bin");
+	mkdirSync(emptyBin, { recursive: true });
+	const origPath = process.env.PATH;
+	process.env.PATH = emptyBin;
+	try {
+		const r = await runIntegration("install", "claude-code", dir);
+		assert.equal(r.ok, true);
+		const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+		const cmd = cfg.hooks.UserPromptSubmit[0].hooks[0].command;
+		assert.ok(cmd.startsWith("/"), "fallback command must be absolute");
+		assert.ok(cmd.endsWith(" hook"), "fallback command must invoke vp hook");
+		assert.match(cmd, /integration\.test\.ts hook$/);
+	} finally {
+		if (origPath === undefined) delete process.env.PATH;
+		else process.env.PATH = origPath;
+		reset();
+	}
+});
+
 test("install codex registers both hooks in hooks.json with absolute vp path", async () => {
 	const home = isolate();
 	const dir = installDir(home);
-	const r = await runIntegration("install", "codex", dir);
+	const r = await withVpOnPath(home, () => runIntegration("install", "codex", dir));
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
 	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
-	assert.ok(
-		cfg.hooks.UserPromptSubmit[0].hooks[0].command.endsWith(" hook"),
-		"codex command must invoke vp hook",
+	assert.equal(
+		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
+		`${vpPath(home)} hook`,
+		"codex command must use the PATH-resolved vp",
 	);
 	reset();
 });
@@ -195,7 +243,7 @@ test("codex install removes a legacy config.toml UserPromptSubmit block", async 
 		join(home, ".codex", "config.toml"),
 		'# comment\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node /old/claude-code-user-prompt-submit.mjs"\n',
 	);
-	await runIntegration("install", "codex", dir);
+	await withVpOnPath(home, () => runIntegration("install", "codex", dir));
 	const toml = readFileSync(join(home, ".codex", "config.toml"), "utf8");
 	assert.equal(toml.includes("vision-proxy"), false, "legacy block must be removed");
 	// The JSON hook registration must still be present.
@@ -207,20 +255,21 @@ test("codex install removes a legacy config.toml UserPromptSubmit block", async 
 test("re-install refreshes the absolute vp path and does not duplicate hooks", async () => {
 	const home = isolate();
 	const dir = installDir(home);
-	await runIntegration("install", "claude-code", dir);
-	const first = await runIntegration("install", "claude-code", dir);
+	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	const first = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `${vpPath(home)} hook`);
 	reset();
 });
 
 test("install is idempotent (no duplicate blocks) for claude-code", async () => {
 	const home = isolate();
 	const dir = installDir(home);
-	await runIntegration("install", "claude-code", dir);
-	const first = await runIntegration("install", "claude-code", dir);
+	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	const first = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -250,7 +299,7 @@ test("install claude-code replaces legacy pre-vpManaged shim entries", async () 
 			},
 		}),
 	);
-	const r = await runIntegration("install", "claude-code", dir);
+	const r = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -289,10 +338,13 @@ test("uninstall claude-code removes legacy pre-vpManaged shim entries", async ()
 });
 
 test("show claude-code prints the hook command without writing to disk", async () => {
-	isolate();
-	const r = await runIntegration("show", "claude-code");
+	const home = isolate();
+	const r = await withVpOnPath(home, () => runIntegration("show", "claude-code"));
 	assert.equal(r.ok, true);
-	assert.match(r.message, /hook/);
+	assert.match(
+		r.message,
+		new RegExp(`${vpPath(home).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} hook`),
+	);
 	assert.equal(existsSync(join(process.env.HOME!, ".claude", "settings.json")), false);
 	reset();
 });
@@ -300,8 +352,8 @@ test("show claude-code prints the hook command without writing to disk", async (
 test("list shows installed state across agents", async () => {
 	const home = isolate();
 	const dir = installDir(home);
-	await runIntegration("install", "claude-code", dir);
-	await runIntegration("install", "codex", dir);
+	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	await withVpOnPath(home, () => runIntegration("install", "codex", dir));
 	// pi uses its default ~/.pi location, not the test installDir.
 	await runIntegration("install", "pi");
 	const r = await runIntegration("list", "");
@@ -325,7 +377,7 @@ test("uninstall claude-code removes only the vision-proxy registrations and leav
 			},
 		}),
 	);
-	await runIntegration("install", "claude-code", dir);
+	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
 	let cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
@@ -440,7 +492,7 @@ test("status flags an integration whose embedded version marker is stale", async
 test("status reads claude-code version from the hooks config, not a marker file", async () => {
 	const home = isolate();
 	const dir = installDir(home);
-	await runIntegration("install", "claude-code", dir);
+	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /✓ claude-code\s+0\.1\.0/);

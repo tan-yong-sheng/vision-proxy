@@ -63,3 +63,4 @@ PR: https://github.com/tan-yong-sheng/vision-proxy/pull/12 (branch `feat/add-pre
 A follow-up commit on the combined PR branch (`3104038`) denies PreToolUse Read for image paths and emits the vision-proxy description as `additionalContext`.
 Commit `3f57102` forwards the user's prompt as `--question` to `vp analyze` for `UserPromptSubmit` hooks and strengthens the injected instruction to explicitly prohibit Read-tool use on image files and direct follow-up questions to the prompt.
 Commit `57b0d7f` cleans up legacy hook registrations on install/uninstall so repeated installs do not create duplicate hook blocks, and clarifies the install output.
+Commit `9644d50` removes the separate `vision-proxy.hook.json` marker file for hook agents and embeds the version inside the host hooks config instead.

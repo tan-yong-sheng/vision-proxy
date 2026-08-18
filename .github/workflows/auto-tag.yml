@@ -1,0 +1,76 @@
+name: auto-tag
+
+# Read package.json on every push to main and create a matching v* tag if it
+# does not exist yet. Because a tag pushed with the default GITHUB_TOKEN cannot
+# trigger another workflow, this workflow immediately calls the reusable
+# release.yml workflow via workflow_call.
+#
+# Conventional branch names:
+#   release/v0.1.0       -> stable release
+#   prerelease/v0.1.0-rc.1 -> pre-release
+#
+# The branch name is for humans; the real decision comes from package.json:
+# a version containing "-" (e.g. 0.1.0-rc.1) is treated as a pre-release.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: create tag from package.json
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      created: ${{ steps.create.outputs.created }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          version="$(jq -r .version package.json)"
+          tag="v${version}"
+          if [[ "${version}" == *-* ]]; then
+            prerelease="true"
+          else
+            prerelease="false"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "package version: ${version}"
+          echo "tag: ${tag}"
+          echo "prerelease: ${prerelease}"
+
+      - name: Create tag if missing
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if git rev-parse "${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists; nothing to do."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag "${tag}"
+            git push origin "${tag}"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    name: call release workflow
+    needs: tag
+    if: needs.tag.outputs.created == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+      prerelease: ${{ needs.tag.outputs.prerelease == 'true' }}
+    secrets: inherit

@@ -12,9 +12,9 @@
  * an image. No Pi imports. No AI SDK imports.
  */
 import { createHash } from "node:crypto";
-import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
-import { basename, dirname, extname, join, parse, relative } from "node:path";
+import { basename, dirname, extname, join, parse } from "node:path";
 import { imageSize } from "image-size";
 import type { Image as ImageScriptImage } from "imagescript";
 
@@ -849,25 +849,14 @@ export interface ReadImageResult {
 	filename?: string;
 }
 
-async function canonical(p: string | undefined): Promise<string | null> {
-	if (!p) return null;
-	try {
-		return await realpath(p);
-	} catch {
-		return p;
-	}
-}
-
-function isInsideOrSame(resolved: string, allowedRoot: string): boolean {
-	const rel = relative(allowedRoot, resolved);
-	return rel === "" || (!rel.startsWith("..") && !parse(rel).root);
-}
-
 function isLocalAbsolutePath(resolved: string): boolean {
 	const parsed = parse(resolved);
 	if (!parsed.root) return false;
 	if (parsed.root.startsWith("\\\\")) return false;
-	return os.platform() === "win32" && /^[a-z]:[\\/]/i.test(parsed.root);
+	if (os.platform() === "win32") {
+		return /^[a-z]:[\\/]/i.test(parsed.root);
+	}
+	return true;
 }
 
 function driveAccessDisabled(): boolean {
@@ -883,30 +872,9 @@ async function resolvedPath(filePath: string): Promise<string | null> {
 	}
 }
 
-async function insideRoot(resolved: string, root: Promise<string | null>): Promise<boolean> {
-	const r = await root;
-	if (!r) return false;
-	return isInsideOrSame(resolved, r);
-}
-
-function tmpRoot(): Promise<string | null> {
-	return canonical(os.tmpdir?.() ?? "/tmp");
-}
-
-function cwdRoot(): Promise<string | null> {
-	return canonical(process.cwd());
-}
-
-function homeRoot(): Promise<string | null> {
-	return canonical(os.homedir?.());
-}
-
 export async function isPathAllowed(filePath: string): Promise<boolean> {
 	const resolved = await resolvedPath(filePath);
 	if (!resolved) return false;
-	if (await insideRoot(resolved, tmpRoot())) return true;
-	if (await insideRoot(resolved, cwdRoot())) return true;
-	if (await insideRoot(resolved, homeRoot())) return true;
 	return isLocalAbsolutePath(resolved) && !driveAccessDisabled();
 }
 
@@ -959,6 +927,15 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 	const mimeType = mimeTypeForExt(filePath);
 	if (!mimeType) return { image: null, reason: "not-an-image" };
 
+	try {
+		await stat(filePath);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+			return { image: null, reason: "not-found" };
+		}
+		// Other errors (e.g. permission denied) are handled by readImageBytes.
+	}
+
 	if (!(await isPathAllowed(filePath))) return { image: null, reason: "denied" };
 
 	const bytesResult = await readImageBytes(filePath);
@@ -979,7 +956,8 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 }
 
 const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
-	denied: "path outside allowed directories (tmp / cwd / home)",
+	denied:
+		"path is not a local absolute path (e.g. a network share or a Windows drive with VP_ALLOW_DRIVES=0)",
 	unreadable: "could not read file",
 	empty: "file is empty",
 	"not-an-image": "unsupported extension",

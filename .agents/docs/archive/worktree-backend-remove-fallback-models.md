@@ -4,7 +4,7 @@ title: Remove fallback model retry surface
 description: Implementation track for removing fallbackModels from vp analyze.
 area: backend
 tags: []
-status: active
+status: landed
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-09-01"
@@ -26,11 +26,11 @@ Remove the `fallbackModels` config/env surface and the retry loop from `vp analy
 
 ## Tasks
 
-- [ ] Remove `fallbackModels` from `VisionConfig`, `DEFAULT_CONFIG`, env parsing, and persisted keys.
-- [ ] Remove the fallback candidate loop and `generateWithFallback()` from `analyze.ts`.
-- [ ] Update `config.ts` coercion.
-- [ ] Update unit tests.
-- [ ] Update config documentation.
+- [x] Remove `fallbackModels` from `VisionConfig`, `DEFAULT_CONFIG`, env parsing, and persisted keys.
+- [x] Remove the fallback candidate loop and `generateWithFallback()` from `analyze.ts`.
+- [x] Update `config.ts` coercion.
+- [x] Update unit tests.
+- [x] Update config documentation.
 
 ## Verification
 
@@ -39,6 +39,6 @@ npm test
 ## Status
 
 - [x] Worktree created
-- [ ] Implementation complete
-- [ ] Tests pass
-- [ ] Landed on feature branch (ready for PR/merge)
+- [x] Implementation complete
+- [x] Tests pass
+- [x] Landed on feature branch (ready for PR/merge)

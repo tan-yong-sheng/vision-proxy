@@ -22,13 +22,14 @@ interface VisionConfig {
   includeContext: boolean;
   tool: "on" | "off";
   maxImagesPerCall: number;
+  /** @deprecated Use `maxImagesPerCall`. One-release alias. */
   maxBatch: number;
   cacheSize: number;
   cacheMaxAgeDays: number;
   pHashSimilarityThreshold: number;
   groundingModels: Record<string, { format: string }>;
-  baseURLs: Record<string, string>;
-  fallbackModels: string[];
+  /** Optional base URL override for the current provider. */
+  baseUrl: string;
   /** Optional provider API key persisted as plain text in config. */
   apiKey: string;
 }
@@ -44,14 +45,13 @@ interface VisionConfig {
 | `systemPrompt` | string | built-in | System prompt sent to the model. |
 | `includeContext` | boolean | `false` | Whether to include extra context in the prompt. |
 | `tool` | string | `on` | Enable/disable the tool-mode proxy: `on` or `off`. |
-| `maxImagesPerCall` | number | `4` | Max images per single `vp analyze` call. |
-| `maxBatch` | number | `4` | Max images in a batch request. |
+| `maxImagesPerCall` | number | `4` | Max images a single `vp analyze` call may receive. This is the canonical, single image limit. |
+| `maxBatch` | number | `4` | **Deprecated.** One-release alias for `maxImagesPerCall`. Set `maxImagesPerCall` instead. |
 | `cacheSize` | number | `100` | Max number of cached descriptions. |
 | `cacheMaxAgeDays` | number | `30` | Days before a cache entry is considered stale. |
 | `pHashSimilarityThreshold` | number | `0.9` | pHash similarity threshold for cache hits. |
 | `groundingModels` | object | `{}` | Per-model grounding format overrides. |
-| `baseURLs` | object | `{}` | Per-provider base URL overrides, e.g. `{ "openai": "http://localhost:8000/v1" }`. |
-| `fallbackModels` | string[] | `[]` | Ordered list of `provider/model-id` strings to try when the primary model fails. |
+| `baseUrl` | string | `""` | Base URL override for the current provider, e.g. `http://localhost:8000/v1`. |
 | `apiKey` | string | `""` | Provider API key persisted as plain text in config. Prefer `vp provider store-key` for OS keyring storage. |
 
 ## Example configs
@@ -62,12 +62,7 @@ interface VisionConfig {
 {
   "provider": "openai",
   "modelId": "gpt-4o",
-  "baseURLs": {
-    "openai": "https://api.openai.com/v1"
-  },
-  "fallbackModels": [
-    "openai/gpt-4o-mini"
-  ]
+  "baseUrl": "https://api.openai.com/v1"
 }
 ```
 
@@ -76,10 +71,7 @@ interface VisionConfig {
 ```json
 {
   "provider": "anthropic",
-  "modelId": "claude-sonnet-4-5",
-  "fallbackModels": [
-    "anthropic/claude-sonnet-4-opus"
-  ]
+  "modelId": "claude-sonnet-4-5"
 }
 ```
 
@@ -88,37 +80,32 @@ interface VisionConfig {
 ```json
 {
   "provider": "google",
-  "modelId": "gemini-2.5-pro",
-  "fallbackModels": [
-    "google/gemini-2.5-flash"
-  ]
+  "modelId": "gemini-2.5-pro"
 }
 ```
 
 ## Environment variables
 
-Every config key can be overridden by an environment variable. Provider env vars (`OPENAI_API_KEY`, etc.) also work.
+Most config keys can be overridden by a `VP_*` environment variable. Provider env vars (`OPENAI_API_KEY`, etc.) also work. The `baseUrl` config key is not mirrored by a `VP_*` variable; use the provider-specific `*_BASE_URL` env vars instead.
 
 | Variable | Config key | Example |
 |----------|------------|---------|
 | `OPENAI_API_KEY` | - | API key for OpenAI. |
 | `ANTHROPIC_API_KEY` | - | API key for Anthropic. |
 | `GOOGLE_API_KEY` | - | API key for Google Gemini. |
-| `OPENAI_BASE_URL` | `baseURLs.openai` | Override OpenAI endpoint. |
-| `ANTHROPIC_BASE_URL` | `baseURLs.anthropic` | Override Anthropic endpoint. |
-| `GOOGLE_BASE_URL` | `baseURLs.google` | Override Google endpoint. |
+| `OPENAI_BASE_URL` | `baseUrl` | Override OpenAI endpoint. |
+| `ANTHROPIC_BASE_URL` | `baseUrl` | Override Anthropic endpoint. |
+| `GOOGLE_BASE_URL` | `baseUrl` | Override Google endpoint. |
 | `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` |
 | `VP_MODEL` | `modelId` | `VP_MODEL=gpt-4o` |
 | `VP_MODE` | `mode` | `VP_MODE=always` |
 | `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=true` |
 | `VP_TOOL` | `tool` | `VP_TOOL=off` |
 | `VP_MAX_IMAGES_PER_CALL` | `maxImagesPerCall` | `VP_MAX_IMAGES_PER_CALL=2` |
-| `VP_MAX_BATCH` | `maxBatch` | `VP_MAX_BATCH=2` |
+| `VP_MAX_BATCH` | `maxBatch` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL`. |
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
 | `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |
-| `VP_FALLBACK_MODELS` | `fallbackModels` | `VP_FALLBACK_MODELS="openai/gpt-4o,openai/gpt-4o-mini"` |
-| `VP_BASE_URLS` | `baseURLs` | `VP_BASE_URLS='openai=http://localhost:8000/v1'` |
 
 ### Example
 

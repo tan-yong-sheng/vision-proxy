@@ -28,5 +28,4 @@ vp analyze screenshot.png
 ## Options
 
 - **API key:** `GOOGLE_API_KEY` env var, `vp provider store-key google`, or `--api-key`.
-- **Custom endpoint:** `GOOGLE_BASE_URL` or `"baseURLs": { "google": "..." }`.
-- **Fallback models:** see [FALLBACK.md](../FALLBACK.md).
+- **Custom endpoint:** `GOOGLE_BASE_URL` or `"baseUrl": "..."` in config.

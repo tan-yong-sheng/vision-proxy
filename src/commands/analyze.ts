@@ -12,7 +12,7 @@
  *     is attacker-controlled, so unfenced output must never be injected.
  */
 
-import { type AnalyzeRequest, analyzeImagesWithModel } from "../adapter.ts";
+import { analyzeImagesWithModel } from "../adapter.ts";
 import { cacheGet, cacheSet, configureCache } from "../cache.ts";
 import { loadConfig } from "../config.ts";
 import {
@@ -31,7 +31,6 @@ import {
 	type ImageContent,
 	type ImagePayload,
 	parseCropArg,
-	parseModelString,
 	readImageFileWithReason,
 	resolveCropEntry,
 	storeImageMeta,
@@ -116,41 +115,6 @@ function buildProviderOptions(
 }
 
 /**
- * Run a vision analysis call, retrying across the configured fallback models
- * when a candidate fails at runtime (e.g. rate limit, server error). A missing
- * API key is reported up front by the caller, so here we only handle call
- * failures. Returns the first successful response.
- */
-async function generateWithFallback(
-	candidates: Array<{ provider: string; modelId: string; baseURL?: string }>,
-	req: Omit<AnalyzeRequest, "model">,
-	env: NodeJS.ProcessEnv,
-	apiKey: string | undefined,
-	configApiKey: string | undefined,
-	analyzeImpl: typeof analyzeImagesWithModel,
-): Promise<{ text: string; usedProvider: string; usedModel: string }> {
-	let lastError: unknown;
-	for (const c of candidates) {
-		const resolved = resolveModel(c.provider, c.modelId, env, apiKey, c.baseURL, configApiKey);
-		if (!resolved.ok) continue; // can't construct this candidate; try next
-		try {
-			const resp = await analyzeImpl({
-				...req,
-				model: resolved.model.model,
-			});
-			return { text: resp.text, usedProvider: c.provider, usedModel: c.modelId };
-		} catch (err) {
-			lastError = err;
-		}
-	}
-	throw lastError instanceof AnalyzeError
-		? lastError
-		: new AnalyzeError(
-				lastError instanceof Error ? lastError.message : "all candidate models failed",
-			);
-}
-
-/**
  * Run analyze. Returns the outcome (does not print). The CLI layer decides how
  * to render stdout.
  */
@@ -170,11 +134,6 @@ export async function runAnalyze(
 			`too many images (${imagePaths.length}). Maximum is ${config.maxImagesPerCall}.`,
 		);
 	}
-	if (imagePaths.length > config.maxBatch) {
-		throw new AnalyzeError(
-			`too many images for batch (${imagePaths.length}). Maximum is ${config.maxBatch}.`,
-		);
-	}
 
 	const provider = flags.provider ?? config.provider;
 	const modelId = flags.model ?? config.modelId;
@@ -183,31 +142,13 @@ export async function runAnalyze(
 		throw new AnalyzeError(`unknown provider "${provider}"`);
 	}
 
-	// Build the ordered candidate list: primary model first, then configured
-	// fallbacks. Each candidate carries a per-provider base URL override from
-	// config.baseURLs (the *_BASE_URL env var still wins inside resolveModel).
-	const candidates: Array<{ provider: string; modelId: string; baseURL?: string }> = [
-		{ provider, modelId, baseURL: config.baseURLs[provider] },
-	];
-	for (const fm of config.fallbackModels) {
-		const parsed = parseModelString(fm);
-		if (parsed) {
-			candidates.push({
-				provider: parsed.provider,
-				modelId: parsed.modelId,
-				baseURL: config.baseURLs[parsed.provider],
-			});
-		}
-	}
-
-	// The primary model must be resolvable (have a key); fallbacks are only
-	// tried on a runtime failure later, so a missing key on the primary is fatal.
+	// The model must be resolvable (have a key); a missing key is fatal.
 	const modelOutcome = resolveModel(
 		provider,
 		modelId,
 		env,
 		flags.apiKey,
-		config.baseURLs[provider],
+		config.baseUrl,
 		config.apiKey,
 	);
 	if (!modelOutcome.ok) {
@@ -260,19 +201,13 @@ export async function runAnalyze(
 			};
 		}
 
-		const resp = await generateWithFallback(
-			candidates,
-			{
-				imagePayloads: [p],
-				systemPrompt,
-				question,
-				maxOutputTokens: flags.maxOutputTokens,
-			},
-			env,
-			flags.apiKey,
-			config.apiKey,
-			analyzeImpl,
-		);
+		const resp = await analyzeImpl({
+			imagePayloads: [p],
+			model: modelOutcome.model.model,
+			systemPrompt,
+			question,
+			maxOutputTokens: flags.maxOutputTokens,
+		});
 		const description = resp.text;
 		await cacheSet(cacheKey, description);
 		const output = flags.fence
@@ -311,20 +246,14 @@ export async function runAnalyze(
 		};
 	}
 
-	const resp = await generateWithFallback(
-		candidates,
-		{
-			imagePayloads: payloads,
-			systemPrompt,
-			question,
-			providerOptions: buildProviderOptions(effectiveFormat),
-			maxOutputTokens: flags.maxOutputTokens,
-		},
-		env,
-		flags.apiKey,
-		config.apiKey,
-		analyzeImpl,
-	);
+	const resp = await analyzeImpl({
+		imagePayloads: payloads,
+		model: modelOutcome.model.model,
+		systemPrompt,
+		question,
+		providerOptions: buildProviderOptions(effectiveFormat),
+		maxOutputTokens: flags.maxOutputTokens,
+	});
 	const description = resp.text;
 	await cacheSet(jointCacheKey, description);
 	const output = flags.fence

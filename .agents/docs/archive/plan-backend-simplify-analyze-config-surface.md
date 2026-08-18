@@ -1,10 +1,10 @@
 ---
 type: plan
 title: Simplify analyze config surface
-description: Remove fallbackModels and consolidate maxImagesPerCall/maxBatch into a single, simpler analyze configuration surface.
+description: "Remove fallbackModels and consolidate maxImagesPerCall/maxBatch into a single, simpler analyze configuration surface."
 area: backend
 tags: []
-status: active
+status: complete
 created: "2026-08-18"
 updated: "2026-08-18"
 stale_after: "2026-10-17"

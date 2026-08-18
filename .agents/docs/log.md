@@ -190,3 +190,12 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-18: archive worktrees/backend-simplify-analyze-config-surface.md -> archive/worktree-backend-simplify-analyze-config-surface.md (abandoned)
 - 2026-08-18: scaffold-worktrees plans/backend-simplify-analyze-config-surface.md -> worktrees/backend-remove-fallback-models.md
 - 2026-08-18: scaffold-worktrees plans/backend-simplify-analyze-config-surface.md -> worktrees/backend-consolidate-max-image-limits.md
+- 2026-08-18: archive worktrees/backend-remove-fallback-models.md -> archive/worktree-backend-remove-fallback-models.md (landed)
+- 2026-08-18: archive bugs/backend-claude-code-and-codex-hooks-not-working.md -> archive/bug-backend-claude-code-and-codex-hooks-not-working.md (fixed)
+- 2026-08-18: archive worktrees/backend-consolidate-max-image-limits.md -> archive/worktree-backend-consolidate-max-image-limits.md (landed)
+- 2026-08-18: archive plans/backend-simplify-analyze-config-surface.md -> archive/plan-backend-simplify-analyze-config-surface.md (complete)
+- 2026-08-18: new plan plans/backend-remove-baseurls-config.md
+- 2026-08-18: scaffold-worktrees plans/backend-remove-baseurls-config.md -> worktrees/backend-remove-base-urls-config.md
+- 2026-08-18: archive plans/backend-remove-baseurls-config.md -> archive/plan-backend-remove-baseurls-config.md (complete)
+- 2026-08-18: archive worktrees/backend-remove-base-urls-config.md -> archive/worktree-backend-remove-base-urls-config.md (landed)
+- 2026-08-18: scaffold-worktrees plans/backend-resolve-pr33-merge-and-coderabbit-fixes.md -> worktrees/backend-dev-main-merge.md

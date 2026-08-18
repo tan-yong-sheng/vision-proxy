@@ -214,6 +214,34 @@ describe("resolveConfig", () => {
 		assert.equal(cfg.cacheMaxAgeDays, DEFAULT_CONFIG.cacheMaxAgeDays);
 	});
 
+	it("defaults maxImagesPerCall to 4", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
+		assert.equal(cfg.maxImagesPerCall, 4);
+	});
+
+	it("applies the deprecated maxBatch alias when maxImagesPerCall is unset", () => {
+		const cfg = resolveConfig({ VP_MAX_BATCH: "2" } as NodeJS.ProcessEnv, { maxBatch: 2 });
+		assert.equal(cfg.maxImagesPerCall, 2);
+	});
+
+	it("reads maxBatch from a config file as an alias", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv, { maxBatch: 2 });
+		assert.equal(cfg.maxImagesPerCall, 2);
+	});
+
+	it("prefers maxImagesPerCall over the maxBatch alias", () => {
+		const cfg = resolveConfig({
+			VP_MAX_IMAGES_PER_CALL: "5",
+			VP_MAX_BATCH: "2",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.maxImagesPerCall, 5);
+	});
+
+	it("leaves the canonical default when only the alias is absent", () => {
+		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
+		assert.equal(cfg.maxImagesPerCall, DEFAULT_CONFIG.maxImagesPerCall);
+	});
+
 	it("applies apiKey from file config", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv, { apiKey: "file-key" });
 		assert.equal(cfg.apiKey, "file-key");
@@ -225,49 +253,26 @@ describe("resolveConfig", () => {
 	});
 });
 
-describe("resolveConfig baseURLs / fallbackModels", () => {
-	it("defaults to empty baseURLs and fallbackModels", () => {
+describe("resolveConfig baseUrl", () => {
+	it("defaults to empty baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
-		assert.deepEqual(cfg.baseURLs, {});
-		assert.deepEqual(cfg.fallbackModels, []);
-	});
-
-	it("parses VP_BASE_URLS into a per-provider map", () => {
-		const cfg = resolveConfig({
-			VP_BASE_URLS: "openai=http://localhost:8000/v1,google=https://g.example",
-		} as NodeJS.ProcessEnv);
-		assert.equal(cfg.baseURLs.openai, "http://localhost:8000/v1");
-		assert.equal(cfg.baseURLs.google, "https://g.example");
-	});
-
-	it("skips malformed VP_BASE_URLS pairs", () => {
-		const cfg = resolveConfig({
-			VP_BASE_URLS: "no-equals,=novalue,openai=http://x",
-		} as NodeJS.ProcessEnv);
-		assert.deepEqual(cfg.baseURLs, { openai: "http://x" });
-	});
-
-	it("parses VP_FALLBACK_MODELS into provider/model strings", () => {
-		const cfg = resolveConfig({
-			VP_FALLBACK_MODELS: "openai/gpt-4o, google/gemini-2.5-flash , garbage",
-		} as NodeJS.ProcessEnv);
-		assert.deepEqual(cfg.fallbackModels, ["openai/gpt-4o", "google/gemini-2.5-flash"]);
+		assert.equal(cfg.baseUrl, "");
 	});
 });
 
-describe("sanitize baseURLs / fallbackModels", () => {
-	it("drops unknown providers and non-string urls in baseURLs", () => {
+describe("sanitize baseUrl", () => {
+	it("defaults to empty string for non-string baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv, {
-			baseURLs: { openai: 123, "bad provider": "http://x", google: "https://y" },
+			baseUrl: 123,
 		});
-		assert.deepEqual(cfg.baseURLs, { google: "https://y" });
+		assert.equal(cfg.baseUrl, "");
 	});
 
-	it("drops non-model entries from fallbackModels", () => {
+	it("keeps valid string baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv, {
-			fallbackModels: ["openai/gpt-4o", 7, "not-a-model"] as unknown as string[],
+			baseUrl: "https://custom.example",
 		});
-		assert.deepEqual(cfg.fallbackModels, ["openai/gpt-4o"]);
+		assert.equal(cfg.baseUrl, "https://custom.example");
 	});
 });
 

@@ -32,11 +32,6 @@ vp provider list-keys
 vp provider delete-key openai
 ```
 
-## Fallback models
-
-Configure backup models for when the primary model fails.
-See [FALLBACK.md](./FALLBACK.md).
-
 ## Config precedence
 
 1. `--config <path>` flag
@@ -53,5 +48,5 @@ See [CONFIG.md](./CONFIG.md) for the full schema and copy-paste JSON examples.
 |---------|-----|
 | `no API key for provider "openai"` | Set `OPENAI_API_KEY` or use `--api-key` |
 | `path is not a local absolute path` | Use an absolute path on a local drive (not a network share) |
-| `model is currently experiencing high demand` | Try a fallback model or wait |
+| `model is currently experiencing high demand` | Retry the same model later; no fallback mechanism is configured |
 

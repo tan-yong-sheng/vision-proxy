@@ -40,6 +40,8 @@ The combined state is the review surface because both branches share the same fe
 | PreToolUse "do not retry" instruction | pass | commit `ebac8ff`: `npm test` 157/0, `npm run typecheck` pass, `fallow audit` pass |
 | UserPromptSubmit instruction | pass | commit `eb2ab5b`: `npm test` 157/0, `npm run typecheck` pass, `fallow audit` pass |
 | Branch pushed with UserPromptSubmit instruction | pass | `feat/add-pretooluse-read-hook-pr` now at `eb2ab5b` |
+| UserPromptSubmit forwards prompt as `--question` | pass | commit `3f57102`: `npm test` 158/0, `npm run typecheck` pass, `fallow audit` pass |
+| Strengthened hook instruction | pass | commit `3f57102`: explicit Read-tool prohibition + follow-up guidance |
 
 ## Notes
 
@@ -54,6 +56,7 @@ The PR branch `feat/add-pretooluse-read-hook-pr` was created from the validated 
 A follow-up commit (`3104038`) changed PreToolUse Read of an image from `allow` to `deny` so the agent skips the native Read and receives the vision-proxy description as `additionalContext`.
 Commit `ebac8ff` further prepends an instruction to the injected context telling the agent that the image was already routed through vision-proxy and not to retry Read on image files.
 Commit `eb2ab5b` applies the same instruction prefix to `UserPromptSubmit` so both hook paths consistently tell the agent not to call Read on image files.
+Commit `3f57102` forwards the user's prompt as `--question` to `vp analyze` for `UserPromptSubmit` hooks and rewrites the injected instruction to explicitly tell the agent not to use the Read tool on image files, to treat the generated description as the image content, and to ask follow-up questions in the prompt instead of reading the file.
 
 ## Retirement criteria
 

@@ -116,22 +116,25 @@ asset="vision-proxy-${target}.tar.gz"
 # --- resolve release ------------------------------------------------------
 if [ -z "$VERSION" ]; then
 	echo "Resolving latest release..."
-	# GitHub redirects /releases/latest to /releases/tag/<tag>. Avoid the
-	# GitHub API so this works even when the unauthenticated API rate limit
-	# has been exhausted.
-	location=""
+	# GitHub's /releases/latest/download/<asset> always redirects to the
+	# current stable release's tag. Follow the redirect, capture the final
+	# URL, and extract the tag. This avoids the GitHub API and its tight
+	# unauthenticated rate limit.
+	probe_url="https://github.com/${REPO}/releases/latest/download/sha256sum.txt"
+	effective_url=""
 	for attempt in 1 2 3; do
-		location="$(curl -fsSL -I "https://github.com/${REPO}/releases/latest" 2>/dev/null | awk -F': ' 'tolower($1) == "location" {print $2}' | tr -d '\r')"
-		[ -n "$location" ] && break
+		effective_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "$probe_url" 2>/dev/null)"
+		[ -n "$effective_url" ] && break
 		sleep 2
 	done
-	if [ -z "$location" ]; then
-		echo "error: could not resolve latest release from https://github.com/${REPO}/releases/latest" >&2
-		echo "Check your network and that a release exists." >&2
+	if [ -z "$effective_url" ]; then
+		echo "error: could not resolve latest release from ${probe_url}" >&2
+		echo "Check your network and that a stable release exists." >&2
 		exit 1
 	fi
-	# location ends with /releases/tag/<tag>
-	VERSION="${location##*/}"
+	# effective_url ends with /releases/download/<tag>/sha256sum.txt
+	VERSION="${effective_url##*/download/}"
+	VERSION="${VERSION%%/*}"
 else
 	echo "Resolving release ${VERSION}..."
 fi

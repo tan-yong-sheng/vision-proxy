@@ -2,6 +2,10 @@ name: release
 
 # Build per-OS/arch tarballs of the compiled CLI (Track A: JS dist + Node 22)
 # and publish them to GitHub Releases alongside a sha256 manifest.
+#
+# Tag conventions:
+#   - v0.1.0, v0.1.1  -> stable release; also backfills Formula/vision-proxy.rb sha256.
+#   - v0.1.0-rc.1, v0.1.0-ac.1, etc. -> GitHub pre-release; formula is NOT updated.
 on:
   push:
     tags:
@@ -49,23 +53,21 @@ jobs:
       - name: Build dist
         run: pnpm run build
 
-      - name: Prune dev dependencies
-        # The tarball ships only production deps; typescript/@types are build-time only.
-        # --ignore-scripts is required because `prepare` runs `npm run build`, which
-        # needs the dev deps we are about to remove.
-        run: pnpm prune --prod --ignore-scripts
-
       - name: Stage release tree
         shell: bash
         run: |
           mkdir -p stage/vision-proxy
-          cp -R dist node_modules package.json stage/vision-proxy/
+          cp -R dist package.json stage/vision-proxy/
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp scripts/vp.cmd stage/vision-proxy/vp.cmd
           else
             cp scripts/vp stage/vision-proxy/vp
             chmod +x stage/vision-proxy/vp
           fi
+          cd stage/vision-proxy
+          # Install production deps directly in the stage directory so we do not
+          # have to copy pnpm's symlink-heavy node_modules across platforms.
+          pnpm install --prod --ignore-scripts --node-linker=hoisted --ignore-workspace
 
       - name: Package
         shell: bash
@@ -88,6 +90,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Determine release kind
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "final=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "final=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -102,6 +115,8 @@ jobs:
       - name: Update Formula checksums
         # Fill Formula/vision-proxy.rb with the real per-arch sha256 values from
         # the just-generated sha256sum.txt so `brew install` works after release.
+        # Only do this for stable (non-prerelease) tags.
+        if: steps.meta.outputs.final == 'true'
         run: |
           set -eu
           sha_file="artifacts/sha256sum.txt"
@@ -127,6 +142,7 @@ jobs:
           grep -A1 "vision-proxy-" "$formula" | grep sha256
 
       - name: Commit updated Formula
+        if: steps.meta.outputs.final == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -148,3 +164,4 @@ jobs:
             artifacts/vision-proxy-*.tar.gz
             artifacts/sha256sum.txt
           generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}

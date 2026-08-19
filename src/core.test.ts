@@ -258,6 +258,20 @@ describe("resolveConfig baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
 		assert.equal(cfg.baseUrl, "");
 	});
+
+	it("applies VP_BASE_URL env override", () => {
+		const cfg = resolveConfig({
+			VP_BASE_URL: "http://localhost:8000/v1",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.baseUrl, "http://localhost:8000/v1");
+	});
+
+	it("ignores empty VP_BASE_URL", () => {
+		const cfg = resolveConfig({
+			VP_BASE_URL: "",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.baseUrl, "");
+	});
 });
 
 describe("sanitize baseUrl", () => {

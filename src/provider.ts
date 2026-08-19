@@ -126,7 +126,7 @@ export function resolveModel(
 		envValue(provider.apiKeyEnv, env) ??
 		(configApiKey && configApiKey.length > 0 ? configApiKey : undefined) ??
 		getStoredProviderKey(providerId);
-	const baseURL = envValue(provider.baseUrlEnv, env) ?? explicitBaseURL;
+	const baseURL = envValue(provider.baseUrlEnv, env) ?? (explicitBaseURL || undefined);
 	if (!apiKey) {
 		return {
 			ok: false,

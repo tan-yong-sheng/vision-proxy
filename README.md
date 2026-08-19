@@ -93,6 +93,7 @@ Run `vp config init` to scaffold a project config file.
 | `VP_CACHE_MAX_AGE_DAYS` | Stale entries older than this are lazily evicted on cache access (0-3650) | `30` |
 | `VP_PHASH_THRESHOLD` | Perceptual-hash similarity threshold (0-1) | `0.8` |
 | `*_BASE_URL` | Provider-specific base URL override (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `GOOGLE_BASE_URL`) | unset |
+| `VP_BASE_URL` | Base URL override for the active provider (e.g. `http://localhost:8000/v1`) | unset |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
 | `VP_ALLOW_DRIVES` | Set to `0`/`false`/`no`/`off` to disable local drive access on Windows | unset (drives allowed) |
 | `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from `vp hook` (Codex preview limit) | `2000` |
@@ -109,7 +110,7 @@ When a key is absent from the environment, `vp` checks the OS keyring as a fallb
 Most settings are set with `vp config set <key> <value>` (written to `.vision-proxy.json` or `~/.vision-proxy/config.json`).
 
 - `baseUrl` - a single base URL override for the current provider, e.g. `vp config set baseUrl http://localhost:8000/v1`.
-  The provider-specific `*_BASE_URL` env vars take precedence over this config value.
+  The provider-specific `*_BASE_URL` env vars take precedence over this config value. `VP_BASE_URL` is the equivalent environment override.
 
 A missing API key on the primary provider is always a fatal error.
 

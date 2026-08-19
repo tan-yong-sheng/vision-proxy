@@ -51,7 +51,7 @@ export interface VisionConfig {
 	cacheMaxAgeDays: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
-	/** Optional base URL override for the current provider. */
+	/** Base URL override for the active provider, e.g. "http://localhost:8000/v1". */
 	baseUrl: string;
 	/**
 	 * Optional provider API key persisted as plain text. Falls back after the
@@ -505,6 +505,15 @@ function parseFloatOverride(
 }
 
 /**
+ * Parse `VP_BASE_URL` — a single base URL string for the active provider.
+ */
+function parseBaseUrlOverride(value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	if (!value) return undefined;
+	return value;
+}
+
+/**
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
@@ -536,6 +545,7 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 		"pHashSimilarityThreshold",
 		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
+	assignIfDefined(overrides, "baseUrl", parseBaseUrlOverride(env.VP_BASE_URL));
 
 	return overrides;
 }
@@ -549,6 +559,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxBatch: boolean;
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
+	baseUrl: boolean;
 } {
 	return {
 		mode: Boolean(env.VP_MODE),
@@ -559,6 +570,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		maxBatch: env.VP_MAX_BATCH !== undefined,
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
+		baseUrl: env.VP_BASE_URL !== undefined,
 	};
 }
 
@@ -637,8 +649,7 @@ function fallbackGroundingModels(
 }
 
 function fallbackBaseUrl(value: unknown): string {
-	if (typeof value === "string" && value) return value;
-	return DEFAULT_CONFIG.baseUrl;
+	return typeof value === "string" ? value : DEFAULT_CONFIG.baseUrl;
 }
 
 export function sanitize(config: VisionConfig): VisionConfig {

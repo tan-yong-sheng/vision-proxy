@@ -28,7 +28,7 @@ interface VisionConfig {
   cacheMaxAgeDays: number;
   pHashSimilarityThreshold: number;
   groundingModels: Record<string, { format: string }>;
-  /** Optional base URL override for the current provider. */
+  /** Base URL override for the active provider. */
   baseUrl: string;
   /** Optional provider API key persisted as plain text in config. */
   apiKey: string;
@@ -51,7 +51,7 @@ interface VisionConfig {
 | `cacheMaxAgeDays` | number | `30` | Days before a cache entry is considered stale. |
 | `pHashSimilarityThreshold` | number | `0.9` | pHash similarity threshold for cache hits. |
 | `groundingModels` | object | `{}` | Per-model grounding format overrides. |
-| `baseUrl` | string | `""` | Base URL override for the current provider, e.g. `http://localhost:8000/v1`. |
+| `baseUrl` | string | `""` | Base URL override for the active provider, e.g. `"http://localhost:8000/v1"`. Provider `*_BASE_URL` env vars still take precedence. `VP_BASE_URL` also works. |
 | `apiKey` | string | `""` | Provider API key persisted as plain text in config. Prefer `vp provider store-key` for OS keyring storage. |
 
 ## Example configs
@@ -86,7 +86,7 @@ interface VisionConfig {
 
 ## Environment variables
 
-Most config keys can be overridden by a `VP_*` environment variable. Provider env vars (`OPENAI_API_KEY`, etc.) also work. The `baseUrl` config key is not mirrored by a `VP_*` variable; use the provider-specific `*_BASE_URL` env vars instead.
+Most config keys can be overridden by a `VP_*` environment variable. Provider env vars (`OPENAI_API_KEY`, etc.) also work. The `baseUrl` config key mirrors `VP_BASE_URL`, but provider-specific `*_BASE_URL` env vars (e.g. `OPENAI_BASE_URL`) take precedence over both.
 
 | Variable | Config key | Example |
 |----------|------------|---------|
@@ -106,6 +106,7 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
 | `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |
+| `VP_BASE_URL` | `baseUrl` | `VP_BASE_URL=http://localhost:8000/v1` |
 
 ### Example
 

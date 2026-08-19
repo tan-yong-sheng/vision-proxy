@@ -17,8 +17,6 @@ name: OSV Scanner PR Check
 on:
   pull_request:
     branches: [main]
-  merge_group:
-    types: [checks_requested]
 
 permissions:
   contents: read
@@ -83,3 +81,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
+          category: osv-scanner

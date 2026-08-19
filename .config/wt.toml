@@ -27,6 +27,11 @@ build = "pnpm run build"
 [[post-start]]
 chmod-fallow-gate = "chmod +x .claude/hooks/fallow-gate.sh"
 
+# Symlink .claude/skills to .agents/skills so Claude Code loads project skills.
+# Safe to re-run: it removes any real directory and recreates the symlink.
+[[post-start]]
+symlink-claude-skills = "mkdir -p .claude && if [ -e .claude/skills ] && [ ! -L .claude/skills ]; then rm -rf .claude/skills; fi && ln -sfn ../.agents/skills .claude/skills"
+
 # --- Pre-commit validation (runs during `wt merge`, before the squash commit) -
 # Fast feedback: lint + typecheck must pass before a commit is recorded.
 

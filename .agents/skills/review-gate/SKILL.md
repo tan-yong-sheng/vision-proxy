@@ -244,16 +244,16 @@ Route findings according to their lifecycle to avoid polluting `bugs/`:
 ## Step 10: local merge-preview QA
 
 A clean single-branch review is not the same as a clean combined merge.
-When several PRs are queued for the same target, conflicts, ordering bugs, and shared-contract drift only show up once the branches are combined.
+When two or more open PRs target the same branch, conflicts, ordering bugs, and shared-contract drift only show up once the branches are combined.
 Step 10 reproduces the merge locally and gates the actual GitHub merge step behind a QA pass over that combined state.
 
-> Run Step 10 whenever multiple PRs are queued for the same target, or when a PR is dependent, touches shared contracts, or is stacked.
+> Run Step 10 whenever two or more open PRs target the same branch, or when a PR is dependent, touches shared contracts, or is stacked.
 
 ### When to run
 
 Run Step 10 when any of the following holds:
 
-- **A. Parallel branches.** Two or more open PRs are queued for the same target branch.
+- **A. Parallel branches.** Two or more open PRs target the same branch.
 - **B. Shared contract touch.** A PR modifies paths whose segments match `types|schema|interface|model|contract`, or paths in a repo-configured `shared-globs` list (if defined).
 - **C. Stacked branch.** A PR explicitly says it depends on another open PR.
 - **D. Base drift.** A PR's base branch is more than 50 commits behind the target default branch.
@@ -498,7 +498,7 @@ A `/review-gate` run is complete when:
 - for a standard gate, the outcome is `checks-passed` (or a terminal review-only outcome when `--skip push,pr,ci` was used); `passed` from CI monitoring is not a review-gate goal because review-gate must not merge
 - if `/agents-docs` is active, the QA dossier in `.agents/docs/qa/` is created or updated and the index is regenerated
 - the user knows the next action (fix, review/merge, escalate, or re-run)
-- when multiple PRs are queued for the same target, Step 10 (local merge-preview QA) has run and recorded a verdict
+- when two or more open PRs target the same branch, Step 10 (local merge-preview QA) has run and recorded a verdict
 
 ## Troubleshooting
 

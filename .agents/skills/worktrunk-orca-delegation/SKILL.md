@@ -68,6 +68,10 @@ Prime fresh worktrees once to skip first-run screens. See [REFERENCE.md](REFEREN
 
 ```bash
 if [ -d <worktree>/.agents/skills ]; then
+  mkdir -p <worktree>/.claude
+  if [ -e <worktree>/.claude/skills ] && [ ! -L <worktree>/.claude/skills ]; then
+    rm -rf <worktree>/.claude/skills
+  fi
   ln -sfn ../.agents/skills <worktree>/.claude/skills
 fi
 ```

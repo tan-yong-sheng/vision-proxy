@@ -1,24 +1,22 @@
 ---
 name: repo-workflow-setup
-description: Configure repository workflow automation (pre-commit, pre-push, merge queue, Worktrunk hooks, static-analysis gate). Triggers: repo onboarding or workflow changes.
+description: Bootstrap repository workflow guardrails. Triggers: repo onboarding or workflow changes.
 ---
 
 # repo-workflow-setup
 
-One-time bootstrap for repository workflow automation.
-Wires together focused skills so each tool stays responsible for its own domain.
+One-time bootstrap for repository workflow guardrails.
+Delegates each concern to its focused skill.
 
 ## Scope
 
-This skill sets up:
+- **Pre-commit hooks** - `/setup-pre-commit`
+- **Pre-push hooks** - optional checks before `git push`
+- **Worktrunk hooks** - `/worktrunk`
+- **Static-analysis gate** - `/fallow` (and language-specific tooling)
+- **GitHub merge queue** - ruleset + CI trigger
 
-- **Pre-commit hooks** - delegate to `/setup-pre-commit`.
-- **Pre-push hooks** - optional checks before `git push`.
-- **Worktrunk hooks** - delegate to `/worktrunk` for worktree lifecycle hooks.
-- **Static-analysis gate** - delegate to `/fallow` (and language-specific tooling).
-- **GitHub merge queue** - repository ruleset + CI trigger.
-
-Everything is optional. Pick only the pieces the repo needs.
+Pick only the pieces the repo needs.
 
 ## GitHub merge queue
 
@@ -71,9 +69,9 @@ gh pr merge <pr-number> --merge-queue
 
 Skills that land PRs should be queue-aware:
 
-- `/review-gate` - add the PR to the queue when the target branch uses one; otherwise leave merge to the user.
-- `/branch-based-release` - release PRs queue like any other PR when a queue is enabled.
-- `/worktrunk-orca-delegation` - independent tracks queue directly to the target branch when a queue is enabled.
+- `/review-gate` - add the PR to the queue when the target branch uses one.
+- `/branch-based-release` - release PRs queue like any other PR when enabled.
+- `/worktrunk-orca-delegation` - independent tracks queue directly to the target branch when enabled.
 
 ## Pre-commit hooks
 
@@ -112,6 +110,6 @@ Run `fallow audit --format json --quiet --explain --gate-marker agent` before co
 
 A `/repo-workflow-setup` run is complete when:
 
-- the requested pieces are configured,
-- each configured piece has a smoke test or verification command,
-- the user knows which pieces are enabled and which are skipped.
+- the requested guardrails are configured,
+- each configured guardrail has a smoke test or verification command,
+- the user knows which guardrails are enabled and which are skipped.

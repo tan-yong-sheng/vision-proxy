@@ -46,6 +46,7 @@ For the complete frontmatter schema and stale windows, see [REFERENCE.md](REFERE
 > Running `scaffold-worktrees <plan-doc>` generates isolated `worktrees/<area>-<slug>.md` flight logs.
 > These flight logs serve as the unambiguous dispatch contracts for `/worktrunk-orca-delegation`.
 > Workers transition flight logs from `active` to `landed`, and verification findings flow into `qa/` dossiers.
+> When the target branch uses a merge queue, independent tracks can queue directly to the default branch without an intermediate integration branch. To configure a merge queue, see `/repo-workflow-setup`.
 
 ## Core workflows
 

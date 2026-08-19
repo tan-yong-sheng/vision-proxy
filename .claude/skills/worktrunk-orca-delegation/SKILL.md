@@ -1,6 +1,6 @@
 ---
 name: worktrunk-orca-delegation
-description: Delegate parallel coding tasks across `worktrunk` worktrees using Orca orchestration. Use when spawning multi-agent worktrees, dispatching workers, polling for completion, or gating merged results with `/review-gate`.
+description: Orchestrate parallel coding tasks across `worktrunk` worktrees with Orca. Triggers: spawn, dispatch, poll, or `/review-gate` merged results.
 ---
 
 # Worktrunk + Orca delegation
@@ -23,8 +23,13 @@ Coordinate multiple agents across [`worktrunk`](https://github.com/max-sixty/wor
 8. Supervise / Poll: launch background waker in Orca (`orca terminal create --title "waker" --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id> --max-ticks 12" --json`) or run `orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json`.
 9. Verify commits: `git rev-list --count <base>..<branch>` > 0.
 10. Validation gate: classify each worktree risk; route independent branches to per-worktree review and dependent/shared-contract branches to a single merge-preview review. **Do not release or merge until the branch is review-clear.**
-11. Release: `orca orchestration worker-release --dispatch <id> --json`
-12. Merge/cleanup: `wt merge <target>` or `wt remove <branch> --reap`.
+11. **Add validated PRs to the merge queue when configured.** For independent branches on a repo that uses a merge queue, run:
+    ```bash
+    gh pr merge <branch> --squash --auto
+    ```
+    For dependent branches or shared-contract touch, complete the merge-preview QA first, then add the result or merge in dependency order. To configure a merge queue, see `/repo-workflow-setup`.
+12. Release: `orca orchestration worker-release --dispatch <id> --json`
+13. Merge/cleanup: `wt merge <target>` or `wt remove <branch> --reap`.
 
 ## Workflow
 
@@ -140,7 +145,13 @@ A branch is **review-clear** when it has either:
 
 **Do not merge a worker branch until it is review-clear.**
 
-Once review-clear, integrate the branch using:
+Once review-clear, integrate the branch. If the target branch uses a merge queue, add the PR to the queue:
+
+```bash
+gh pr merge <branch> --squash --auto
+```
+
+Otherwise, merge locally with Worktrunk:
 
 ```bash
 wt merge <target-branch>
@@ -232,9 +243,10 @@ When a feature set consists of stacked or interdependent branches (such as datab
 ```bash
 # 1. Confirm the branch is review-clear.
 # 2. Release the worker terminal.
-# 3. Merge into the target branch.
+# 3. Merge into the target branch (or add to the merge queue if configured).
 orca orchestration worker-release --dispatch <id> --json
-wt merge <target>
+gh pr merge <branch> --squash --auto  # when the target branch uses a merge queue
+# or: wt merge <target>
 ```
 
 ## Rules
@@ -254,6 +266,53 @@ wt merge <target>
 - Use repo-local worktrees when running inside a sandbox. Configure Worktrunk with `worktree-path = "{{ repo_path }}/.worktrees/{{ branch | sanitize }}"` and add `.worktrees/` to `.gitignore`. This keeps worktrees under `$WORKDIR`, avoiding the need to grant broad `$HOME` read access just so tools can resolve paths.
 - Verify that the build/test tools can actually access the worktree. Bun may fail with `CouldntReadCurrentDirectory`/`AccessDenied` when the sandbox blocks the worktree path or when `bun run` calls `openat` on ancestor directories (`/home`, `/`). Workaround: invoke the underlying tool directly, e.g., `node node_modules/.bin/jest` instead of `bun run test`.
 - On such hosts run checks in the main checkout, use repo-local worktrees, or restart the agent session after moving worktrees so the sandbox rules are applied to the new paths.
+
+## Runtime isolation for parallel worktrees
+
+Git worktrees share Git history but not runtime resources. Parallel agents can collide on ports, databases, containers, and temp directories.
+
+Configure `.config/wt.toml` to isolate each worktree:
+
+```toml
+[[post-start]]
+set-vars = """
+wt config state vars set \\
+  container='{{ repo }}-{{ branch | sanitize }}-postgres' \\
+  db_port='{{ ('db-' ~ branch) | hash_port }}' \\
+  db_url='postgres://postgres:dev@localhost:{{ ('db-' ~ branch) | hash_port }}/{{ branch | sanitize_db }}'
+"""
+
+[[post-start]]
+db = """
+docker run -d --rm \\
+  --name {{ vars.container }} \\
+  -p {{ vars.db_port }}:5432 \\
+  -e POSTGRES_DB={{ branch | sanitize_db }} \\
+  -e POSTGRES_PASSWORD=dev \\
+  postgres:16
+"""
+
+[[post-start]]
+server = "wt step tether -- npm run dev -- --port {{ branch | hash_port }}"
+
+[pre-remove]
+db-stop = "docker stop {{ vars.container }} 2>/dev/null || true"
+
+[list]
+url = "http://localhost:{{ branch | hash_port }}"
+```
+
+Agents can then read the isolated DB URL anywhere:
+
+```bash
+DATABASE_URL=$(wt config state vars get db_url) npm test
+```
+
+### Cleanup rules
+
+- Always define `pre-remove` hooks for branch-scoped containers and databases.
+- Use `wt step tether` for dev servers so the process group is torn down on worktree removal.
+- Before removing a worktree, run `wt remove <branch>` instead of `rm -rf` so hooks fire.
 
 ## Troubleshooting
 

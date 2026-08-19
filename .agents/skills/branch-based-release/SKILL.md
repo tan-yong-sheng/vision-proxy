@@ -4,7 +4,7 @@ description: Branch-based release/pre-release convention. Triggers: release, pre
 ---
 # branch-based-release
 
-Release vision-proxy from `main` using a branch-based, auto-tagging workflow.
+Release from the default branch using a branch-based, auto-tagging workflow.
 
 ## Conventions
 
@@ -20,10 +20,12 @@ The branch name is for human clarity only. The real release decision is made fro
 
 ## Release PR contents
 
-A release/pre-release PR changes only version config files:
+A release/pre-release PR changes only version config files.
+Examples:
 
 - `package.json` - bump `"version"`.
-- `Formula/vision-proxy.rb` - bump `version "..."` for stable releases only.
+- `Formula/<project>.rb` - bump `version "..."` for stable releases only.
+- `Cargo.toml`, `pyproject.toml`, or a plain `VERSION` file for other ecosystems.
 
 No code, test, or documentation changes belong in a release PR.
 
@@ -34,10 +36,10 @@ Anything else is a release-process violation and should be rejected or moved to 
 
 ### Allowed files
 
-| Branch type | Allowed changes |
+| Branch type | Allowed changes (example) |
 |---|---|
-| `release/v*` | `package.json`, `Formula/vision-proxy.rb` |
-| `prerelease/v*` | `package.json` only |
+| `release/v*` | canonical version file + packaging metadata (e.g. `package.json`, `Formula/<project>.rb`) |
+| `prerelease/v*` | canonical version file only |
 
 The Homebrew formula is skipped for pre-releases because pre-releases are not installable through the default curl installer or Homebrew tap.
 
@@ -58,28 +60,38 @@ You can also enforce this in CI with a path filter on release PRs. See the workf
 ### Stable release
 
 ```bash
-git checkout -b release/v0.1.0 main
-# Edit package.json -> "version": "0.1.0"
-# Edit Formula/vision-proxy.rb -> version "0.1.0"
-git add package.json Formula/vision-proxy.rb
+git checkout -b release/v0.1.0 <default-branch>
+# Edit the canonical version file(s), e.g.:
+#   package.json -> "version": "0.1.0"
+#   Formula/<project>.rb -> version "0.1.0"
+git add <version-files>
 git commit -m "release: v0.1.0"
 git push -u origin release/v0.1.0
-gh pr create --base main --title "release: v0.1.0" --body "Bumps version to v0.1.0."
-gh pr merge --squash --admin
+gh pr create --base <default-branch> --title "release: v0.1.0" --body "Bumps version to v0.1.0."
+# If the target branch uses a merge queue:
+gh pr merge --squash --auto
+# Otherwise:
+# gh pr merge --squash
 ```
 
-Merging triggers `.github/workflows/auto-tag.yml`, which reads `package.json`, creates the `v0.1.0` tag, and calls `.github/workflows/release.yml` via `workflow_call`.
+Merging triggers the release automation (for example `.github/workflows/auto-tag.yml`), which reads the canonical version source, creates the `v0.1.0` tag, and calls the release workflow via `workflow_call`.
+
+> To configure a merge queue, see `/repo-workflow-setup`.
 
 ### Pre-release
 
 ```bash
-git checkout -b prerelease/v0.1.0-rc.1 main
-# Edit package.json -> "version": "0.1.0-rc.1"
-git add package.json
+git checkout -b prerelease/v0.1.0-rc.1 <default-branch>
+# Edit the canonical version file, e.g.:
+#   package.json -> "version": "0.1.0-rc.1"
+git add <version-file>
 git commit -m "prerelease: v0.1.0-rc.1"
 git push -u origin prerelease/v0.1.0-rc.1
-gh pr create --base main --title "prerelease: v0.1.0-rc.1" --body "Bumps version to v0.1.0-rc.1."
-gh pr merge --squash --admin
+gh pr create --base <default-branch> --title "prerelease: v0.1.0-rc.1" --body "Bumps version to v0.1.0-rc.1."
+# If the target branch uses a merge queue:
+gh pr merge --squash --auto
+# Otherwise:
+# gh pr merge --squash
 ```
 
 The workflow creates `v0.1.0-rc.1` as a GitHub pre-release and does not update the Homebrew formula.
@@ -126,9 +138,9 @@ jobs:
       - name: Verify release PR only changes version files
         run: |
           changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
-          allowed="package.json"
+          allowed="<version-file>"
           if [ "${{ startsWith(github.head_ref, 'release/') }}" = "true" ]; then
-            allowed="package.json Formula/<project>.rb"
+            allowed="<version-file> <packaging-file>"
           fi
           for f in $changed; do
             if [[ " $allowed " != *" $f "* ]]; then

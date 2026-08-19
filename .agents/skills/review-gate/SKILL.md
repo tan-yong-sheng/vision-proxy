@@ -247,6 +247,8 @@ A clean single-branch review is not the same as a clean combined merge.
 When several PRs are queued for the same target, conflicts, ordering bugs, and shared-contract drift only show up once the branches are combined.
 Step 10 reproduces the merge locally and gates the actual GitHub merge step behind a QA pass over that combined state.
 
+> **When merge queue is enabled on the target branch:** independent branches do not need Step 10; the merge queue validates the combined state automatically. Run Step 10 only for dependent branches, shared-contract touch, or stacked PRs.
+
 ### When to run
 
 Run Step 10 when any of the following holds:
@@ -474,7 +476,7 @@ Add a `## PR strategy` section to the dossier:
 - **Intent is required.** Pass the user's goal verbatim in `--intent`; do not condense it into a diff summary.
 - **Branch first.** The work must be committed on a feature branch before `axi run`.
 - **Use `--yes` for unattended agent runs.** This auto-accepts `review: awaiting_approval` and `lint: awaiting_approval` gates and lets the pipeline auto-fix actionable findings.
-- **Never merge from review-gate.** The gate validates and publishes; the human merges. Always pass `--skip ci` so the run terminates at `checks-passed` (PR opened, CI green or `no_ci: true`) instead of monitoring the PR until merge or close. Do not invoke `no-mistakes axi run` with a step or flag that would merge the PR, and do not treat `passed` as a desirable outcome unless the user explicitly asked for full CI monitoring and understands merge ownership is still theirs.
+- **Never merge from review-gate; hand off merge to the repo's configured workflow.** The gate validates and publishes. If the target branch uses a merge queue, add the PR to the queue with `gh pr merge --squash --auto` (or `gh pr merge --merge-queue`) instead of merging manually. If the repo does not use a merge queue, leave the merge to the user or to `/branch-based-release`. To configure a merge queue, see `/repo-workflow-setup`. Always pass `--skip ci` so the run terminates at `checks-passed` (PR opened, CI green or `no_ci: true`) instead of monitoring the PR until merge or close. Do not invoke `no-mistakes axi run` with a step or flag that would merge the PR directly.
 - **Serialize runs against the same repository.** `no-mistakes` uses a singleton daemon lock per `NM_HOME` and concurrent `axi run` invocations for the same repo can crash from cold-start races or resource contention. Check `no-mistakes axi` for active runs before starting a new one; wait for the active run to finish or abort it first.
 - **Skip `ci` by default for review-gate.** Use `--skip ci` with `--yes` so the pipeline pushes the branch and opens a PR, then returns without waiting for merge. Use `--skip push,pr,ci` only for a review-only gate where the branch must not be published.
 - **Check status with `no-mistakes axi status`.** It is the supported way to see the current step, findings, and branch sync state without blocking on the run.
@@ -496,7 +498,8 @@ A `/review-gate` run is complete when:
 - for a standard gate, the outcome is `checks-passed` (or a terminal review-only outcome when `--skip push,pr,ci` was used); `passed` from CI monitoring is not a review-gate goal because review-gate must not merge
 - if `/agents-docs` is active, the QA dossier in `.agents/docs/qa/` is created or updated and the index is regenerated
 - the user knows the next action (fix, review/merge, escalate, or re-run)
-- when multiple PRs are queued, Step 10 (local merge-preview QA) has run and recorded a verdict
+- when the target branch uses a merge queue, the PR has been added to the queue (e.g. `gh pr merge --squash --auto`) rather than manually merged
+- when multiple PRs are queued and the target branch does not use a merge queue, Step 10 (local merge-preview QA) has run and recorded a verdict
 
 ## Troubleshooting
 

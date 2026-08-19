@@ -456,6 +456,7 @@ Add a `## PR strategy` section to the dossier:
 - **Intent is required.** Pass the user's goal verbatim in `--intent`; do not condense it into a diff summary.
 - **Branch first.** The work must be committed on a feature branch before `axi run`.
 - **Use `--yes` for unattended agent runs.** This auto-accepts `review: awaiting_approval` and `lint: awaiting_approval` gates and lets the pipeline auto-fix actionable findings.
+- **Never merge from review-gate.** The gate validates and publishes; the human merges. Always pass `--skip ci` so the run terminates at `checks-passed` (PR opened, CI green or `no_ci: true`) instead of monitoring the PR until merge or close. Do not invoke `no-mistakes axi run` with a step or flag that would merge the PR, and do not treat `passed` as a desirable outcome unless the user explicitly asked for full CI monitoring and understands merge ownership is still theirs.
 - **Skip `ci` by default for review-gate.** Use `--skip ci` with `--yes` so the pipeline pushes the branch and opens a PR, then returns without waiting for merge. Use `--skip push,pr,ci` only for a review-only gate where the branch must not be published.
 - **Check status with `no-mistakes axi status`.** It is the supported way to see the current step, findings, and branch sync state without blocking on the run.
 - **Respect `pipeline_owned` state.** When `branch_sync.state` is `pipeline_owned`, the pipeline has rewritten the branch head. Do not make local follow-up commits until the run completes.
@@ -473,8 +474,9 @@ Add a `## PR strategy` section to the dossier:
 A `/review-gate` run is complete when:
 
 - the no-mistakes run has reached an `outcome:`
+- for a standard gate, the outcome is `checks-passed` (or a terminal review-only outcome when `--skip push,pr,ci` was used); `passed` from CI monitoring is not a review-gate goal because review-gate must not merge
 - if `/agents-docs` is active, the QA dossier in `.agents/docs/qa/` is created or updated and the index is regenerated
-- the user knows the next action (fix, merge, escalate, or re-run)
+- the user knows the next action (fix, review/merge, escalate, or re-run)
 - when multiple PRs are queued, Step 10 (local merge-preview QA) has run and recorded a verdict
 
 ## Troubleshooting

@@ -68,15 +68,10 @@ git add <version-files>
 git commit -m "release: v0.1.0"
 git push -u origin release/v0.1.0
 gh pr create --base <default-branch> --title "release: v0.1.0" --body "Bumps version to v0.1.0."
-# If the target branch uses a merge queue:
-gh pr merge --squash --auto
-# Otherwise:
-# gh pr merge --squash
+gh pr merge --squash
 ```
 
 Merging triggers the release automation (for example `.github/workflows/auto-tag.yml`), which reads the canonical version source, creates the `v0.1.0` tag, and calls the release workflow via `workflow_call`.
-
-> To configure a merge queue, see `/repo-workflow-setup`.
 
 ### Pre-release
 
@@ -88,10 +83,7 @@ git add <version-file>
 git commit -m "prerelease: v0.1.0-rc.1"
 git push -u origin prerelease/v0.1.0-rc.1
 gh pr create --base <default-branch> --title "prerelease: v0.1.0-rc.1" --body "Bumps version to v0.1.0-rc.1."
-# If the target branch uses a merge queue:
-gh pr merge --squash --auto
-# Otherwise:
-# gh pr merge --squash
+gh pr merge --squash
 ```
 
 The workflow creates `v0.1.0-rc.1` as a GitHub pre-release and does not update the Homebrew formula.

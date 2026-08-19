@@ -23,13 +23,8 @@ Coordinate multiple agents across [`worktrunk`](https://github.com/max-sixty/wor
 8. Supervise / Poll: launch background waker in Orca (`orca terminal create --title "waker" --command ".agents/skills/worktrunk-orca-delegation/scripts/waker.sh --run <run-id> --max-ticks 12" --json`) or run `orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json`.
 9. Verify commits: `git rev-list --count <base>..<branch>` > 0.
 10. Validation gate: classify each worktree risk; route independent branches to per-worktree review and dependent/shared-contract branches to a single merge-preview review. **Do not release or merge until the branch is review-clear.**
-11. **Add validated PRs to the merge queue when configured.** For independent branches on a repo that uses a merge queue, run:
-    ```bash
-    gh pr merge <branch> --squash --auto
-    ```
-    For dependent branches or shared-contract touch, complete the merge-preview QA first, then add the result or merge in dependency order. To configure a merge queue, see `/repo-workflow-setup`.
-12. Release: `orca orchestration worker-release --dispatch <id> --json`
-13. Merge/cleanup: `wt merge <target>` or `wt remove <branch> --reap`.
+11. Release: `orca orchestration worker-release --dispatch <id> --json`
+12. Merge/cleanup: `wt merge <target>` or `wt remove <branch> --reap`.
 
 ## Workflow
 
@@ -69,16 +64,11 @@ wt switch --create <branch> --base <base> --no-cd
 
 Prime fresh worktrees once to skip first-run screens. See [REFERENCE.md](REFERENCE.md).
 
-**Overlay skills into the worktree:** After creating the worktree, copy over any orchestrator skills with `--ignore-existing`. Claude Code does not follow a symlinked `.claude/skills` directory, so copy the directory contents instead of symlinking.
+**Overlay skills into the worktree:** After creating the worktree, point `.claude/skills` at `.agents/skills` with a symlink so Claude Code loads the project skills.
 
 ```bash
-if [ -d <source-worktree>/.agents/skills ]; then
-  mkdir -p <worktree>/.agents/skills
-  rsync -au --ignore-existing <source-worktree>/.agents/skills/ <worktree>/.agents/skills/
-fi
-if [ -d <source-worktree>/.claude/skills ]; then
-  mkdir -p <worktree>/.claude/skills
-  rsync -au --ignore-existing <source-worktree>/.claude/skills/ <worktree>/.claude/skills/
+if [ -d <worktree>/.agents/skills ]; then
+  ln -sfn ../.agents/skills <worktree>/.claude/skills
 fi
 ```
 
@@ -145,13 +135,7 @@ A branch is **review-clear** when it has either:
 
 **Do not merge a worker branch until it is review-clear.**
 
-Once review-clear, integrate the branch. If the target branch uses a merge queue, add the PR to the queue:
-
-```bash
-gh pr merge <branch> --squash --auto
-```
-
-Otherwise, merge locally with Worktrunk:
+Once review-clear, integrate the branch with Worktrunk:
 
 ```bash
 wt merge <target-branch>
@@ -243,10 +227,9 @@ When a feature set consists of stacked or interdependent branches (such as datab
 ```bash
 # 1. Confirm the branch is review-clear.
 # 2. Release the worker terminal.
-# 3. Merge into the target branch (or add to the merge queue if configured).
+# 3. Merge into the target branch.
 orca orchestration worker-release --dispatch <id> --json
-gh pr merge <branch> --squash --auto  # when the target branch uses a merge queue
-# or: wt merge <target>
+wt merge <target>
 ```
 
 ## Rules

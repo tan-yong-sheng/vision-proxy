@@ -14,14 +14,6 @@ colors: true
 pre-commit:
   parallel: false
   commands:
-    # Keep .claude/skills in sync with .agents/skills so Claude Code loads the
-    # latest project skills without manual copying. Only runs when .agents/skills
-    # changed in the staged diff.
-    sync-claude-skills:
-      run: git diff --cached --quiet -- .agents/skills/ || rsync -a --delete .agents/skills/ .claude/skills/
-      fail_text: "Failed to sync .claude/skills from .agents/skills"
-      stage_fixed: true
-
     # Secret scanning on staged diff. Uses .betterleaks.toml + .betterleaksignore.
     betterleaks:
       run: betterleaks git --staged --no-banner

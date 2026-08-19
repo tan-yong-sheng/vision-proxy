@@ -7,4 +7,5 @@ package-lock.json
 .lavish/
 .worktrees/
 .agents/rules/
+.claude/skills
 *.log

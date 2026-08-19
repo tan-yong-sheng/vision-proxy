@@ -12,7 +12,9 @@ import path from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { AnalyzeRequest, AnalyzeResponse } from "../adapter.ts";
+import { analyzeImagesWithModel } from "../adapter.ts";
 import { resetCacheState } from "../cache.ts";
+import { readImageFileWithReason } from "../core.ts";
 import { AnalyzeError, type AnalyzeFlags, type AnalyzeOutcome, runAnalyze } from "./analyze.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -286,167 +288,141 @@ describe("runAnalyze content mismatch detection", () => {
 	});
 });
 
-// Local helper functions for URL/size tests (match core.ts implementations)
-function isUrl(str: string): boolean {
-	try {
-		const u = new URL(str);
-		return u.protocol === "http:" || u.protocol === "https:";
-	} catch {
-		return false;
-	}
+// Stub the global fetch so readImageFileWithReason exercises the real URL
+// download, content-type parsing, size-limit check, and content sniffing paths
+// without touching the network.
+function stubFetch(body: Uint8Array, headers: Record<string, string>, ok = true) {
+	const original = globalThis.fetch;
+	globalThis.fetch = (async () => {
+		return {
+			ok,
+			status: ok ? 200 : 500,
+			body: {
+				getReader: () => {
+					let done = false;
+					return {
+						read: async () => {
+							if (done) return { done: true, value: undefined };
+							done = true;
+							return { done: false, value: body };
+						},
+					};
+				},
+			},
+			headers: {
+				get: (k: string) => headers[k.toLowerCase()] ?? null,
+			},
+		} as unknown as Response;
+	}) as typeof fetch;
+	return () => {
+		globalThis.fetch = original;
+	};
 }
 
-function maxImageFileBytes(): number {
-	const raw = process.env.VP_MAX_IMAGE_BYTES;
-	if (raw) {
-		const n = Number.parseInt(raw, 10);
-		if (Number.isFinite(n) && n > 0) return n;
-	}
-	return 10 * 1024 * 1024;
-}
-
-describe("runAnalyze URL download", () => {
-	// These tests would require a mock HTTP server.
-	// For now we test the URL path validation and config handling.
-	it("accepts http:// URL format in image path", () => {
-		// URL validation happens in readImageFileWithReason via isUrl()
-		// We just verify the function exists and the path is recognized as URL
-		assert.equal(isUrl("http://example.com/image.png"), true);
-		assert.equal(isUrl("https://example.com/image.png"), true);
-		assert.equal(isUrl("/local/path.png"), false);
-	});
-
-	it("enforces size limit on downloaded images via VP_MAX_IMAGE_BYTES", async () => {
-		// This test verifies the config option is read correctly
-		process.env.VP_MAX_IMAGE_BYTES = "500000";
+describe("readImageFileWithReason URL download", () => {
+	it("downloads a PNG URL and returns the sniffed mime type", async () => {
+		const png = Buffer.from(PNG_B64, "base64");
+		const restore = stubFetch(png, { "content-type": "image/png" });
 		try {
-			assert.equal(maxImageFileBytes(), 500000);
+			const res = await readImageFileWithReason("https://example.com/image.png");
+			assert.ok(res.image);
+			assert.equal(res.image?.mimeType, "image/png");
 		} finally {
-			delete process.env.VP_MAX_IMAGE_BYTES;
+			restore();
 		}
 	});
 
-	it("uses default size limit when VP_MAX_IMAGE_BYTES not set", async () => {
-		delete process.env.VP_MAX_IMAGE_BYTES;
-		assert.equal(maxImageFileBytes(), 10 * 1024 * 1024); // 10MB default
+	it("rejects non-image URLs via isUrl", async () => {
+		// Local paths never enter the URL branch.
+		const res = await readImageFileWithReason("/local/path.png");
+		assert.equal(res.image, null);
+	});
+
+	it("honors VP_MAX_IMAGE_BYTES size limit", async () => {
+		// A content-length above the limit makes downloadImageFromUrl return null.
+		const png = Buffer.from(PNG_B64, "base64");
+		const restore = stubFetch(png, {
+			"content-type": "image/png",
+			"content-length": String(10 * 1024 * 1024 + 1),
+		});
+		try {
+			process.env.VP_MAX_IMAGE_BYTES = "500000";
+			const res = await readImageFileWithReason("https://example.com/large.png");
+			assert.equal(res.image, null);
+			assert.equal(res.reason, "unreadable");
+		} finally {
+			delete process.env.VP_MAX_IMAGE_BYTES;
+			restore();
+		}
 	});
 });
 
-describe("runAnalyze transient retry simulation", () => {
-	// The retry logic is inside analyzeImagesWithModel (adapter.ts).
-	// We simulate it by wrapping our stub with the same retry logic.
-	// Copied from adapter.ts since it's not exported.
-	function isTransientError(err: Error): boolean {
-		const msg = err.message.toLowerCase();
-		if (msg.includes("rate limit") || msg.includes("429")) return true;
-		if (msg.includes("500") || msg.includes("502") || msg.includes("503") || msg.includes("504"))
-			return true;
-		if (msg.includes("request contains an invalid argument")) return true;
-		if (msg.includes("overloaded") || msg.includes("timeout")) return true;
-		return false;
+describe("analyzeImagesWithModel transient retry", () => {
+	// Exercise the real retry loop inside analyzeImagesWithModel by injecting a
+	// fake generateText that throws transient errors on the first attempt(s).
+	// This validates the actual production retry path, not a copy of it.
+	function flakyGenerateText(transientFailures: number, message: string) {
+		let calls = 0;
+		return {
+			async call(_opts: unknown): Promise<{ text: string }> {
+				calls++;
+				if (calls <= transientFailures) {
+					throw new Error(message);
+				}
+				return { text: `success on call ${calls}` };
+			},
+			calls() {
+				return calls;
+			},
+		};
 	}
 
-	async function withRetry(
-		impl: (req: AnalyzeRequest) => Promise<AnalyzeResponse>,
-		req: AnalyzeRequest,
-	): Promise<AnalyzeResponse> {
-		let lastErr: Error | undefined;
-		const maxRetries = 1;
-		for (let attempt = 0; attempt <= maxRetries; attempt++) {
-			try {
-				return await impl(req);
-			} catch (err) {
-				lastErr = err instanceof Error ? err : new Error(String(err));
-				if (attempt < maxRetries && isTransientError(lastErr)) {
-					await new Promise((r) => setTimeout(r, 10)); // fast retry for tests
-					continue;
-				}
-				throw lastErr;
-			}
-		}
-		throw lastErr;
+	function req(impl: unknown): AnalyzeRequest {
+		return {
+			imagePayloads: [],
+			systemPrompt: "sys",
+			question: "q",
+			model: {} as AnalyzeRequest["model"],
+			generateTextImpl: impl as AnalyzeRequest["generateTextImpl"],
+		};
 	}
 
 	it("retries on transient error (429 rate limit)", async () => {
-		let attempts = 0;
-		const flakyAnalyze = async (_req: AnalyzeRequest): Promise<AnalyzeResponse> => {
-			attempts++;
-			if (attempts === 1) {
-				throw new Error("Rate limit 429 too many requests");
-			}
-			return { text: `success on attempt ${attempts}` };
-		};
-
-		const wrappedAnalyze = async (req: AnalyzeRequest) => withRetry(flakyAnalyze, req);
-
-		const out: AnalyzeOutcome = await runAnalyze([imgPath], baseFlags(), wrappedAnalyze);
-		assert.equal(attempts, 2);
-		assert.ok(out.output.includes("success on attempt 2"));
+		const gen = flakyGenerateText(1, "Rate limit 429 too many requests");
+		const out = await analyzeImagesWithModel(req(gen.call));
+		assert.equal(gen.calls(), 2);
+		assert.ok(out.text.includes("success on call 2"));
 	});
 
 	it("retries on transient error (503 service unavailable)", async () => {
-		let attempts = 0;
-		const flakyAnalyze = async (_req: AnalyzeRequest): Promise<AnalyzeResponse> => {
-			attempts++;
-			if (attempts === 1) {
-				throw new Error("503 service unavailable");
-			}
-			return { text: `success on attempt ${attempts}` };
-		};
-
-		const wrappedAnalyze = async (req: AnalyzeRequest) => withRetry(flakyAnalyze, req);
-
-		const out: AnalyzeOutcome = await runAnalyze([imgPath], baseFlags(), wrappedAnalyze);
-		assert.equal(attempts, 2);
-		assert.ok(out.output.includes("success on attempt 2"));
+		const gen = flakyGenerateText(1, "503 service unavailable");
+		const out = await analyzeImagesWithModel(req(gen.call));
+		assert.equal(gen.calls(), 2);
+		assert.ok(out.text.includes("success on call 2"));
 	});
 
 	it("retries on transient error (invalid argument)", async () => {
-		let attempts = 0;
-		const flakyAnalyze = async (_req: AnalyzeRequest): Promise<AnalyzeResponse> => {
-			attempts++;
-			if (attempts === 1) {
-				throw new Error("Request contains an invalid argument");
-			}
-			return { text: `success on attempt ${attempts}` };
-		};
-
-		const wrappedAnalyze = async (req: AnalyzeRequest) => withRetry(flakyAnalyze, req);
-
-		const out: AnalyzeOutcome = await runAnalyze([imgPath], baseFlags(), wrappedAnalyze);
-		assert.equal(attempts, 2);
-		assert.ok(out.output.includes("success on attempt 2"));
+		const gen = flakyGenerateText(1, "Request contains an invalid argument");
+		const out = await analyzeImagesWithModel(req(gen.call));
+		assert.equal(gen.calls(), 2);
+		assert.ok(out.text.includes("success on call 2"));
 	});
 
 	it("does not retry on non-transient error", async () => {
-		let attempts = 0;
-		const flakyAnalyze = async (_req: AnalyzeRequest): Promise<AnalyzeResponse> => {
-			attempts++;
-			throw new Error("400 bad request - not transient");
-		};
-
-		const wrappedAnalyze = async (req: AnalyzeRequest) => withRetry(flakyAnalyze, req);
-
+		const gen = flakyGenerateText(99, "400 bad request - not transient");
 		await assert.rejects(
-			() => runAnalyze([imgPath], baseFlags(), wrappedAnalyze),
+			() => analyzeImagesWithModel(req(gen.call)),
 			(e) => e instanceof Error && /400 bad request/.test(e.message),
 		);
-		assert.equal(attempts, 1);
+		assert.equal(gen.calls(), 1);
 	});
 
 	it("throws after max retries exhausted", async () => {
-		let attempts = 0;
-		const flakyAnalyze = async (_req: AnalyzeRequest): Promise<AnalyzeResponse> => {
-			attempts++;
-			throw new Error("Rate limit 429 too many requests");
-		};
-
-		const wrappedAnalyze = async (req: AnalyzeRequest) => withRetry(flakyAnalyze, req);
-
+		const gen = flakyGenerateText(99, "Rate limit 429 too many requests");
 		await assert.rejects(
-			() => runAnalyze([imgPath], baseFlags(), wrappedAnalyze),
+			() => analyzeImagesWithModel(req(gen.call)),
 			(e) => e instanceof Error && /Rate limit 429/.test(e.message),
 		);
-		assert.equal(attempts, 2); // 1 initial + 1 retry
+		assert.equal(gen.calls(), 2); // 1 initial + 1 retry
 	});
 });

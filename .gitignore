@@ -7,4 +7,6 @@ package-lock.json
 .lavish/
 .worktrees/
 .agents/rules/
+# Symlink to .agents/skills; created by worktrunk post-start or manually after clone.
+.claude/skills
 *.log

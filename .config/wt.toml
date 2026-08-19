@@ -21,23 +21,19 @@ install = "pnpm install"
 [[post-start]]
 build = "pnpm run build"
 
-# Sync .claude/skills from .agents/skills so Claude Code loads the same project
-# skills. A symlink caused Claude Code to fail with ENOENT, so we copy instead.
-[[post-start]]
-sync-claude-skills = "rsync -a --delete .agents/skills/ .claude/skills/"
-
 # Ensure the generated Claude Code fallow gate hook is executable. Git sometimes
 # loses the executable bit on generated files, and the hook silently fails if
 # it is not executable.
 [[post-start]]
 chmod-fallow-gate = "chmod +x .claude/hooks/fallow-gate.sh"
 
+# Symlink .claude/skills to .agents/skills so Claude Code loads project skills.
+# Safe to re-run: it removes any real directory and recreates the symlink.
+[[post-start]]
+symlink-claude-skills = "mkdir -p .claude && if [ -e .claude/skills ] && [ ! -L .claude/skills ]; then rm -rf .claude/skills; fi && ln -sfn ../.agents/skills .claude/skills"
+
 # --- Pre-commit validation (runs during `wt merge`, before the squash commit) -
 # Fast feedback: lint + typecheck must pass before a commit is recorded.
-
-# Keep .claude/skills in sync with .agents/skills before validation.
-[[pre-commit]]
-sync-claude-skills = "rsync -a --delete .agents/skills/ .claude/skills/"
 
 [[pre-commit]]
 lint = "pnpm run lint"

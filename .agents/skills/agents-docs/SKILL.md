@@ -1,6 +1,6 @@
 ---
 name: agents-docs
-description: Maintain the `.agents/docs/` corpus (index, log, Lavish sync). Triggers: doc lifecycle or corpus QA.
+description: Maintain the `.agents/docs/` corpus (index, log, Lavish sync). Triggers for doc lifecycle or corpus QA.
 ---
 # agents-docs
 

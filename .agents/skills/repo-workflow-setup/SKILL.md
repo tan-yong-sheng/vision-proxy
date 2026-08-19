@@ -1,6 +1,6 @@
 ---
 name: repo-workflow-setup
-description: Bootstrap repository workflow guardrails. Triggers: repo onboarding or workflow changes.
+description: Bootstrap repository workflow guardrails. Triggers for repo onboarding or workflow changes.
 ---
 
 # repo-workflow-setup

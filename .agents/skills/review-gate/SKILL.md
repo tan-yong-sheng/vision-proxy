@@ -1,6 +1,6 @@
 ---
 name: review-gate
-description: Run `no-mistakes axi run` for pre-merge QA. Triggers: branch, worktree, or stacked-PR review.
+description: Run `no-mistakes axi run` for pre-merge QA. Triggers for branch, worktree, or stacked-PR review.
 user-invocable: false
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: branch-based-release
-description: Branch-based release/pre-release convention. Triggers: release, pre-release, or release-automation changes.
+description: Branch-based release/pre-release convention. Triggers for release, pre-release, or release-automation changes.
 ---
 # branch-based-release
 

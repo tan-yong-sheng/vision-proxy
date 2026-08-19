@@ -12,8 +12,8 @@ Delegates each concern to its focused skill.
 
 - **Pre-commit hooks** - `/setup-pre-commit`
 - **Pre-push hooks** - optional checks before `git push`
-- **Worktrunk hooks** - `/worktrunk`
-- **Static-analysis gate** - `/fallow` (and language-specific tooling)
+- **Worktrunk hooks** - [`/worktrunk`](https://github.com/max-sixty/worktrunk)
+- **Static-analysis gate** - [`/fallow`](https://github.com/fallow-rs/fallow) for TypeScript/JavaScript (and language-specific tooling for other ecosystems)
 - **GitHub merge queue** - ruleset + CI trigger
 
 Pick only the pieces the repo needs.
@@ -96,13 +96,13 @@ pnpm secrets
 
 ## Worktrunk hooks
 
-See `/worktrunk`.
+See [`/worktrunk`](https://github.com/max-sixty/worktrunk).
 
 Use `post-start` and `pre-remove` hooks to isolate runtime resources for parallel worktrees (ports, databases, containers).
 
 ## Static-analysis gate
 
-See `/fallow`.
+See [`/fallow`](https://github.com/fallow-rs/fallow) for TypeScript/JavaScript projects.
 
 Run `fallow audit --format json --quiet --explain --gate-marker agent` before committing AI-generated changes.
 

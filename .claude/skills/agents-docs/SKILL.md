@@ -1,6 +1,6 @@
 ---
 name: agents-docs
-description: Maintain `.agents/docs/` as an OKF corpus with index, log, and Lavish sync. Use when creating, archiving, pruning, syncing, or checking docs, plans, worktrees, bugs, or QA dossiers.
+description: Maintain the `.agents/docs/` corpus (index, log, Lavish sync). Triggers: doc lifecycle or corpus QA.
 ---
 # agents-docs
 
@@ -46,6 +46,7 @@ For the complete frontmatter schema and stale windows, see [REFERENCE.md](REFERE
 > Running `scaffold-worktrees <plan-doc>` generates isolated `worktrees/<area>-<slug>.md` flight logs.
 > These flight logs serve as the unambiguous dispatch contracts for `/worktrunk-orca-delegation`.
 > Workers transition flight logs from `active` to `landed`, and verification findings flow into `qa/` dossiers.
+> When the target branch uses a merge queue, independent tracks can queue directly to the default branch without an intermediate integration branch. To configure a merge queue, see `/repo-workflow-setup`.
 
 ## Core workflows
 
@@ -101,17 +102,18 @@ Use it when a doc is being left behind mid-process without a full review.
 `revive <archive-doc>` moves any archived doc from `archive/<type>-<basename>.md` back to its active home folder (e.g. `research/`, `plans/`, `worktrees/`, `bugs/`), sets its status to `active` (or `open` for bugs), resets its staleness deadline, rewrites links, and regenerates the index.
 
 > **Auto model.** "Done" is declared by you in frontmatter.
-Every lifecycle command runs `clean` at the end: terminal docs auto-archive, superseded archive docs auto-GC after TTL (default 180d), and stale active docs surface for a decision.
+Every lifecycle command runs a dry `clean` sweep at the end: terminal docs are surfaced for archiving, superseded archive docs are surfaced for GC after TTL (default 180d), and stale active docs are surfaced for a decision.
+The sweep never moves or deletes files without `--apply`.
 
 ### clean - the auto-archive / auto-prune sweep
 
-`clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]` is what `maybeSweep` calls.
-Dry-run previews; default applies.
+`clean [--apply] [--stale-orphan] [--force] [--ttl <days>]` is what `maybeSweep` calls.
+Dry-run by default; pass `--apply` to actually archive or GC files.
 Use it explicitly when you want to run the sweep without performing a lifecycle command, or to preview before merging work.
-It runs at the end of `new`, `visual`, `sync`, `archive`, `abandon`, `revive`, `scaffold-worktrees`, and `ensure --apply` automatically - so a freshly-completed doc moves on its own next command.
+It runs at the end of `new`, `visual`, `sync`, `archive`, `abandon`, `revive`, `scaffold-worktrees`, and `ensure --apply` automatically - but only as a dry-run that surfaces candidates and alerts.
 
 `--stale-orphan` archives active docs that are both stale (per type-specific thresholds) AND unreferenced.
-This is dry-run by default; pass `--apply` to actually move files.
+This is also dry-run by default; pass `--apply` to actually move files.
 Entry-point docs (`entry_point: true`) and still-referenced docs are never included.
 
 Output buckets: auto-archive, stale alerts, stale-orphan candidates, archive summary, gc-refused, anomalies.
@@ -131,6 +133,7 @@ Interactive review sessions use [`lavish-axi`](https://github.com/kunchenguid/la
 `prune --dry-run` proposes archive moves from deterministic frontmatter (terminal status, `superseded_by`).
 `prune --apply` moves them.
 `prune --gc --dry-run` proposes deleting archive docs that are superseded AND past the retention window (default 180 days, `--ttl` to change) - the only path that ever deletes, and `log.md` keeps a trace line.
+`prune --gc` is dry-run by default; `prune --gc --apply` deletes.
 An archive doc that is still referenced from a live doc is refused with the linker names; pass `--force` to override.
 
 ### review - status, report, index
@@ -185,6 +188,8 @@ bun .agents/skills/agents-docs/scripts/docs.js clean --stale-orphan
 # review dry-run, then:
 bun .agents/skills/agents-docs/scripts/docs.js clean --stale-orphan --apply
 bun .agents/skills/agents-docs/scripts/docs.js prune --gc --dry-run
+# review GC candidates, then:
+bun .agents/skills/agents-docs/scripts/docs.js prune --gc --apply
 ```
 
 ### Reply scale

@@ -14,7 +14,7 @@
 //   status [--show-archive]
 //   report [--html [--out <path>]] [--check] [--show-archive]
 //   index
-//   clean [--dry-run] [--force] [--ttl <days>]
+//   clean [--apply] [--stale-orphan] [--force] [--ttl <days>]
 //   prune [--dry-run|--apply] [--gc] [--ttl <days>] [--force]
 //   archive <doc> [--status <terminal-status>]
 //   ensure [--dry-run|--apply]
@@ -1041,28 +1041,28 @@ function runSweep({ apply = false, force = false, ttlDays = DEFAULT_TTL_DAYS, qu
 
 function cmdClean(args) {
   const staleOrphan = args.includes("--stale-orphan");
-  const applyFlag = args.includes("--apply");
-  const dryRun = args.includes("--dry-run");
+  const apply = args.includes("--apply");
   const force = args.includes("--force");
   const ttlFlag = args.find((a) => a.startsWith("--ttl="));
   const ttlDays = ttlFlag ? Number(ttlFlag.split("=")[1]) : DEFAULT_TTL_DAYS;
-  // stale-orphan archives docs that are not explicitly terminal; require --apply to actually move them.
-  const apply = staleOrphan ? applyFlag : !dryRun;
+  // clean is dry-run by default; --apply is required to move or delete files.
   const out = runSweep({ apply, force, ttlDays, staleOrphan });
   if (apply && out.archived.length + out.gcDeleted.length === 0) {
     console.log("clean: nothing to auto-archive or gc");
   }
-  if (staleOrphan && !apply) {
-    console.log("\nrun with --apply to archive the stale-orphan docs above");
+  if (!apply && (out.archiveCandidates.length || out.gcCandidates.length)) {
+    console.log("\ndry-run: re-run with --apply to archive or gc these docs");
   }
 }
 
 // Decision B (every checkpoint): run the sweep silently at the end of lifecycle
 // commands. Alerts (stale / anomaly / gc-refused) surface; the empty filler is
-// suppressed. Never lets an auto-sweep kill the command that triggered it.
+// suppressed. The sweep is always dry-run here; --apply is required for any
+// destructive archive or GC operation. Never lets an auto-sweep kill the command
+// that triggered it.
 function maybeSweep() {
   try {
-    runSweep({ apply: true, quiet: true });
+    runSweep({ apply: false, quiet: true });
   } catch (e) {
     console.error(`clean: ${e.message}`);
   }
@@ -1319,7 +1319,7 @@ Usage: bun docs.js <command> [args] [flags]
   status [--show-archive] [--show-orphan]  list docs by folder x area x status; flag stale / orphan / missing type
   report [--html [--out <path>]] [--check] [--show-archive] [--show-orphan]  derived status dashboard; --check exits 1 on unhealthy docs
   index                                regenerate index.md from frontmatter
-  clean [--dry-run] [--apply] [--stale-orphan] [--force] [--ttl <days>]  auto-archive terminal/superseded docs and GC unreferenced archive docs
+  clean [--apply] [--stale-orphan] [--force] [--ttl <days>]  dry-run preview of auto-archive and GC; --apply required to move or delete files
   prune [--dry-run|--apply] [--gc] [--ttl <days>] [--force]  propose archive moves; --gc lists archive deletions
   archive <doc> [--status=<v>] [--dry-run]  move to archive/<type>-*.md, set terminal status, rewrite links, append log
                                             (research + status complete runs the evidence gate first - see evidence.js)

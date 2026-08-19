@@ -1,6 +1,6 @@
 ---
 name: review-gate
-description: Run a `no-mistakes axi run` review on a branch or codebase scope. Use when gating, reviewing, or pre-merge QA-ing a branch, worktree, or stacked PR.
+description: Run `no-mistakes axi run` for pre-merge QA. Triggers: branch, worktree, or stacked-PR review.
 user-invocable: false
 ---
 
@@ -201,6 +201,24 @@ The `ci` step monitors GitHub checks until merge/close and can run indefinitely.
 - **Dependent branches or shared-contract touch:** dispatch a single merge-preview review task that creates a disposable worktree, merges the branches in order, and runs `/review-gate` on the combined state (Step 10).
 - **Standalone fallback:** create one worktree per branch, run `no-mistakes axi run` in each, poll to outcome, collect findings. See [REFERENCE.md](REFERENCE.md).
 
+#### Serialization caution for the same repository
+
+`no-mistakes` keeps one daemon per `NM_HOME` and uses a singleton lock during daemon startup. In practice, running multiple `no-mistakes axi run` invocations against the same repository at the same time - even from different worktrees or branches - can race on daemon startup or contend on agent/git resources and crash.
+
+When dispatching more than one `/review-gate` task for the same repository, prefer **serialized** execution:
+
+1. Start the first run and wait until it reaches an outcome (`checks-passed`, `failed`, or `cancelled`).
+2. Only then start the second run.
+3. Repeat for each remaining branch.
+
+Before starting any run, check the home view for active runs:
+
+```bash
+no-mistakes axi
+```
+
+If another run is already active, wait for it to finish or abort it explicitly with `no-mistakes axi abort` before starting a new one. Do not rely on upstream's documented support for concurrent pushes unless you have verified it is stable in this environment.
+
 ### Findings output & routing
 
 Create or update the QA dossier directly in `.agents/docs/qa/` via `/agents-docs`:
@@ -228,6 +246,8 @@ Route findings according to their lifecycle to avoid polluting `bugs/`:
 A clean single-branch review is not the same as a clean combined merge.
 When several PRs are queued for the same target, conflicts, ordering bugs, and shared-contract drift only show up once the branches are combined.
 Step 10 reproduces the merge locally and gates the actual GitHub merge step behind a QA pass over that combined state.
+
+> **When merge queue is enabled on the target branch:** independent branches do not need Step 10; the merge queue validates the combined state automatically. Run Step 10 only for dependent branches, shared-contract touch, or stacked PRs.
 
 ### When to run
 
@@ -456,6 +476,8 @@ Add a `## PR strategy` section to the dossier:
 - **Intent is required.** Pass the user's goal verbatim in `--intent`; do not condense it into a diff summary.
 - **Branch first.** The work must be committed on a feature branch before `axi run`.
 - **Use `--yes` for unattended agent runs.** This auto-accepts `review: awaiting_approval` and `lint: awaiting_approval` gates and lets the pipeline auto-fix actionable findings.
+- **Never merge from review-gate; hand off merge to the repo's configured workflow.** The gate validates and publishes. If the target branch uses a merge queue, add the PR to the queue with `gh pr merge --squash --auto` (or `gh pr merge --merge-queue`) instead of merging manually. If the repo does not use a merge queue, leave the merge to the user or to `/branch-based-release`. To configure a merge queue, see `/repo-workflow-setup`. Always pass `--skip ci` so the run terminates at `checks-passed` (PR opened, CI green or `no_ci: true`) instead of monitoring the PR until merge or close. Do not invoke `no-mistakes axi run` with a step or flag that would merge the PR directly.
+- **Serialize runs against the same repository.** `no-mistakes` uses a singleton daemon lock per `NM_HOME` and concurrent `axi run` invocations for the same repo can crash from cold-start races or resource contention. Check `no-mistakes axi` for active runs before starting a new one; wait for the active run to finish or abort it first.
 - **Skip `ci` by default for review-gate.** Use `--skip ci` with `--yes` so the pipeline pushes the branch and opens a PR, then returns without waiting for merge. Use `--skip push,pr,ci` only for a review-only gate where the branch must not be published.
 - **Check status with `no-mistakes axi status`.** It is the supported way to see the current step, findings, and branch sync state without blocking on the run.
 - **Respect `pipeline_owned` state.** When `branch_sync.state` is `pipeline_owned`, the pipeline has rewritten the branch head. Do not make local follow-up commits until the run completes.
@@ -473,9 +495,11 @@ Add a `## PR strategy` section to the dossier:
 A `/review-gate` run is complete when:
 
 - the no-mistakes run has reached an `outcome:`
+- for a standard gate, the outcome is `checks-passed` (or a terminal review-only outcome when `--skip push,pr,ci` was used); `passed` from CI monitoring is not a review-gate goal because review-gate must not merge
 - if `/agents-docs` is active, the QA dossier in `.agents/docs/qa/` is created or updated and the index is regenerated
-- the user knows the next action (fix, merge, escalate, or re-run)
-- when multiple PRs are queued, Step 10 (local merge-preview QA) has run and recorded a verdict
+- the user knows the next action (fix, review/merge, escalate, or re-run)
+- when the target branch uses a merge queue, the PR has been added to the queue (e.g. `gh pr merge --squash --auto`) rather than manually merged
+- when multiple PRs are queued and the target branch does not use a merge queue, Step 10 (local merge-preview QA) has run and recorded a verdict
 
 ## Troubleshooting
 

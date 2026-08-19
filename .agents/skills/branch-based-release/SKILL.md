@@ -1,6 +1,6 @@
 ---
 name: branch-based-release
-description: Branch-based release/pre-release convention for vision-proxy. Use when cutting a release, preparing a pre-release, or updating the release automation.
+description: Branch-based release/pre-release convention. Triggers: release, pre-release, or release-automation changes.
 ---
 # branch-based-release
 

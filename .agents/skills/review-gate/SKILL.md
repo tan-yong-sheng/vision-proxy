@@ -1,6 +1,6 @@
 ---
 name: review-gate
-description: Run a `no-mistakes axi run` review on a branch or codebase scope. Use when gating, reviewing, or pre-merge QA-ing a branch, worktree, or stacked PR.
+description: Run `no-mistakes axi run` for pre-merge QA. Triggers: branch, worktree, or stacked-PR review.
 user-invocable: false
 ---
 

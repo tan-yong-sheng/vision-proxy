@@ -1,6 +1,6 @@
 ---
 name: agents-docs
-description: Maintain `.agents/docs/` as an OKF corpus with index, log, and Lavish sync. Use when creating, archiving, pruning, syncing, or checking docs, plans, worktrees, bugs, or QA dossiers.
+description: Maintain the `.agents/docs/` corpus (index, log, Lavish sync). Triggers: doc lifecycle or corpus QA.
 ---
 # agents-docs
 

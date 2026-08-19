@@ -1,6 +1,6 @@
 ---
 name: grill-with-agents-docs
-description: Relentlessly interview the user on a design tree using .agents/docs grounding and an interactive Lavish HTML questionnaire.
+description: Grill the user on a design tree via a Lavish questionnaire grounded in `.agents/docs`.
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: worktrunk-orca-delegation
-description: Delegate parallel coding tasks across `worktrunk` worktrees using Orca orchestration. Use when spawning multi-agent worktrees, dispatching workers, polling for completion, or gating merged results with `/review-gate`.
+description: Orchestrate parallel coding tasks across `worktrunk` worktrees with Orca. Triggers: spawn, dispatch, poll, or `/review-gate` merged results.
 ---
 
 # Worktrunk + Orca delegation

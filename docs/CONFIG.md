@@ -107,6 +107,8 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
 | `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |
 | `VP_BASE_URL` | `baseUrl` | `VP_BASE_URL=http://localhost:8000/v1` |
+| `VP_DOWNLOAD_TIMEOUT` | - | `VP_DOWNLOAD_TIMEOUT=30000` |
+| `VP_STRICT_MIME` | - | `VP_STRICT_MIME=1` |
 
 ### Example
 
@@ -114,6 +116,23 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 export OPENAI_API_KEY="sk-..."
 VP_PROVIDER=openai VP_MODEL=gpt-4o vp analyze screenshot.png
 ```
+
+### URL input and content sniffing
+
+`vp analyze` accepts `http://` and `https://` URLs in addition to local file paths. Downloads are subject to:
+
+- **Timeout:** `VP_DOWNLOAD_TIMEOUT` (default 30 s)
+- **Size limit:** `VP_MAX_IMAGE_BYTES` (default 10 MB)
+- **Content sniffing:** Sharp detects the actual MIME type from the downloaded bytes.
+
+If the detected MIME type differs from the URL's `Content-Type` header or file extension:
+
+- Lenient mode (default): use the detected type and proceed.
+- Strict mode (`VP_STRICT_MIME=1`): reject the image with a `mime-mismatch` error.
+
+Local files are also content-sniffed; the same strict/lenient behavior applies.
+
+Supported image formats (via Sharp): PNG, JPEG, GIF, WebP, TIFF, AVIF. BMP and ICO files are detected but cannot be used as input for cropping; they are sent to the model as-is.
 
 ## View and edit
 

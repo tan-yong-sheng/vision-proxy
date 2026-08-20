@@ -47,6 +47,8 @@ See [CONFIG.md](./CONFIG.md) for the full schema and copy-paste JSON examples.
 | Symptom | Fix |
 |---------|-----|
 | `no API key for provider "openai"` | Set `OPENAI_API_KEY` or use `--api-key` |
-| `path is not a local absolute path` | Use an absolute path on a local drive (not a network share) |
-| `model is currently experiencing high demand` | Retry the same model later; no fallback mechanism is configured |
+| `path is not a local absolute path` | Use an absolute path on a local drive (not a network share), or an `http://` / `https://` URL |
+| `file extension does not match actual image content` | Ensure the file extension matches the content, or set `VP_STRICT_MIME=0` to allow lenient mode |
+| `download timeout` | Increase `VP_DOWNLOAD_TIMEOUT` or check network connectivity |
+| `model is currently experiencing high demand` | Retry the same model later; transient retries (429, 5xx) are automatic |
 

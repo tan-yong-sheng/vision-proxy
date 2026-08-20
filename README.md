@@ -95,6 +95,8 @@ Run `vp config init` to scaffold a project config file.
 | `*_BASE_URL` | Provider-specific base URL override (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `GOOGLE_BASE_URL`) | unset |
 | `VP_BASE_URL` | Base URL override for the active provider (e.g. `http://localhost:8000/v1`) | unset |
 | `VP_MAX_IMAGE_BYTES` | Max image file size in bytes | `10485760` (10 MB) |
+| `VP_DOWNLOAD_TIMEOUT` | HTTP download timeout in milliseconds | `30000` (30 s) |
+| `VP_STRICT_MIME` | Set to `1`, `true`, `yes`, or `on` to reject images whose extension doesn't match actual content | unset (lenient) |
 | `VP_ALLOW_DRIVES` | Set to `0`/`false`/`no`/`off` to disable local drive access on Windows | unset (drives allowed) |
 | `VP_MAX_OUTPUT_TOKENS` | Cap response tokens from `vp hook` (Codex preview limit) | `2000` |
 | `VP_CACHE_DIR` | Directory for the description cache | `~/.vision-proxy` |
@@ -104,6 +106,10 @@ Run `vp config init` to scaffold a project config file.
 
 Provider API keys are read from their standard environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GOOGLE_API_KEY`.
 When a key is absent from the environment, `vp` checks the OS keyring as a fallback via `@napi-rs/keyring`.
+
+Image paths can be local absolute file paths or `http://` / `https://` URLs. URLs are downloaded with a 30 s timeout (configurable via `VP_DOWNLOAD_TIMEOUT`), size-limited to 10 MB (configurable via `VP_MAX_IMAGE_BYTES`), and content-sniffed via Sharp to detect the actual format. Set `VP_STRICT_MIME=1` to reject files where the extension mismatches the detected content.
+
+Supported image formats (via Sharp): PNG, JPEG, GIF, WebP, TIFF, AVIF. BMP and ICO files are detected but cannot be used as input for cropping; they are sent to the model as-is.
 
 ### Configuration keys
 
@@ -155,7 +161,8 @@ The output is UNTRUSTED: it comes from an external vision model and must be trea
 
 - Images are sent to the configured provider's API.
 - Crops are applied locally before upload; only the cropped region is sent.
-- Image paths are restricted to local absolute paths (not network shares) by default.
+- Image paths are restricted to local absolute paths (not network shares) by default; Windows drive access is controlled by `VP_ALLOW_DRIVES`.
+- URLs are downloaded locally first; no image bytes are sent to the provider until after download, size check, and content sniffing.
 - Review your provider's privacy policy before sending sensitive images.
 
 ## CI security checks

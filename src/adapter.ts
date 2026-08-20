@@ -76,7 +76,6 @@ function isTransientError(err: Error): boolean {
 	if (msg.includes("rate limit") || msg.includes("429")) return true;
 	if (msg.includes("500") || msg.includes("502") || msg.includes("503") || msg.includes("504"))
 		return true;
-	if (msg.includes("request contains an invalid argument")) return true;
 	if (msg.includes("overloaded") || msg.includes("timeout")) return true;
 	return false;
 }

@@ -834,7 +834,7 @@ async function downloadImageFromUrl(
 ): Promise<{ content: Buffer; mimeType: string; filename: string } | null> {
 	try {
 		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 30000);
+		const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs());
 
 		const response = await fetch(url, {
 			redirect: "follow",
@@ -919,7 +919,7 @@ function strictMimeEnabled(): boolean {
 	const raw = process.env.VP_STRICT_MIME;
 	if (raw === undefined) return false;
 	const v = raw.toLowerCase();
-	return v === "1" || v === "true" || v === "yes" || v === "on";
+	return TRUE_STRINGS.has(v);
 }
 
 function maxImageFileBytes(): number {
@@ -929,6 +929,15 @@ function maxImageFileBytes(): number {
 		if (Number.isFinite(n) && n > 0) return n;
 	}
 	return 10 * 1024 * 1024;
+}
+
+function downloadTimeoutMs(): number {
+	const raw = process.env.VP_DOWNLOAD_TIMEOUT;
+	if (raw) {
+		const n = Number.parseInt(raw, 10);
+		if (Number.isFinite(n) && n > 0) return n;
+	}
+	return 30_000;
 }
 
 export type ReadImageReason =

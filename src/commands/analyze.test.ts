@@ -401,11 +401,13 @@ describe("analyzeImagesWithModel transient retry", () => {
 		assert.ok(out.text.includes("success on call 2"));
 	});
 
-	it("retries on transient error (invalid argument)", async () => {
+	it("does not retry on invalid argument (400 client error)", async () => {
 		const gen = flakyGenerateText(1, "Request contains an invalid argument");
-		const out = await analyzeImagesWithModel(req(gen.call));
-		assert.equal(gen.calls(), 2);
-		assert.ok(out.text.includes("success on call 2"));
+		await assert.rejects(
+			() => analyzeImagesWithModel(req(gen.call)),
+			(e) => e instanceof Error && /invalid argument/.test(e.message),
+		);
+		assert.equal(gen.calls(), 1);
 	});
 
 	it("does not retry on non-transient error", async () => {

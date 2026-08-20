@@ -1,0 +1,62 @@
+{
+  "findings": [
+    {
+      "id": "adapter-invalid-argument-transient",
+      "severity": "error",
+      "file": "src/adapter.ts",
+      "line": 79,
+      "description": "isTransientError() treats 'request contains an invalid argument' as a transient error worthy of retry. This is a 400-level client error (bad request), not a transient server error. Retrying the same invalid request will fail again, wasting time and potentially masking real bugs in request construction. The pattern matches on a substring that could appear in various provider error messages for permanently invalid requests (e.g., unsupported image format, malformed parameters, oversized images).",
+      "action": "auto-fix",
+      "review_scope": "source"
+    },
+    {
+      "id": "core-strict-mime-inconsistent-parsing",
+      "severity": "warning",
+      "file": "src/core.ts",
+      "line": 918,
+      "description": "strictMimeEnabled() uses custom inline parsing for boolean env vars ('1', 'true', 'yes', 'on') instead of reusing the shared TRUE_STRINGS/FALSE_STRINGS sets defined at lines 442-443 and used by parseBooleanOverride. This creates inconsistency and a maintenance burden if the accepted values ever need to change.",
+      "action": "auto-fix",
+      "review_scope": "source"
+    },
+    {
+      "id": "core-download-timeout-hardcoded",
+      "severity": "warning",
+      "file": "src/core.ts",
+      "line": 837,
+      "description": "downloadImageFromUrl() uses a hardcoded 30-second timeout (setTimeout(controller.abort(), 30000)) with no environment variable override. This could be too short for large images on slow connections or too long for fast-fail requirements. Other limits like VP_MAX_IMAGE_BYTES are configurable.",
+      "action": "auto-fix",
+      "review_scope": "source"
+    },
+    {
+      "id": "core-safe-crop-double-decode",
+      "severity": "info",
+      "file": "src/core.ts",
+      "line": 1476,
+      "description": "safeCropImage() decodes the image twice: once for sharp(...).metadata() to get dimensions, and again for sharp(...).extract().toBuffer() to perform the crop. Sharp cannot extract without re-decoding, so this is a known library limitation, not a code bug. For large images this doubles CPU cost. Acceptable for a CLI tool with small batch sizes.",
+      "action": "no-op",
+      "review_scope": "source"
+    },
+    {
+      "id": "core-bmp-ico-crop-unsupported",
+      "severity": "info",
+      "file": "src/core.ts",
+      "line": 1472,
+      "description": "BMP and ICO formats are not supported for cropping (sharp limitation). The test suite explicitly documents this (crop-stress.test.ts comment: 'Sharp does NOT support: BMP, ICO (as input formats)'). Non-cropped analysis still works because raw bytes are passed to the provider with extension-based mime type. This is a behavior change from the previous imagescript library which may have supported these formats for cropping.",
+      "action": "no-op",
+      "review_scope": "source"
+    }
+  ],
+  "tested": [
+    "src/commands/analyze.test.ts (46 tests pass)",
+    "src/commands/crop-stress.test.ts (88 tests pass)",
+    "src/core.test.ts (43 tests pass)",
+    "All 311 tests in suite pass",
+    "npm run build passes",
+    "npm run typecheck passes",
+    "fallow audit passes"
+  ],
+  "testing_summary": "All 311 tests pass including new comprehensive crop stress tests (88 tests), analyze tests with new URL/content-sniffing/retry coverage (46 tests), and core config tests (43 tests). Build and typecheck pass. Fallow audit clean.",
+  "risk_level": "medium",
+  "risk_rationale": "The primary risk is the incorrect transient error classification (error #1) which could cause wasted retries on permanently invalid requests, though max retries is capped at 1. Other findings are warnings/infos with limited impact. The change is well-tested with 311 passing tests and clean static analysis.",
+  "risk_scope": "source-or-external"
+}

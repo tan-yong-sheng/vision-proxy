@@ -357,4 +357,20 @@ describe("isRestrictedAddress", () => {
 		assert.equal(isRestrictedAddress("::10"), false);
 		assert.equal(isRestrictedAddress("::1:1"), false);
 	});
+
+	it("blocks restricted IPv4 embedded in the NAT64 well-known prefix 64:ff9b::/96", () => {
+		const blocked = [
+			"64:ff9b::a9fe:a9fe", // hex form of 64:ff9b::169.254.169.254 metadata service
+			"64:ff9b::169.254.169.254", // dotted form
+			"64:ff9b::7f00:1", // hex form of 64:ff9b::127.0.0.1 loopback
+			"64:ff9b::10.0.0.5", // private range
+		];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		// Public embedded IPv4 stays allowed: NAT64 translation of public hosts
+		// is the prefix's legitimate purpose.
+		assert.equal(isRestrictedAddress("64:ff9b::8.8.8.8"), false);
+		assert.equal(isRestrictedAddress("64:ff9b::1.2.3.4"), false);
+	});
 });

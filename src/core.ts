@@ -834,8 +834,9 @@ async function sniffMimeType(content: Buffer): Promise<string | undefined> {
 /**
  * Returns true if the given IPv4/IPv6 address is in a range that must not be
  * fetched from a CLI tool: loopback, link-local, private, carrier-grade NAT,
- * unique-local IPv6, unspecified, IPv4-mapped IPv6 (::ffff:a.b.c.d), or the
- * metadata service (169.254.169.254). Accepts bracketed IPv6 literals.
+ * unique-local IPv6, unspecified, IPv4-mapped IPv6 (::ffff:a.b.c.d), NAT64
+ * translation addresses (64:ff9b::/96), or the metadata service
+ * (169.254.169.254). Accepts bracketed IPv6 literals.
  */
 export function isRestrictedAddress(ip: string): boolean {
 	// Strip brackets from IPv6 literals (e.g., [::1], [fe80::1]).
@@ -871,6 +872,15 @@ export function isRestrictedAddress(ip: string): boolean {
 			const restricted =
 				groups[5] === 0 ? isRestrictedRoutableIpv4(octets) : isRestrictedIpv4(octets.join("."));
 			if (restricted) return true;
+		}
+		// NAT64 well-known translation prefix (64:ff9b::/96): evaluate the
+		// embedded IPv4 against the IPv4 restrictions before a CLAT/NAT64
+		// gateway translates it.
+		if (lead === 0x0064 && groups[1] === 0xff9b) {
+			const hi = groups[6];
+			const lo = groups[7];
+			const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
+			if (isRestrictedIpv4(octets.join("."))) return true;
 		}
 		return false;
 	}

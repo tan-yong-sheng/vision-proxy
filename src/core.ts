@@ -837,20 +837,27 @@ async function sniffMimeType(content: Buffer): Promise<string | undefined> {
  * unique-local IPv6, or the metadata service (169.254.169.254).
  */
 function isRestrictedAddress(ip: string): boolean {
-	const parts = ip.split(".").map((p) => Number.parseInt(p, 10));
+	// Handle IPv6 literals with brackets (e.g., [::1], [fe80::1])
+	let normalizedIp = ip;
+	if (ip.startsWith("[") && ip.endsWith("]")) {
+		normalizedIp = ip.slice(1, -1);
+	}
+
+	const parts = normalizedIp.split(".").map((p) => Number.parseInt(p, 10));
 	if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
 		// Not a dotted-quad IPv4 literal — fall through to range checks below.
 	}
-	if (ip.startsWith("127.")) return true; // loopback
-	if (ip.startsWith("0.")) return true; // "this" network
-	if (ip.startsWith("10.")) return true; // RFC1918 private
-	if (ip.startsWith("192.168.")) return true; // RFC1918 private
-	if (ip.startsWith("169.254.")) return true; // link-local + cloud metadata
-	if (ip.startsWith("100.") && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
-	if (ip.startsWith("172.") && parts[1] >= 16 && parts[1] <= 31) return true; // RFC1918 private
-	if (ip.startsWith("::1")) return true; // IPv6 loopback
-	if (ip.startsWith("fe80:")) return true; // IPv6 link-local
-	if (ip.startsWith("fc") || ip.startsWith("fd")) return true; // IPv6 unique-local
+	if (normalizedIp.startsWith("127.")) return true; // loopback
+	if (normalizedIp.startsWith("0.")) return true; // "this" network
+	if (normalizedIp.startsWith("10.")) return true; // RFC1918 private
+	if (normalizedIp.startsWith("192.168.")) return true; // RFC1918 private
+	if (normalizedIp.startsWith("169.254.")) return true; // link-local + cloud metadata
+	if (normalizedIp.startsWith("100.") && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
+	if (normalizedIp.startsWith("172.") && parts[1] >= 16 && parts[1] <= 31) return true; // RFC1918 private
+	if (normalizedIp.toLowerCase().startsWith("::1")) return true; // IPv6 loopback
+	if (normalizedIp.toLowerCase().startsWith("fe80:")) return true; // IPv6 link-local
+	if (normalizedIp.toLowerCase().startsWith("fc") || normalizedIp.toLowerCase().startsWith("fd"))
+		return true; // IPv6 unique-local
 	return false;
 }
 
@@ -866,8 +873,14 @@ async function isSafeUrl(str: string): Promise<boolean> {
 	const host = u.hostname;
 	if (!host) return false;
 
+	// Handle IPv6 literals with brackets (e.g., [::1], [2001:db8::1])
+	let normalizedHost = host;
+	if (host.startsWith("[") && host.endsWith("]")) {
+		normalizedHost = host.slice(1, -1);
+	}
+
 	// Literal IP in the URL — check directly.
-	if (isIPv4(host) || isIPv6(host)) {
+	if (isIPv4(normalizedHost) || isIPv6(normalizedHost)) {
 		return !isRestrictedAddress(host);
 	}
 

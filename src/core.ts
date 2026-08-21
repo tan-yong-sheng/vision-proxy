@@ -834,30 +834,65 @@ async function sniffMimeType(content: Buffer): Promise<string | undefined> {
 /**
  * Returns true if the given IPv4/IPv6 address is in a range that must not be
  * fetched from a CLI tool: loopback, link-local, private, carrier-grade NAT,
- * unique-local IPv6, or the metadata service (169.254.169.254).
+ * unique-local IPv6, unspecified, IPv4-mapped IPv6 (::ffff:a.b.c.d), or the
+ * metadata service (169.254.169.254). Accepts bracketed IPv6 literals.
  */
 function isRestrictedAddress(ip: string): boolean {
-	// Handle IPv6 literals with brackets (e.g., [::1], [fe80::1])
+	// Strip brackets from IPv6 literals (e.g., [::1], [fe80::1]).
 	let normalizedIp = ip;
-	if (ip.startsWith("[") && ip.endsWith("]")) {
-		normalizedIp = ip.slice(1, -1);
+	if (normalizedIp.startsWith("[") && normalizedIp.endsWith("]")) {
+		normalizedIp = normalizedIp.slice(1, -1);
+	}
+	normalizedIp = normalizedIp.toLowerCase();
+
+	// IPv6 special forms.
+	if (isIPv6(normalizedIp)) {
+		if (normalizedIp === "::") return true; // unspecified
+		if (normalizedIp.startsWith("::1")) return true; // loopback
+		if (normalizedIp.startsWith("fe80:")) return true; // link-local
+		if (normalizedIp.startsWith("fc") || normalizedIp.startsWith("fd")) return true; // unique-local
+		// IPv4-mapped (::ffff:a.b.c.d). The URL parser canonicalizes the embedded
+		// IPv4 as hex (e.g. ::ffff:7f00:1), so decode the tail back to dotted-decimal
+		// and evaluate it against the IPv4 restrictions.
+		if (normalizedIp.includes("ffff:")) {
+			const embedded = embeddedIpv4FromMapped(normalizedIp);
+			if (embedded && isRestrictedIpv4(embedded)) return true;
+		}
+		return false;
 	}
 
-	const parts = normalizedIp.split(".").map((p) => Number.parseInt(p, 10));
+	if (isIPv4(normalizedIp)) return isRestrictedIpv4(normalizedIp);
+	return false;
+}
+
+/**
+ * Decode the embedded IPv4 from an IPv4-mapped IPv6 address. The URL parser
+ * canonicalizes `::ffff:127.0.0.1` into the hex form `::ffff:7f00:1`, so we
+ * read the two trailing 16-bit groups back into dotted-decimal (e.g. 7f00:1 ->
+ * 127.0.0.1). Returns null if the tail is not a well-formed mapped address.
+ */
+function embeddedIpv4FromMapped(ipv6: string): string | null {
+	const tail = ipv6.slice(ipv6.lastIndexOf("ffff:") + 5);
+	const groups = tail.split(":");
+	const nums = groups.map((g) => Number.parseInt(g, 16));
+	if (nums.length !== 2 || nums.some((n) => Number.isNaN(n) || n < 0 || n > 0xffff)) return null;
+	const [hi, lo] = nums;
+	return `${(hi >> 8) & 0xff}.${(hi >> 0) & 0xff}.${(lo >> 8) & 0xff}.${(lo >> 0) & 0xff}`;
+}
+
+/** Reject restricted IPv4 ranges for dotted-quad literals. */
+function isRestrictedIpv4(ip: string): boolean {
+	const parts = ip.split(".").map((p) => Number.parseInt(p, 10));
 	if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
-		// Not a dotted-quad IPv4 literal — fall through to range checks below.
+		return true; // malformed → treat as unsafe
 	}
-	if (normalizedIp.startsWith("127.")) return true; // loopback
-	if (normalizedIp.startsWith("0.")) return true; // "this" network
-	if (normalizedIp.startsWith("10.")) return true; // RFC1918 private
-	if (normalizedIp.startsWith("192.168.")) return true; // RFC1918 private
-	if (normalizedIp.startsWith("169.254.")) return true; // link-local + cloud metadata
-	if (normalizedIp.startsWith("100.") && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
-	if (normalizedIp.startsWith("172.") && parts[1] >= 16 && parts[1] <= 31) return true; // RFC1918 private
-	if (normalizedIp.toLowerCase().startsWith("::1")) return true; // IPv6 loopback
-	if (normalizedIp.toLowerCase().startsWith("fe80:")) return true; // IPv6 link-local
-	if (normalizedIp.toLowerCase().startsWith("fc") || normalizedIp.toLowerCase().startsWith("fd"))
-		return true; // IPv6 unique-local
+	if (ip.startsWith("0.")) return true; // "this" network / unspecified
+	if (ip.startsWith("127.")) return true; // loopback
+	if (ip.startsWith("10.")) return true; // RFC1918 private
+	if (ip.startsWith("192.168.")) return true; // RFC1918 private
+	if (ip.startsWith("169.254.")) return true; // link-local + cloud metadata
+	if (ip.startsWith("100.") && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
+	if (ip.startsWith("172.") && parts[1] >= 16 && parts[1] <= 31) return true; // RFC1918 private
 	return false;
 }
 
@@ -873,7 +908,7 @@ async function isSafeUrl(str: string): Promise<boolean> {
 	const host = u.hostname;
 	if (!host) return false;
 
-	// Handle IPv6 literals with brackets (e.g., [::1], [2001:db8::1])
+	// Handle IPv6 literals with brackets (e.g., [::1], [2001:db8::1]).
 	let normalizedHost = host;
 	if (host.startsWith("[") && host.endsWith("]")) {
 		normalizedHost = host.slice(1, -1);
@@ -881,7 +916,7 @@ async function isSafeUrl(str: string): Promise<boolean> {
 
 	// Literal IP in the URL — check directly.
 	if (isIPv4(normalizedHost) || isIPv6(normalizedHost)) {
-		return !isRestrictedAddress(host);
+		return !isRestrictedAddress(normalizedHost);
 	}
 
 	// Hostname — resolve and reject if any address is restricted.
@@ -927,6 +962,9 @@ async function downloadImageFromUrl(
 
 				// Handle manual redirects by re-validating each hop.
 				if (response.status >= 300 && response.status < 400) {
+					// Release the connection before following the next hop so sockets
+					// are not held open across redirects.
+					await response.body?.cancel().catch(() => {});
 					const location = response.headers.get("location");
 					if (!location) return null;
 					try {
@@ -938,6 +976,8 @@ async function downloadImageFromUrl(
 				}
 
 				if (!response.ok) {
+					// Consume/cancel the error body so the connection is not leaked.
+					await response.body?.cancel().catch(() => {});
 					return null;
 				}
 

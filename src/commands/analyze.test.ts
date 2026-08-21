@@ -404,6 +404,38 @@ describe("readImageFileWithReason URL download", () => {
 		}
 	});
 
+	it("rejects IPv4-mapped and unspecified IPv6 forms (SSRF protection)", async () => {
+		// ::ffff:127.0.0.1 embeds a loopback IPv4; :: is the unspecified address.
+		// Both must be blocked even though they are not plain dotted-quad / ::1.
+		const blocked = [
+			"http://[::ffff:127.0.0.1]/image.png",
+			"http://[::ffff:10.0.0.5]/image.png",
+			"http://[::ffff:169.254.169.254]/image.png",
+			"http://[::]/image.png",
+		];
+		let calls = 0;
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			calls++;
+			return {
+				ok: true,
+				status: 200,
+				body: null,
+				headers: { get: () => null },
+			} as unknown as Response;
+		}) as typeof fetch;
+		try {
+			for (const url of blocked) {
+				const res = await readImageFileWithReason(url);
+				assert.equal(res.image, null, `expected ${url} to be blocked`);
+				assert.equal(res.reason, "denied", `expected ${url} to report "denied"`);
+			}
+			assert.equal(calls, 0, "no fetch should be made for IPv4-mapped hosts");
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+
 	it("allows public IPv6 literal addresses", async () => {
 		// Public IPv6 literals should be allowed (would proceed to fetch).
 		// We verify they pass SSRF validation by mocking a successful fetch.

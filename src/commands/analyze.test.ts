@@ -495,6 +495,48 @@ describe("readImageFileWithReason URL download", () => {
 			restore();
 		}
 	});
+
+	it("rejects an empty URL body with reason empty", async () => {
+		const restore = stubFetch(new Uint8Array(0), { "content-type": "image/png" });
+		try {
+			const res = await readImageFileWithReason("https://example.com/empty.png");
+			assert.equal(res.image, null);
+			assert.equal(res.reason, "empty");
+		} finally {
+			restore();
+		}
+	});
+
+	it("cancels the response body when content-length exceeds the size limit", async () => {
+		// The socket-release invariant: a content-length rejection must cancel the
+		// body just like redirect, error-status, and oversize-stream paths do.
+		let cancelled = false;
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			return {
+				ok: true,
+				status: 200,
+				body: {
+					cancel: async () => {
+						cancelled = true;
+					},
+				},
+				headers: {
+					get: (k: string) => (k === "content-length" ? String(10 * 1024 * 1024 + 1) : null),
+				},
+			} as unknown as Response;
+		}) as typeof fetch;
+		try {
+			process.env.VP_MAX_IMAGE_BYTES = "500000";
+			const res = await readImageFileWithReason("https://example.com/huge.png");
+			assert.equal(res.image, null);
+			assert.equal(res.reason, "unreadable");
+			assert.equal(cancelled, true, "body should be cancelled on content-length rejection");
+		} finally {
+			delete process.env.VP_MAX_IMAGE_BYTES;
+			globalThis.fetch = original;
+		}
+	});
 });
 
 describe("analyzeImagesWithModel transient retry", () => {

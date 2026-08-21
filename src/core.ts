@@ -1024,6 +1024,8 @@ async function downloadImageFromUrl(
 				const contentLength = response.headers.get("content-length");
 				const maxBytes = maxImageFileBytes();
 				if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+					// Release the connection so a rejected download does not leak a socket.
+					await response.body?.cancel().catch(() => {});
 					return null;
 				}
 
@@ -1229,6 +1231,13 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 		}
 
 		let { content, mimeType, filename } = downloaded;
+
+		// Enforce the same size bounds as the local-path branch (e.g. reject an
+		// empty body served with an allow-listed Content-Type).
+		const sizeReason = imageSizeReason(content);
+		if (sizeReason) {
+			return { image: null, reason: sizeReason, bytes: content.length, filename };
+		}
 
 		// Content sniffing on downloaded content
 		const detectedMimeType = await sniffMimeType(content);

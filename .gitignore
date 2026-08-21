@@ -4,6 +4,7 @@ package-lock.json
 .pnpm-store/
 .npm-cache/
 .pi/
+.no-mistakes/
 .lavish/
 .worktrees/
 .agents/rules/

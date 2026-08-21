@@ -124,7 +124,7 @@ VP_PROVIDER=openai VP_MODEL=gpt-4o vp analyze screenshot.png
 - **Timeout:** `VP_DOWNLOAD_TIMEOUT` (default 30 s)
 - **Size limit:** `VP_MAX_IMAGE_BYTES` (default 10 MB)
 - **Content sniffing:** Sharp detects the actual MIME type from the downloaded bytes.
-- **SSRF protection:** the host must not resolve to a loopback, private, link-local, carrier-grade NAT, unique-local, IPv4-mapped/NAT64-embedded, or cloud-metadata (169.254.169.254) address; every redirect hop is re-validated and non-image MIME types are rejected.
+- **SSRF protection:** the host must not resolve to an unspecified (`::`), loopback, private, link-local, carrier-grade NAT, unique-local, IPv4-mapped/NAT64-embedded, or cloud-metadata (169.254.169.254) address; every redirect hop is re-validated and non-image MIME types are rejected.
 
 If the detected MIME type differs from the URL's `Content-Type` header or file extension:
 

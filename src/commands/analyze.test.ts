@@ -324,7 +324,7 @@ describe("readImageFileWithReason URL download", () => {
 		const png = Buffer.from(PNG_B64, "base64");
 		const restore = stubFetch(png, { "content-type": "image/png" });
 		try {
-			const res = await readImageFileWithReason("https://example.com/image.png");
+			const res = await readImageFileWithReason("http://93.184.216.34/image.png");
 			assert.ok(res.image);
 			assert.equal(res.image?.mimeType, "image/png");
 		} finally {
@@ -471,7 +471,7 @@ describe("readImageFileWithReason URL download", () => {
 		);
 		const restore = stubFetch(svg, { "content-type": "image/png" });
 		try {
-			const res = await readImageFileWithReason("https://example.com/evil.png");
+			const res = await readImageFileWithReason("http://93.184.216.34/evil.png");
 			assert.equal(res.image, null);
 		} finally {
 			restore();
@@ -487,7 +487,7 @@ describe("readImageFileWithReason URL download", () => {
 		});
 		try {
 			process.env.VP_MAX_IMAGE_BYTES = "500000";
-			const res = await readImageFileWithReason("https://example.com/large.png");
+			const res = await readImageFileWithReason("http://93.184.216.34/large.png");
 			assert.equal(res.image, null);
 			assert.equal(res.reason, "unreadable");
 		} finally {
@@ -499,7 +499,7 @@ describe("readImageFileWithReason URL download", () => {
 	it("rejects an empty URL body with reason empty", async () => {
 		const restore = stubFetch(new Uint8Array(0), { "content-type": "image/png" });
 		try {
-			const res = await readImageFileWithReason("https://example.com/empty.png");
+			const res = await readImageFileWithReason("http://93.184.216.34/empty.png");
 			assert.equal(res.image, null);
 			assert.equal(res.reason, "empty");
 		} finally {
@@ -528,7 +528,7 @@ describe("readImageFileWithReason URL download", () => {
 		}) as typeof fetch;
 		try {
 			process.env.VP_MAX_IMAGE_BYTES = "500000";
-			const res = await readImageFileWithReason("https://example.com/huge.png");
+			const res = await readImageFileWithReason("http://93.184.216.34/huge.png");
 			assert.equal(res.image, null);
 			assert.equal(res.reason, "unreadable");
 			assert.equal(cancelled, true, "body should be cancelled on content-length rejection");

@@ -857,6 +857,7 @@ export function isRestrictedAddress(ip: string): boolean {
 		// (fec0-feff).
 		if (lead >= 0xfe80 && lead <= 0xfeff) return true;
 		if ((lead & 0xfe00) === 0xfc00) return true; // unique-local fc00::/7
+		if ((lead & 0xff00) === 0xff00) return true; // multicast ff00::/8 (e.g. ff02::1 all-nodes)
 		// IPv4-mapped (::ffff:a.b.c.d) and the deprecated IPv4-compatible
 		// (::a.b.c.d) forms: evaluate the embedded IPv4 against the IPv4
 		// restrictions. Handles both the hex form produced by URL

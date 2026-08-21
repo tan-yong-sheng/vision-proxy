@@ -347,7 +347,17 @@ describe("isRestrictedAddress", () => {
 			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
 		}
 		assert.equal(isRestrictedAddress("fe7f::1"), false); // below fe80::/10
-		assert.equal(isRestrictedAddress("ff00::1"), false); // multicast, outside /10
+		assert.equal(isRestrictedAddress("ff00::1"), true); // multicast ff00::/8
+	});
+
+	it("rejects IPv6 multicast ff00::/8 addresses", () => {
+		// Link-local multicast targets such as ff02::1 (all-nodes) and
+		// ff02::2 (all-routers) must not be fetched.
+		const blocked = ["ff00::1", "ff02::1", "ff02::2", "ff05::1"];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		assert.equal(isRestrictedAddress("fe7f::1"), false); // below fe80::/10, not multicast
 	});
 
 	it("matches loopback exactly without over-blocking ::-prefixed globals", () => {

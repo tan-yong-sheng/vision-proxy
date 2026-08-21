@@ -856,15 +856,21 @@ export function isRestrictedAddress(ip: string): boolean {
 		// (fec0-feff).
 		if (lead >= 0xfe80 && lead <= 0xfeff) return true;
 		if ((lead & 0xfe00) === 0xfc00) return true; // unique-local fc00::/7
-		// IPv4-mapped (::ffff:a.b.c.d): evaluate the embedded IPv4 against the
-		// IPv4 restrictions. Handles both the hex form produced by URL
-		// canonicalization (::ffff:7f00:1) and the RFC-5952 dotted form returned
-		// by DNS resolution (::ffff:127.0.0.1).
-		if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+		// IPv4-mapped (::ffff:a.b.c.d) and the deprecated IPv4-compatible
+		// (::a.b.c.d) forms: evaluate the embedded IPv4 against the IPv4
+		// restrictions. Handles both the hex form produced by URL
+		// canonicalization (::ffff:7f00:1, ::7f00:1) and the RFC-5952 dotted
+		// form returned by DNS resolution (::ffff:127.0.0.1).
+		if (groups.slice(0, 5).every((g) => g === 0) && (groups[5] === 0 || groups[5] === 0xffff)) {
 			const hi = groups[6];
 			const lo = groups[7];
-			if (isRestrictedIpv4(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`))
-				return true;
+			const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
+			// The IPv4-compatible form already has an all-zero head, so its
+			// embedded tail must skip the "this network" rule that would
+			// otherwise flag every such address (e.g. ::10, ::1:1).
+			const restricted =
+				groups[5] === 0 ? isRestrictedRoutableIpv4(octets) : isRestrictedIpv4(octets.join("."));
+			if (restricted) return true;
 		}
 		return false;
 	}
@@ -911,6 +917,15 @@ function isRestrictedIpv4(ip: string): boolean {
 		return true; // malformed → treat as unsafe
 	}
 	if (ip.startsWith("0.")) return true; // "this" network / unspecified
+	return isRestrictedRoutableIpv4(parts);
+}
+
+/** Reject routable restricted IPv4 ranges: loopback, private, CGNAT, link-local. */
+function isRestrictedRoutableIpv4(parts: number[]): boolean {
+	if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+		return true; // malformed → treat as unsafe
+	}
+	const ip = parts.join(".");
 	if (ip.startsWith("127.")) return true; // loopback
 	if (ip.startsWith("10.")) return true; // RFC1918 private
 	if (ip.startsWith("192.168.")) return true; // RFC1918 private

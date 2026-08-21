@@ -328,6 +328,19 @@ describe("isRestrictedAddress", () => {
 		assert.equal(isRestrictedAddress("::ffff:1.2.3.4"), false);
 	});
 
+	it("blocks the deprecated IPv4-compatible ::/96 form in hex and dotted tails", () => {
+		const blocked = [
+			"::7f00:1", // hex form of ::127.0.0.1, as URL canonicalization emits
+			"::127.0.0.1", // dotted form
+			"::a9fe:a9fe", // ::169.254.169.254 metadata service
+			"::a00:1", // ::10.0.0.1 private range
+		];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		assert.equal(isRestrictedAddress("::801:808"), false); // ::8.1.8.8 public
+	});
+
 	it("covers the full link-local fe80::/10 and site-local fec0::/10 ranges", () => {
 		const blocked = ["fe80::1", "febf::1", "fec0::1", "feff::1"];
 		for (const ip of blocked) {

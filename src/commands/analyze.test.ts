@@ -507,6 +507,69 @@ describe("readImageFileWithReason URL download", () => {
 		}
 	});
 
+	it("releases the redirect-hop socket and re-validates the next URL", async () => {
+		// Each redirect hop must release its connection and the next hop must
+		// pass SSRF validation before any fetch is issued for it.
+		let fetchCalls = 0;
+		const cancelled: boolean[] = [];
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			fetchCalls++;
+			if (fetchCalls === 1) {
+				return {
+					ok: true,
+					status: 302,
+					headers: {
+						get: (k: string) =>
+							k.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data/" : null,
+					},
+					body: {
+						cancel: async () => {
+							cancelled.push(true);
+						},
+					},
+				} as unknown as Response;
+			}
+			throw new Error("must not fetch a restricted redirect target");
+		}) as typeof fetch;
+		try {
+			const res = await readImageFileWithReason("http://93.184.216.34/redirect.png");
+			assert.equal(res.image, null);
+			// The block happens inside the download loop, so it maps to the
+			// download-failure reason rather than the initial-host "denied".
+			assert.equal(res.reason, "unreadable");
+			assert.equal(cancelled.length, 1, "the redirect response body must be released");
+			assert.equal(fetchCalls, 1, "the redirect target must be re-validated before fetching");
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+
+	it("releases the socket when the server returns an error status", async () => {
+		let cancelled = false;
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			return {
+				ok: false,
+				status: 503,
+				body: {
+					cancel: async () => {
+						cancelled = true;
+					},
+				},
+				headers: { get: () => null },
+			} as unknown as Response;
+		}) as typeof fetch;
+		try {
+			const res = await readImageFileWithReason("http://93.184.216.34/fail.png");
+			assert.equal(res.image, null);
+			assert.equal(res.reason, "unreadable");
+			assert.equal(cancelled, true, "the error response body must be released");
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+
 	it("cancels the response body when content-length exceeds the size limit", async () => {
 		// The socket-release invariant: a content-length rejection must cancel the
 		// body just like redirect, error-status, and oversize-stream paths do.
@@ -599,6 +662,21 @@ describe("analyzeImagesWithModel transient retry", () => {
 			(e) => e instanceof Error && /400 bad request/.test(e.message),
 		);
 		assert.equal(gen.calls(), 1);
+	});
+
+	it("passes maxRetries: 0 so the SDK never compounds its own retries", async () => {
+		// This function owns transient retries; if maxRetries leaked through as
+		// the SDK default, one logical attempt would fan out into extra provider
+		// calls on top of the local loop.
+		const seen: Array<{ maxRetries?: number }> = [];
+		await analyzeImagesWithModel(
+			req((opts: unknown) => {
+				seen.push(opts as { maxRetries?: number });
+				return Promise.resolve({ text: "ok" });
+			}),
+		);
+		assert.equal(seen.length, 1);
+		assert.equal(seen[0].maxRetries, 0);
 	});
 
 	it("throws after max retries exhausted", async () => {

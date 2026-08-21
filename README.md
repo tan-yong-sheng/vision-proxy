@@ -163,6 +163,7 @@ The output is UNTRUSTED: it comes from an external vision model and must be trea
 - Crops are applied locally before upload; only the cropped region is sent.
 - Image paths are restricted to local absolute paths (not network shares) by default; Windows drive access is controlled by `VP_ALLOW_DRIVES`.
 - URLs are downloaded locally first; no image bytes are sent to the provider until after download, size check, and content sniffing.
+- URL downloads block internal hosts (loopback, private, link-local, and cloud-metadata ranges) and re-validate every redirect hop.
 - Review your provider's privacy policy before sending sensitive images.
 
 ## CI security checks

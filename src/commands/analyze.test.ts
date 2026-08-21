@@ -374,10 +374,13 @@ describe("readImageFileWithReason URL download", () => {
 	});
 
 	it("rejects IPv6 literal restricted addresses (SSRF protection) without fetching", async () => {
-		// IPv6 literals with brackets: loopback, link-local, unique-local are blocked.
+		// IPv6 literals with brackets: loopback, link-local (full fe80::/10),
+		// site-local, unique-local are blocked.
 		const blocked = [
 			"http://[::1]/image.png",
 			"http://[fe80::1]/image.png",
+			"http://[febf::1]/image.png",
+			"http://[fec0::1]/image.png",
 			"http://[fc00::1]/image.png",
 			"http://[fd12:3456::1]/image.png",
 		];
@@ -445,6 +448,7 @@ describe("readImageFileWithReason URL download", () => {
 			const allowed = [
 				"http://[2001:db8::1]/image.png", // documentation prefix
 				"http://[2606:4700:4700::1111]/image.png", // Cloudflare DNS
+				"http://[::1:1]/image.png", // global unicast, not loopback ::1
 			];
 			for (const url of allowed) {
 				const res = await readImageFileWithReason(url);

@@ -837,7 +837,7 @@ async function sniffMimeType(content: Buffer): Promise<string | undefined> {
  * unique-local IPv6, unspecified, IPv4-mapped IPv6 (::ffff:a.b.c.d), or the
  * metadata service (169.254.169.254). Accepts bracketed IPv6 literals.
  */
-function isRestrictedAddress(ip: string): boolean {
+export function isRestrictedAddress(ip: string): boolean {
 	// Strip brackets from IPv6 literals (e.g., [::1], [fe80::1]).
 	let normalizedIp = ip;
 	if (normalizedIp.startsWith("[") && normalizedIp.endsWith("]")) {
@@ -847,16 +847,24 @@ function isRestrictedAddress(ip: string): boolean {
 
 	// IPv6 special forms.
 	if (isIPv6(normalizedIp)) {
-		if (normalizedIp === "::") return true; // unspecified
-		if (normalizedIp.startsWith("::1")) return true; // loopback
-		if (normalizedIp.startsWith("fe80:")) return true; // link-local
-		if (normalizedIp.startsWith("fc") || normalizedIp.startsWith("fd")) return true; // unique-local
-		// IPv4-mapped (::ffff:a.b.c.d). The URL parser canonicalizes the embedded
-		// IPv4 as hex (e.g. ::ffff:7f00:1), so decode the tail back to dotted-decimal
-		// and evaluate it against the IPv4 restrictions.
-		if (normalizedIp.includes("ffff:")) {
-			const embedded = embeddedIpv4FromMapped(normalizedIp);
-			if (embedded && isRestrictedIpv4(embedded)) return true;
+		const groups = expandIpv6Groups(normalizedIp);
+		if (!groups) return true; // malformed → treat as unsafe
+		if (groups.every((g) => g === 0)) return true; // unspecified ::
+		if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) return true; // loopback ::1
+		const lead = groups[0];
+		// Link-local fe80::/10 (fe80-febf) and deprecated site-local fec0::/10
+		// (fec0-feff).
+		if (lead >= 0xfe80 && lead <= 0xfeff) return true;
+		if ((lead & 0xfe00) === 0xfc00) return true; // unique-local fc00::/7
+		// IPv4-mapped (::ffff:a.b.c.d): evaluate the embedded IPv4 against the
+		// IPv4 restrictions. Handles both the hex form produced by URL
+		// canonicalization (::ffff:7f00:1) and the RFC-5952 dotted form returned
+		// by DNS resolution (::ffff:127.0.0.1).
+		if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+			const hi = groups[6];
+			const lo = groups[7];
+			if (isRestrictedIpv4(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`))
+				return true;
 		}
 		return false;
 	}
@@ -866,18 +874,34 @@ function isRestrictedAddress(ip: string): boolean {
 }
 
 /**
- * Decode the embedded IPv4 from an IPv4-mapped IPv6 address. The URL parser
- * canonicalizes `::ffff:127.0.0.1` into the hex form `::ffff:7f00:1`, so we
- * read the two trailing 16-bit groups back into dotted-decimal (e.g. 7f00:1 ->
- * 127.0.0.1). Returns null if the tail is not a well-formed mapped address.
+ * Expand an IPv6 address into its eight 16-bit groups. Accepts compressed
+ * (`::`) notation and a trailing dotted-quad tail (e.g. `::ffff:127.0.0.1`).
+ * Returns null if the address cannot be parsed into exactly eight groups.
  */
-function embeddedIpv4FromMapped(ipv6: string): string | null {
-	const tail = ipv6.slice(ipv6.lastIndexOf("ffff:") + 5);
-	const groups = tail.split(":");
-	const nums = groups.map((g) => Number.parseInt(g, 16));
-	if (nums.length !== 2 || nums.some((n) => Number.isNaN(n) || n < 0 || n > 0xffff)) return null;
-	const [hi, lo] = nums;
-	return `${(hi >> 8) & 0xff}.${(hi >> 0) & 0xff}.${(lo >> 8) & 0xff}.${(lo >> 0) & 0xff}`;
+function expandIpv6Groups(ip: string): number[] | null {
+	const halves = ip.split("::");
+	if (halves.length > 2) return null;
+	const left = halves[0] === "" ? [] : halves[0].split(":");
+	const right = halves.length === 2 ? (halves[1] === "" ? [] : halves[1].split(":")) : [];
+	// A trailing dotted-quad counts as two 16-bit groups.
+	let dotted: [number, number] | null = null;
+	const lastList = right.length > 0 ? right : left;
+	if (lastList.length > 0 && lastList[lastList.length - 1].includes(".")) {
+		const octets = (lastList.pop() as string).split(".");
+		if (octets.length !== 4) return null;
+		const nums = octets.map((p) => (/^\d{1,3}$/.test(p) ? Number.parseInt(p, 10) : -1));
+		if (nums.some((n) => n < 0 || n > 255)) return null;
+		dotted = [((nums[0] << 8) | nums[1]) >>> 0, ((nums[2] << 8) | nums[3]) >>> 0];
+	}
+	const fill = 8 - left.length - right.length - (dotted ? 2 : 0);
+	if (halves.length === 2 ? fill < 0 : fill !== 0) return null;
+	const groups: number[] = [];
+	for (const g of [...left, ...Array(Math.max(fill, 0)).fill("0"), ...right]) {
+		if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+		groups.push(Number.parseInt(g, 16));
+	}
+	if (dotted) groups.push(dotted[0], dotted[1]);
+	return groups.length === 8 ? groups : null;
 }
 
 /** Reject restricted IPv4 ranges for dotted-quad literals. */

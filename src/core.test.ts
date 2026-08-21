@@ -18,6 +18,7 @@ import {
 	fenceUntrusted,
 	getGroundingFormat,
 	hashImageData,
+	isRestrictedAddress,
 	isValidNamedRegion,
 	LRUCache,
 	normalizedToPixels,
@@ -304,5 +305,43 @@ describe("fence builders", () => {
 		const f = buildJointDescriptionFence([{ hash: "h1" }, { hash: "h2" }], "desc");
 		assert.ok(f.includes('images="2"'));
 		assert.ok(f.startsWith("<vision_proxy_joint_description"));
+	});
+});
+
+describe("isRestrictedAddress", () => {
+	it("blocks IPv4-mapped IPv6 in both hex and dotted (RFC-5952) forms", () => {
+		// URL literals canonicalize to hex; DNS results arrive dotted.
+		const blocked = [
+			"::ffff:7f00:1", // hex form of ::ffff:127.0.0.1
+			"::ffff:127.0.0.1", // dotted form as returned by dns.lookup
+			"::ffff:169.254.169.254",
+			"::ffff:10.0.0.5",
+			"::ffff:192.168.1.1",
+		];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+	});
+
+	it("allows public IPv4-mapped addresses", () => {
+		assert.equal(isRestrictedAddress("::ffff:8.8.8.8"), false);
+		assert.equal(isRestrictedAddress("::ffff:1.2.3.4"), false);
+	});
+
+	it("covers the full link-local fe80::/10 and site-local fec0::/10 ranges", () => {
+		const blocked = ["fe80::1", "febf::1", "fec0::1", "feff::1"];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		assert.equal(isRestrictedAddress("fe7f::1"), false); // below fe80::/10
+		assert.equal(isRestrictedAddress("ff00::1"), false); // multicast, outside /10
+	});
+
+	it("matches loopback exactly without over-blocking ::-prefixed globals", () => {
+		assert.equal(isRestrictedAddress("::1"), true);
+		assert.equal(isRestrictedAddress("0:0:0:0:0:0:0:1"), true); // full form
+		assert.equal(isRestrictedAddress("[::1]"), true); // bracketed literal
+		assert.equal(isRestrictedAddress("::10"), false);
+		assert.equal(isRestrictedAddress("::1:1"), false);
 	});
 });

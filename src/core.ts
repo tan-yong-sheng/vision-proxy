@@ -1194,6 +1194,13 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 		// Content sniffing on downloaded content
 		const detectedMimeType = await sniffMimeType(content);
 		if (detectedMimeType && detectedMimeType !== mimeType) {
+			// If the sniffed format is not a supported image input (e.g. an SVG
+			// body served with a spoofed image/png Content-Type), reject it
+			// regardless of strict mode. The allow-list must hold for the final
+			// type; only relabel between two *supported* image formats.
+			if (!Object.values(EXT_TO_MIME).includes(detectedMimeType)) {
+				return { image: null, reason: "unreadable" };
+			}
 			if (strictMimeEnabled()) {
 				return {
 					image: null,
@@ -1202,9 +1209,7 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 					filename,
 				};
 			}
-			if (detectedMimeType) {
-				mimeType = detectedMimeType;
-			}
+			mimeType = detectedMimeType;
 		}
 
 		return {
@@ -1246,13 +1251,16 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 	// Content-sniff the actual format via sharp to detect extension/mime mismatches.
 	const detectedMimeType = await sniffMimeType(content);
 	if (detectedMimeType && detectedMimeType !== mimeType) {
+		// A sniffed type outside the supported allow-list is rejected in both
+		// strict and non-strict modes (e.g. SVG content in a .png file).
+		if (!Object.values(EXT_TO_MIME).includes(detectedMimeType)) {
+			return { image: null, reason: "unreadable" };
+		}
 		if (strictMimeEnabled()) {
 			return { image: null, reason: "mime-mismatch" };
 		}
 		// In non-strict mode, prefer the content-detected type but still return.
-		if (detectedMimeType) {
-			mimeType = detectedMimeType;
-		}
+		mimeType = detectedMimeType;
 	}
 
 	return {

@@ -456,16 +456,18 @@ describe("readImageFileWithReason URL download", () => {
 		}
 	});
 
-	it("rejects SVG content sniffed from a URL (not in allow-list)", async () => {
-		// sharp reports mediaType "image/svg+xml" for SVG. SVG is not a supported
-		// input format, so a download whose content sniffs as SVG must be rejected.
+	it("rejects SVG body served with a spoofed image/png Content-Type", async () => {
+		// sharp reports mediaType "image/svg+xml" for SVG. A server that sends an
+		// SVG body with Content-Type: image/png must NOT let the sniff-override in
+		// readImageFileWithReason relabel it to image/svg+xml and accept it as an
+		// image in non-strict mode.
 		const svg = Buffer.from(
 			'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>',
 			"utf8",
 		);
-		const restore = stubFetch(svg, { "content-type": "image/svg+xml" });
+		const restore = stubFetch(svg, { "content-type": "image/png" });
 		try {
-			const res = await readImageFileWithReason("https://example.com/evil.svg");
+			const res = await readImageFileWithReason("https://example.com/evil.png");
 			assert.equal(res.image, null);
 		} finally {
 			restore();

@@ -139,6 +139,10 @@ export async function analyzeImagesWithModel(req: AnalyzeRequest): Promise<Analy
 				model,
 				system: systemPrompt,
 				messages: [userMessage],
+				// Disable the SDK's built-in retry: this function owns the transient
+				// retry loop (maxRetries below), so leaving SDK retries on would
+				// compound into up to 2*N provider calls per user request.
+				maxRetries: 0,
 				...(signal ? { abortSignal: signal } : {}),
 				...(maxOutputTokens ? { maxOutputTokens } : {}),
 			});

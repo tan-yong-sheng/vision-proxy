@@ -338,8 +338,10 @@ describe("readImageFileWithReason URL download", () => {
 		assert.equal(res.image, null);
 	});
 
-	it("rejects restricted/internal hosts (SSRF protection)", async () => {
+	it("rejects restricted/internal hosts (SSRF protection) without fetching", async () => {
 		// Loopback, metadata service, and private ranges are blocked before any fetch.
+		// We stub fetch to count calls so a regression can't silently emit a request
+		// to 127.0.0.1 / 169.254.169.254 / 10.x / 192.168.x.
 		const blocked = [
 			"http://127.0.0.1/image.png",
 			"http://localhost/image.png",
@@ -347,13 +349,31 @@ describe("readImageFileWithReason URL download", () => {
 			"http://10.0.0.5/secret.png",
 			"http://192.168.1.1/router.png",
 		];
-		for (const url of blocked) {
-			const res = await readImageFileWithReason(url);
-			assert.equal(res.image, null, `expected ${url} to be blocked`);
+		let calls = 0;
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			calls++;
+			return {
+				ok: true,
+				status: 200,
+				body: null,
+				headers: { get: () => null },
+			} as unknown as Response;
+		}) as typeof fetch;
+		try {
+			for (const url of blocked) {
+				const res = await readImageFileWithReason(url);
+				assert.equal(res.image, null, `expected ${url} to be blocked`);
+				// Blocked hosts must be reported as "denied", not "not-found".
+				assert.equal(res.reason, "denied", `expected ${url} to report "denied"`);
+			}
+			assert.equal(calls, 0, "no fetch should be made for blocked hosts");
+		} finally {
+			globalThis.fetch = original;
 		}
 	});
 
-	it("rejects IPv6 literal restricted addresses (SSRF protection)", async () => {
+	it("rejects IPv6 literal restricted addresses (SSRF protection) without fetching", async () => {
 		// IPv6 literals with brackets: loopback, link-local, unique-local are blocked.
 		const blocked = [
 			"http://[::1]/image.png",
@@ -361,9 +381,26 @@ describe("readImageFileWithReason URL download", () => {
 			"http://[fc00::1]/image.png",
 			"http://[fd12:3456::1]/image.png",
 		];
-		for (const url of blocked) {
-			const res = await readImageFileWithReason(url);
-			assert.equal(res.image, null, `expected ${url} to be blocked`);
+		let calls = 0;
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			calls++;
+			return {
+				ok: true,
+				status: 200,
+				body: null,
+				headers: { get: () => null },
+			} as unknown as Response;
+		}) as typeof fetch;
+		try {
+			for (const url of blocked) {
+				const res = await readImageFileWithReason(url);
+				assert.equal(res.image, null, `expected ${url} to be blocked`);
+				assert.equal(res.reason, "denied", `expected ${url} to report "denied"`);
+			}
+			assert.equal(calls, 0, "no fetch should be made for blocked IPv6 hosts");
+		} finally {
+			globalThis.fetch = original;
 		}
 	});
 
@@ -382,6 +419,22 @@ describe("readImageFileWithReason URL download", () => {
 				assert.equal(res.image !== null, true, `expected ${url} to be allowed`);
 				assert.equal(res.reason, undefined, `expected ${url} to not have a rejection reason`);
 			}
+		} finally {
+			restore();
+		}
+	});
+
+	it("rejects SVG content sniffed from a URL (not in allow-list)", async () => {
+		// sharp reports mediaType "image/svg+xml" for SVG. SVG is not a supported
+		// input format, so a download whose content sniffs as SVG must be rejected.
+		const svg = Buffer.from(
+			'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>',
+			"utf8",
+		);
+		const restore = stubFetch(svg, { "content-type": "image/svg+xml" });
+		try {
+			const res = await readImageFileWithReason("https://example.com/evil.svg");
+			assert.equal(res.image, null);
 		} finally {
 			restore();
 		}

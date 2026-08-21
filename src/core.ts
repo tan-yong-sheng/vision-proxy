@@ -894,6 +894,15 @@ async function isSafeUrl(str: string): Promise<boolean> {
 	}
 }
 
+/**
+ * Download an image from a URL with SSRF protection, redirect limits, size caps,
+ * and content-type/sniffing MIME resolution.
+ *
+ * Redirects are followed manually (redirect: "manual") so each hop is re-validated
+ * against the SSRF allow-list. Returns null if the host is restricted, any hop
+ * fails safety, the response is non-OK, the body exceeds the size limit, or the
+ * resolved MIME type is not in the supported image allow-list.
+ */
 async function downloadImageFromUrl(
 	url: string,
 	maxRedirects = 3,
@@ -903,85 +912,100 @@ async function downloadImageFromUrl(
 		if (!(await isSafeUrl(currentUrl))) return null;
 		try {
 			const controller = new AbortController();
+			// Keep the timeout armed until the body is fully consumed so a slow or
+			// stalled download cannot hang the CLI indefinitely.
 			const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs());
 
-			const response = await fetch(currentUrl, {
-				redirect: "manual",
-				signal: controller.signal,
-				headers: {
-					"User-Agent": "vision-proxy/0.1.0",
-				},
-			});
+			try {
+				const response = await fetch(currentUrl, {
+					redirect: "manual",
+					signal: controller.signal,
+					headers: {
+						"User-Agent": "vision-proxy/0.1.0",
+					},
+				});
 
-			clearTimeout(timeout);
+				// Handle manual redirects by re-validating each hop.
+				if (response.status >= 300 && response.status < 400) {
+					const location = response.headers.get("location");
+					if (!location) return null;
+					try {
+						currentUrl = new URL(location, currentUrl).toString();
+					} catch {
+						return null;
+					}
+					continue;
+				}
 
-			// Handle manual redirects by re-validating each hop.
-			if (response.status >= 300 && response.status < 400) {
-				const location = response.headers.get("location");
-				if (!location) return null;
+				if (!response.ok) {
+					return null;
+				}
+
+				// Check content-length if available
+				const contentLength = response.headers.get("content-length");
+				const maxBytes = maxImageFileBytes();
+				if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+					return null;
+				}
+
+				// Stream with size limit
+				const chunks: Uint8Array[] = [];
+				let totalBytes = 0;
+
+				if (!response.body) {
+					return null;
+				}
+
+				const reader = response.body.getReader();
+				let oversize = false;
 				try {
-					currentUrl = new URL(location, currentUrl).toString();
-				} catch {
-					return null;
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+
+						totalBytes += value.length;
+						if (totalBytes > maxBytes) {
+							oversize = true;
+							return null;
+						}
+						chunks.push(value);
+					}
+				} finally {
+					// Always release the underlying socket, even on oversize abort.
+					if (oversize) {
+						await reader.cancel().catch(() => {});
+					}
 				}
-				continue;
-			}
 
-			if (!response.ok) {
-				return null;
-			}
+				const content = Buffer.concat(chunks);
 
-			// Check content-length if available
-			const contentLength = response.headers.get("content-length");
-			const maxBytes = maxImageFileBytes();
-			if (contentLength && parseInt(contentLength, 10) > maxBytes) {
-				return null;
-			}
+				// Determine mime type from content-type header or URL
+				let mimeType = response.headers.get("content-type") || "";
+				mimeType = mimeType.split(";")[0].trim().toLowerCase();
 
-			// Stream with size limit
-			const chunks: Uint8Array[] = [];
-			let totalBytes = 0;
-
-			if (!response.body) {
-				return null;
-			}
-
-			const reader = response.body.getReader();
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				totalBytes += value.length;
-				if (totalBytes > maxBytes) {
-					return null;
+				if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+					// Try to guess from URL extension
+					const urlPath = new URL(currentUrl).pathname;
+					mimeType = mimeTypeForExt(urlPath) || "";
 				}
-				chunks.push(value);
-			}
 
-			const content = Buffer.concat(chunks);
+				if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+					// Default to sniffing, but only accept formats in the allow-list.
+					// sharp reports mediaType for SVG as "image/svg+xml", which is NOT a
+					// supported input format and must not slip through as "an image".
+					const detected = await sniffMimeType(content);
+					if (!detected || !Object.values(EXT_TO_MIME).includes(detected)) return null;
+					mimeType = detected;
+				}
 
-			// Determine mime type from content-type header or URL
-			let mimeType = response.headers.get("content-type") || "";
-			mimeType = mimeType.split(";")[0].trim().toLowerCase();
-
-			if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
-				// Try to guess from URL extension
+				// Extract filename from URL
 				const urlPath = new URL(currentUrl).pathname;
-				mimeType = mimeTypeForExt(urlPath) || "";
+				const filename = basename(urlPath) || "download";
+
+				return { content, mimeType, filename };
+			} finally {
+				clearTimeout(timeout);
 			}
-
-			if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
-				// Default to sniffing
-				const detected = await sniffMimeType(content);
-				if (!detected) return null;
-				mimeType = detected;
-			}
-
-			// Extract filename from URL
-			const urlPath = new URL(currentUrl).pathname;
-			const filename = basename(urlPath) || "download";
-
-			return { content, mimeType, filename };
 		} catch {
 			return null;
 		}
@@ -1113,8 +1137,13 @@ async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 }
 
 export async function readImageFileWithReason(rawPath: string): Promise<ReadImageResult> {
-	// Handle URLs (with SSRF protection: rejects restricted/internal hosts)
-	if (await isSafeUrl(rawPath)) {
+	// Handle URLs. Split URL detection from SSRF safety so a blocked host
+	// returns reason "denied" instead of falling through to local-path handling
+	// (which would misreport it as "not-found").
+	if (isUrl(rawPath)) {
+		if (!(await isSafeUrl(rawPath))) {
+			return { image: null, reason: "denied" };
+		}
 		const downloaded = await downloadImageFromUrl(rawPath);
 		if (!downloaded) {
 			return { image: null, reason: "unreadable" };
@@ -1196,7 +1225,7 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 
 const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
 	denied:
-		"path is not a local absolute path (e.g. a network share or a Windows drive with VP_ALLOW_DRIVES=0)",
+		"access denied: not a local absolute path (e.g. a network share or a Windows drive with VP_ALLOW_DRIVES=0), or the URL host is in a restricted/internal range (SSRF protection)",
 	unreadable: "could not read file",
 	empty: "file is empty",
 	"not-an-image": "unsupported extension",

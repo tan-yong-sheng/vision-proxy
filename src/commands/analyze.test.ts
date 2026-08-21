@@ -338,6 +338,21 @@ describe("readImageFileWithReason URL download", () => {
 		assert.equal(res.image, null);
 	});
 
+	it("rejects restricted/internal hosts (SSRF protection)", async () => {
+		// Loopback, metadata service, and private ranges are blocked before any fetch.
+		const blocked = [
+			"http://127.0.0.1/image.png",
+			"http://localhost/image.png",
+			"http://169.254.169.254/latest/meta-data/",
+			"http://10.0.0.5/secret.png",
+			"http://192.168.1.1/router.png",
+		];
+		for (const url of blocked) {
+			const res = await readImageFileWithReason(url);
+			assert.equal(res.image, null, `expected ${url} to be blocked`);
+		}
+	});
+
 	it("honors VP_MAX_IMAGE_BYTES size limit", async () => {
 		// A content-length above the limit makes downloadImageFromUrl return null.
 		const png = Buffer.from(PNG_B64, "base64");

@@ -12,7 +12,9 @@
  * an image. No Pi imports. No AI SDK imports.
  */
 import { createHash } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { access, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { isIPv4, isIPv6 } from "node:net";
 import os from "node:os";
 import { basename, dirname, extname, join, parse } from "node:path";
 import { imageSize } from "image-size";
@@ -829,81 +831,149 @@ async function sniffMimeType(content: Buffer): Promise<string | undefined> {
 	return undefined;
 }
 
+/**
+ * Returns true if the given IPv4/IPv6 address is in a range that must not be
+ * fetched from a CLI tool: loopback, link-local, private, carrier-grade NAT,
+ * unique-local IPv6, or the metadata service (169.254.169.254).
+ */
+function isRestrictedAddress(ip: string): boolean {
+	const parts = ip.split(".").map((p) => Number.parseInt(p, 10));
+	if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+		// Not a dotted-quad IPv4 literal — fall through to range checks below.
+	}
+	if (ip.startsWith("127.")) return true; // loopback
+	if (ip.startsWith("0.")) return true; // "this" network
+	if (ip.startsWith("10.")) return true; // RFC1918 private
+	if (ip.startsWith("192.168.")) return true; // RFC1918 private
+	if (ip.startsWith("169.254.")) return true; // link-local + cloud metadata
+	if (ip.startsWith("100.") && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
+	if (ip.startsWith("172.") && parts[1] >= 16 && parts[1] <= 31) return true; // RFC1918 private
+	if (ip.startsWith("::1")) return true; // IPv6 loopback
+	if (ip.startsWith("fe80:")) return true; // IPv6 link-local
+	if (ip.startsWith("fc") || ip.startsWith("fd")) return true; // IPv6 unique-local
+	return false;
+}
+
+/**
+ * Rejects URLs whose host resolves to a restricted address (loopback, link-local,
+ * private, metadata). An empty host or non-IP host that resolves to a restricted
+ * address is also rejected. This prevents the URL-download path from being used
+ * as an SSRF pivot to internal services.
+ */
+async function isSafeUrl(str: string): Promise<boolean> {
+	if (!isUrl(str)) return false;
+	const u = new URL(str);
+	const host = u.hostname;
+	if (!host) return false;
+
+	// Literal IP in the URL — check directly.
+	if (isIPv4(host) || isIPv6(host)) {
+		return !isRestrictedAddress(host);
+	}
+
+	// Hostname — resolve and reject if any address is restricted.
+	try {
+		const records = await lookup(host, { all: true });
+		if (records.length === 0) return false;
+		return !records.some((r) => isRestrictedAddress(r.address));
+	} catch {
+		return false;
+	}
+}
+
 async function downloadImageFromUrl(
 	url: string,
+	maxRedirects = 3,
 ): Promise<{ content: Buffer; mimeType: string; filename: string } | null> {
-	try {
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs());
+	let currentUrl = url;
+	for (let redirect = 0; redirect <= maxRedirects; redirect++) {
+		if (!(await isSafeUrl(currentUrl))) return null;
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs());
 
-		const response = await fetch(url, {
-			redirect: "follow",
-			signal: controller.signal,
-			headers: {
-				"User-Agent": "vision-proxy/0.1.0",
-			},
-		});
+			const response = await fetch(currentUrl, {
+				redirect: "manual",
+				signal: controller.signal,
+				headers: {
+					"User-Agent": "vision-proxy/0.1.0",
+				},
+			});
 
-		clearTimeout(timeout);
+			clearTimeout(timeout);
 
-		if (!response.ok) {
-			return null;
-		}
+			// Handle manual redirects by re-validating each hop.
+			if (response.status >= 300 && response.status < 400) {
+				const location = response.headers.get("location");
+				if (!location) return null;
+				try {
+					currentUrl = new URL(location, currentUrl).toString();
+				} catch {
+					return null;
+				}
+				continue;
+			}
 
-		// Check content-length if available
-		const contentLength = response.headers.get("content-length");
-		const maxBytes = maxImageFileBytes();
-		if (contentLength && parseInt(contentLength, 10) > maxBytes) {
-			return null;
-		}
-
-		// Stream with size limit
-		const chunks: Uint8Array[] = [];
-		let totalBytes = 0;
-
-		if (!response.body) {
-			return null;
-		}
-
-		const reader = response.body.getReader();
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-
-			totalBytes += value.length;
-			if (totalBytes > maxBytes) {
+			if (!response.ok) {
 				return null;
 			}
-			chunks.push(value);
+
+			// Check content-length if available
+			const contentLength = response.headers.get("content-length");
+			const maxBytes = maxImageFileBytes();
+			if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+				return null;
+			}
+
+			// Stream with size limit
+			const chunks: Uint8Array[] = [];
+			let totalBytes = 0;
+
+			if (!response.body) {
+				return null;
+			}
+
+			const reader = response.body.getReader();
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				totalBytes += value.length;
+				if (totalBytes > maxBytes) {
+					return null;
+				}
+				chunks.push(value);
+			}
+
+			const content = Buffer.concat(chunks);
+
+			// Determine mime type from content-type header or URL
+			let mimeType = response.headers.get("content-type") || "";
+			mimeType = mimeType.split(";")[0].trim().toLowerCase();
+
+			if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+				// Try to guess from URL extension
+				const urlPath = new URL(currentUrl).pathname;
+				mimeType = mimeTypeForExt(urlPath) || "";
+			}
+
+			if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+				// Default to sniffing
+				const detected = await sniffMimeType(content);
+				if (!detected) return null;
+				mimeType = detected;
+			}
+
+			// Extract filename from URL
+			const urlPath = new URL(currentUrl).pathname;
+			const filename = basename(urlPath) || "download";
+
+			return { content, mimeType, filename };
+		} catch {
+			return null;
 		}
-
-		const content = Buffer.concat(chunks);
-
-		// Determine mime type from content-type header or URL
-		let mimeType = response.headers.get("content-type") || "";
-		mimeType = mimeType.split(";")[0].trim().toLowerCase();
-
-		if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
-			// Try to guess from URL extension
-			const urlPath = new URL(url).pathname;
-			mimeType = mimeTypeForExt(urlPath) || "";
-		}
-
-		if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
-			// Default to sniffing
-			const detected = await sniffMimeType(content);
-			if (!detected) return null;
-			mimeType = detected;
-		}
-
-		// Extract filename from URL
-		const urlPath = new URL(url).pathname;
-		const filename = basename(urlPath) || "download";
-
-		return { content, mimeType, filename };
-	} catch {
-		return null;
 	}
+	return null;
 }
 
 function isUrl(str: string): boolean {
@@ -1030,8 +1100,8 @@ async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 }
 
 export async function readImageFileWithReason(rawPath: string): Promise<ReadImageResult> {
-	// Handle URLs
-	if (isUrl(rawPath)) {
+	// Handle URLs (with SSRF protection: rejects restricted/internal hosts)
+	if (await isSafeUrl(rawPath)) {
 		const downloaded = await downloadImageFromUrl(rawPath);
 		if (!downloaded) {
 			return { image: null, reason: "unreadable" };

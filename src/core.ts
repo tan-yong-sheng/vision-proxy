@@ -837,6 +837,8 @@ async function sniffMimeType(content: Buffer): Promise<string | undefined> {
  * unique-local IPv6, unspecified, IPv4-mapped IPv6 (::ffff:a.b.c.d), NAT64
  * translation addresses (64:ff9b::/96), or the metadata service
  * (169.254.169.254). Accepts bracketed IPv6 literals.
+ *
+ * @tags security, ssrf, net
  */
 export function isRestrictedAddress(ip: string): boolean {
 	// Strip brackets from IPv6 literals (e.g., [::1], [fe80::1]).

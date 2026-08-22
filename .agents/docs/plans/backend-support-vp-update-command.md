@@ -1,7 +1,7 @@
 ---
 type: plan
 title: support vp update command
-description: Add a vp update command to self-update curl-installed vision-proxy binaries and guide Homebrew/npm users to their respective package managers.
+description: Add a vp update command to self-update curl-installed vision-proxy binaries, background auto-update notifications, and streamline provider quickstart in documentation.
 area: backend
 tags: []
 status: active
@@ -16,51 +16,57 @@ related:
 ## Goal capsule
 
 Introduce a `vp update` command that allows users installed via the curl installer (`~/.local/share/vision-proxy`) to self-update to the latest release or a pinned release tag with a single command.
-For users installed via Homebrew, npm, or from source, `vp update` detects their install method and prints actionable instructions for updating through their respective package manager.
+Add non-blocking auto-update notification checks via `~/.vision-proxy/update-check.json` on CLI invocations, and streamline documentation quickstart to emphasize `~/.vision-proxy/config.json` with provider and apiKey settings.
 
 ## Current state
 
-- The curl installer (`scripts/install.sh`) installs release tarballs into `~/.local/share/vision-proxy/<version>` and symlinks `~/.local/bin/vp`.
-- Updating requires re-running the long command: `curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh`.
-- `vp` has no built-in `update` or `upgrade` subcommand in `src/cli.ts`.
-- Users cannot check if a newer version of `vision-proxy` is available directly from the CLI.
+- `vp update` exists to manually update or check versions for curl installs.
+- `vp` does not automatically check for new releases in the background or notify users when a new release is available.
+- `README.md` quickstart previously showed temporary session environment variables (`export ANTHROPIC_API_KEY=...`) rather than persistent `~/.vision-proxy/config.json` configuration, causing friction when agents run hooks in isolated subshells.
 
 ## Target state
 
-- `vp update` command is available with the following flags:
-  - `vp update` - checks for the latest version and updates if a newer version is available.
-  - `vp update --check` (`-c`) - checks whether an update is available without modifying any files.
-  - `vp update --version <tag>` - installs a specific release tag (e.g. `v0.1.0`).
-  - `vp update --force` (`-f`) - forces re-download and reinstallation even if already up to date.
-- Installation source detection:
-  - **Curl installer** (`~/.local/share/vision-proxy/...`): executes self-update via `install.sh`.
-  - **Homebrew** (`/Cellar/` or `/homebrew/` in realpath): prints `vision-proxy was installed via Homebrew. Run 'brew upgrade vision-proxy' to update.`.
-  - **npm** (`node_modules` in realpath): prints `vision-proxy was installed via npm. Run 'npm install -g vision-proxy' to update.`.
-  - **Source checkout** (git clone / local dev): prints `vision-proxy is running from a local source build. Pull latest changes and run 'npm run build'.`.
-- If already on the latest version (and neither `--force` nor `--version` is supplied), prints `vision-proxy is already up to date (vX.Y.Z)`.
-- Updates `HELP` text and subcommand help in `src/cli.ts`.
-- Updates documentation in `README.md` and `docs/QUICKSTART.md`.
+- **Auto-Update Notification**:
+  - `~/.vision-proxy/update-check.json` persists `{ "checked_at": "<ISO-timestamp>", "latest_version": "<tag>" }`.
+  - On CLI command startup, check `update-check.json` (<1ms local read).
+  - If `latest_version > current_version`, print a non-intrusive notification banner to `stderr`:
+    `A new version of vision-proxy is available: v0.1.2 (current: v0.1.1). Run 'vp update' to upgrade.`
+  - If `update-check.json` is missing or older than 24 hours (86,400,000 ms), spawn a detached background check (`node dist/cli.js update --background-check`) with `child.unref()` and `stdio: "ignore"` to update the cache without blocking the active command.
+  - Notification and background checking are suppressed when:
+    - Running `vp hook` (or `process.env.VP_HOOK` / `isHookEvent`), ensuring agent prompt/tool hooks are never polluted.
+    - `--json` flag is active.
+    - Running in CI (`process.env.CI`).
+    - `process.env.VP_NO_UPDATE_NOTIFIER=1` is set.
+    - `!process.stderr.isTTY` (non-interactive pipes).
+- **Documentation Quickstart**:
+  - Update `README.md` and `docs/QUICKSTART.md` quickstart to showcase persistent JSON config in `~/.vision-proxy/config.json`:
+    ```json
+    {
+      "provider": "google",
+      "apiKey": "AIzaSy..."
+    }
+    ```
+  - Alongside `vp config set provider google` and `vp config set apiKey ...` CLI alternatives.
 
 ## Key technical decisions
 
-1. **Detect installation method via `fs.realpathSync(process.argv[1])`**:
-   Inspecting the resolved realpath of the running CLI binary reliably distinguishes between `~/.local/share/vision-proxy/` (curl installer), Homebrew prefixes, npm global node_modules, and local checkouts.
-2. **Delegate curl updates to `scripts/install.sh`**:
-   Rather than re-implementing tarball download, OS/arch detection, SHA-256 verification, and symlink creation in TypeScript, `vp update` invokes `install.sh` with the appropriate arguments.
-   This preserves a single source of truth for installer behavior and checksum verification.
-3. **Probe latest release without GitHub API rate limits**:
-   Like `install.sh`, fetch `https://github.com/tan-yong-sheng/vision-proxy/releases/latest` with redirect manual mode to extract the tag from the `Location` header, avoiding unauthenticated rate limits (60/hr) on GitHub API endpoints.
-4. **POSIX-safe in-place update**:
-   Because Node.js loads the running program into memory, updating the target directory in `~/.local/share/vision-proxy/<new-version>` and updating the symlink `~/.local/bin/vp` is safe and atomic on Linux and macOS.
+1. **Decouple notification checks from command execution**:
+   Reading the local `update-check.json` happens synchronously on startup in `< 1ms`.
+   Network queries only happen in detached background child processes, guaranteeing zero latency overhead for user commands.
+2. **Strict hook isolation**:
+   Agent hooks (`vp hook`) must receive clean stdout/stderr output.
+   All update banners and background check spawns are strictly bypassed during hook execution.
+3. **Cache path standard**:
+   Store `update-check.json` inside `~/.vision-proxy/` (alongside `config.json` and `cache.json`), ensuring user-level isolation and easy clean up.
 
 ## Deliverables
 
 | # | Deliverable | File(s) |
 |---|---|---|
-| 1 | Create update command module with install detector, version checker, and installer runner. | `src/commands/update.ts` |
-| 2 | Wire `update` subcommand, help index, and flag parsing into CLI entrypoint. | `src/cli.ts` |
-| 3 | Add unit and integration tests for install detection, version parsing, and update flags. | `src/commands/update.test.ts` |
-| 4 | Update user-facing documentation with `vp update` usage. | `README.md`, `docs/QUICKSTART.md` |
+| 1 | Add cache reading, background check spawning, and notice banner to update module. | `src/commands/update.ts` |
+| 2 | Connect auto-check hook into CLI startup and wire `--background-check` handler. | `src/cli.ts` |
+| 3 | Add unit and integration tests for update cache TTL, banner rendering, suppression rules, and background spawn. | `src/commands/update.test.ts` |
+| 4 | Update `README.md` and `docs/QUICKSTART.md` with JSON quickstart example and update notifier env var documentation. | `README.md`, `docs/QUICKSTART.md` |
 
 ## Tools / MCP / Skills
 
@@ -69,8 +75,7 @@ For users installed via Homebrew, npm, or from source, `vp update` detects their
 
 ## Worktree Strategy
 
-- Single feature worktree targeting `main`.
-- Independent command implementation with no shared contract breaks.
+- Single feature worktree targeting `main` on branch `feat/support-vp-update-command`.
 
 | Worktree doc | Branch | PR strategy | Depends on | Notes |
 |---|---|---|---|---|
@@ -80,6 +85,6 @@ For users installed via Homebrew, npm, or from source, `vp update` detects their
 
 | Risk | Mitigation |
 |---|---|
-| User is offline or GitHub redirect fails | Fail gracefully with an informative error message explaining that the release check failed. |
-| User installed via Homebrew or npm and runs `vp update` | Detect install source upfront and exit cleanly with the exact command for their package manager. |
-| Incompatible Node.js version on remote update | `install.sh` performs Node >= 22 prerequisite check before touching symlinks. |
+| Background check child process hangs | Spawn with `unref()` and `stdio: "ignore"`, with a short internal timeout on the HTTP probe. |
+| Notification pollutes agent hook context | Explicitly guard `command === "hook"` and suppress notifier output when running hooks. |
+| Stale or corrupt JSON cache file | Wrap cache read/parse in a try-catch block and fall back to empty cache. |

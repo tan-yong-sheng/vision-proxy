@@ -47,9 +47,9 @@ Add a `vp update` command to `vision-proxy` that allows self-updating curl-insta
 
 ## Status
 
-- [ ] Branch created from `main`
-- [ ] Implementation complete
-- [ ] Local checks pass (`npm test`, `npm run typecheck`, `biome check`, `fallow audit`)
-- [ ] PR opened against `main`
-- [ ] `/review-gate` complete
+- [x] Branch created from `main`
+- [x] Implementation complete
+- [x] Local checks pass (`npm test`, `npm run typecheck`, `biome check`, `fallow audit`)
+- [x] Merged into `main`
+- [x] `/review-gate` complete
 

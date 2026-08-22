@@ -4,9 +4,11 @@ package-lock.json
 .pnpm-store/
 .npm-cache/
 .pi/
+.no-mistakes/
 .lavish/
 .worktrees/
 .agents/rules/
 # Symlink to .agents/skills; created by worktrunk post-start or manually after clone.
 .claude/skills
 *.log
+.no-mistakes-evidence/

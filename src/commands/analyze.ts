@@ -92,10 +92,14 @@ async function applyCrop(
 		const buf = Buffer.from(payload.image.data, "base64");
 		const cropped = await cropImage(buf, resolved, payload.image.mimeType);
 		if (!cropped) return { error: "crop failed" };
+		// encodeCroppedImage emits PNG only for image/png inputs; everything else
+		// becomes JPEG. Label the bytes with the actual encoded media type so the
+		// provider receives a correct Content-Type, not the source format.
+		const outMime = payload.image.mimeType === "image/png" ? "image/png" : "image/jpeg";
 		const newImg: ImageContent = {
 			type: "image",
 			data: cropped.toString("base64"),
-			mimeType: payload.image.mimeType,
+			mimeType: outMime,
 		};
 		const newHash = hashImageData(newImg.data);
 		storeImageMeta(newHash, newImg.data, meta.filename);

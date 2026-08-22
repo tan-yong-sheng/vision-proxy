@@ -195,7 +195,7 @@ Usage:
   vp analyze <paths...> [options]
 
 Arguments:
-  <paths...>           one or more image file paths or URLs to analyze
+  <paths...>           one or more image file paths or URLs (http/https) to analyze
 
 Options:
   --format <name>      grounding format: plain (default) | qwen_pixels |

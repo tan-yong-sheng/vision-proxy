@@ -28,6 +28,8 @@ export interface AnalyzeRequest {
 	signal?: AbortSignal;
 	/** Optional max output tokens cap (e.g. Codex shim budget). */
 	maxOutputTokens?: number;
+	/** Injectable generateText for testing; defaults to the real SDK call. */
+	generateTextImpl?: typeof generateText;
 }
 
 export interface AnalyzeResponse {
@@ -68,6 +70,20 @@ function buildPromptText(imagePayloads: ImagePayload[], question: string): strin
 	);
 }
 
+function isTransientError(err: Error): boolean {
+	const msg = err.message.toLowerCase();
+	// Vercel AI SDK wraps provider errors; check for common transient patterns
+	if (msg.includes("rate limit") || msg.includes("429")) return true;
+	if (msg.includes("500") || msg.includes("502") || msg.includes("503") || msg.includes("504"))
+		return true;
+	if (msg.includes("overloaded") || msg.includes("timeout")) return true;
+	return false;
+}
+
+async function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Wrap an error from the Vercel AI SDK into a user-facing message.
  * Exposed for testing.
@@ -85,13 +101,21 @@ export function wrapAnalyzeError(err: unknown): unknown {
 }
 
 /**
- * Run a single vision analysis call via the Vercel AI SDK.
+ * Run a single vision analysis call via the Vercel AI SDK with transient retry.
  *
  * Returns the model text. The caller owns caching and fence emission.
  */
 export async function analyzeImagesWithModel(req: AnalyzeRequest): Promise<AnalyzeResponse> {
-	const { imagePayloads, systemPrompt, question, model, providerOptions, signal, maxOutputTokens } =
-		req;
+	const {
+		imagePayloads,
+		systemPrompt,
+		question,
+		model,
+		providerOptions,
+		signal,
+		maxOutputTokens,
+		generateTextImpl = generateText,
+	} = req;
 
 	const textPart: TextPart = { type: "text", text: buildPromptText(imagePayloads, question) };
 	const fileParts: SdkFilePart[] = imagePayloads.map((p) => {
@@ -106,16 +130,33 @@ export async function analyzeImagesWithModel(req: AnalyzeRequest): Promise<Analy
 
 	const userMessage: ModelMessage = { role: "user", content };
 
-	try {
-		const result = await generateText({
-			model,
-			system: systemPrompt,
-			messages: [userMessage],
-			...(signal ? { abortSignal: signal } : {}),
-			...(maxOutputTokens ? { maxOutputTokens } : {}),
-		});
-		return { text: result.text.trim() };
-	} catch (err) {
-		throw wrapAnalyzeError(err);
+	let lastErr: Error | undefined;
+	const maxRetries = 1;
+
+	for (let attempt = 0; attempt <= maxRetries; attempt++) {
+		try {
+			const result = await generateTextImpl({
+				model,
+				system: systemPrompt,
+				messages: [userMessage],
+				// Disable the SDK's built-in retry: this function owns the transient
+				// retry loop (maxRetries below), so leaving SDK retries on would
+				// compound into up to 2*N provider calls per user request.
+				maxRetries: 0,
+				...(signal ? { abortSignal: signal } : {}),
+				...(maxOutputTokens ? { maxOutputTokens } : {}),
+			});
+
+			return { text: result.text.trim() };
+		} catch (err) {
+			lastErr = err instanceof Error ? err : new Error(String(err));
+			if (attempt < maxRetries && isTransientError(lastErr)) {
+				await sleep(1000 * 2 ** attempt);
+				continue;
+			}
+			throw wrapAnalyzeError(lastErr);
+		}
 	}
+
+	throw wrapAnalyzeError(lastErr);
 }

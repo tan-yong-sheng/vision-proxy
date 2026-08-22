@@ -18,6 +18,7 @@ import {
 	fenceUntrusted,
 	getGroundingFormat,
 	hashImageData,
+	isRestrictedAddress,
 	isValidNamedRegion,
 	LRUCache,
 	normalizedToPixels,
@@ -258,6 +259,20 @@ describe("resolveConfig baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
 		assert.equal(cfg.baseUrl, "");
 	});
+
+	it("applies VP_BASE_URL env override", () => {
+		const cfg = resolveConfig({
+			VP_BASE_URL: "http://localhost:8000/v1",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.baseUrl, "http://localhost:8000/v1");
+	});
+
+	it("ignores empty VP_BASE_URL", () => {
+		const cfg = resolveConfig({
+			VP_BASE_URL: "",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.baseUrl, "");
+	});
 });
 
 describe("sanitize baseUrl", () => {
@@ -290,5 +305,82 @@ describe("fence builders", () => {
 		const f = buildJointDescriptionFence([{ hash: "h1" }, { hash: "h2" }], "desc");
 		assert.ok(f.includes('images="2"'));
 		assert.ok(f.startsWith("<vision_proxy_joint_description"));
+	});
+});
+
+describe("isRestrictedAddress", () => {
+	it("blocks IPv4-mapped IPv6 in both hex and dotted (RFC-5952) forms", () => {
+		// URL literals canonicalize to hex; DNS results arrive dotted.
+		const blocked = [
+			"::ffff:7f00:1", // hex form of ::ffff:127.0.0.1
+			"::ffff:127.0.0.1", // dotted form as returned by dns.lookup
+			"::ffff:169.254.169.254",
+			"::ffff:10.0.0.5",
+			"::ffff:192.168.1.1",
+		];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+	});
+
+	it("allows public IPv4-mapped addresses", () => {
+		assert.equal(isRestrictedAddress("::ffff:8.8.8.8"), false);
+		assert.equal(isRestrictedAddress("::ffff:1.2.3.4"), false);
+	});
+
+	it("blocks the deprecated IPv4-compatible ::/96 form in hex and dotted tails", () => {
+		const blocked = [
+			"::7f00:1", // hex form of ::127.0.0.1, as URL canonicalization emits
+			"::127.0.0.1", // dotted form
+			"::a9fe:a9fe", // ::169.254.169.254 metadata service
+			"::a00:1", // ::10.0.0.1 private range
+		];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		assert.equal(isRestrictedAddress("::801:808"), false); // ::8.1.8.8 public
+	});
+
+	it("covers the full link-local fe80::/10 and site-local fec0::/10 ranges", () => {
+		const blocked = ["fe80::1", "febf::1", "fec0::1", "feff::1"];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		assert.equal(isRestrictedAddress("fe7f::1"), false); // below fe80::/10
+		assert.equal(isRestrictedAddress("ff00::1"), true); // multicast ff00::/8
+	});
+
+	it("rejects IPv6 multicast ff00::/8 addresses", () => {
+		// Link-local multicast targets such as ff02::1 (all-nodes) and
+		// ff02::2 (all-routers) must not be fetched.
+		const blocked = ["ff00::1", "ff02::1", "ff02::2", "ff05::1"];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		assert.equal(isRestrictedAddress("fe7f::1"), false); // below fe80::/10, not multicast
+	});
+
+	it("matches loopback exactly without over-blocking ::-prefixed globals", () => {
+		assert.equal(isRestrictedAddress("::1"), true);
+		assert.equal(isRestrictedAddress("0:0:0:0:0:0:0:1"), true); // full form
+		assert.equal(isRestrictedAddress("[::1]"), true); // bracketed literal
+		assert.equal(isRestrictedAddress("::10"), false);
+		assert.equal(isRestrictedAddress("::1:1"), false);
+	});
+
+	it("blocks restricted IPv4 embedded in the NAT64 well-known prefix 64:ff9b::/96", () => {
+		const blocked = [
+			"64:ff9b::a9fe:a9fe", // hex form of 64:ff9b::169.254.169.254 metadata service
+			"64:ff9b::169.254.169.254", // dotted form
+			"64:ff9b::7f00:1", // hex form of 64:ff9b::127.0.0.1 loopback
+			"64:ff9b::10.0.0.5", // private range
+		];
+		for (const ip of blocked) {
+			assert.equal(isRestrictedAddress(ip), true, `expected ${ip} to be restricted`);
+		}
+		// Public embedded IPv4 stays allowed: NAT64 translation of public hosts
+		// is the prefix's legitimate purpose.
+		assert.equal(isRestrictedAddress("64:ff9b::8.8.8.8"), false);
+		assert.equal(isRestrictedAddress("64:ff9b::1.2.3.4"), false);
 	});
 });

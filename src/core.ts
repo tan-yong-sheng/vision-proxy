@@ -12,11 +12,13 @@
  * an image. No Pi imports. No AI SDK imports.
  */
 import { createHash } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { access, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { isIPv4, isIPv6 } from "node:net";
 import os from "node:os";
 import { basename, dirname, extname, join, parse } from "node:path";
 import { imageSize } from "image-size";
-import type { Image as ImageScriptImage } from "imagescript";
+import sharp from "sharp";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type ProxyMode = "fallback" | "always" | "off";
@@ -51,7 +53,7 @@ export interface VisionConfig {
 	cacheMaxAgeDays: number;
 	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
-	/** Optional base URL override for the current provider. */
+	/** Base URL override for the active provider, e.g. "http://localhost:8000/v1". */
 	baseUrl: string;
 	/**
 	 * Optional provider API key persisted as plain text. Falls back after the
@@ -505,6 +507,15 @@ function parseFloatOverride(
 }
 
 /**
+ * Parse `VP_BASE_URL` — a single base URL string for the active provider.
+ */
+function parseBaseUrlOverride(value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	if (!value) return undefined;
+	return value;
+}
+
+/**
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
  */
@@ -536,6 +547,7 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 		"pHashSimilarityThreshold",
 		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
 	);
+	assignIfDefined(overrides, "baseUrl", parseBaseUrlOverride(env.VP_BASE_URL));
 
 	return overrides;
 }
@@ -549,6 +561,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 	maxBatch: boolean;
 	cacheSize: boolean;
 	cacheMaxAgeDays: boolean;
+	baseUrl: boolean;
 } {
 	return {
 		mode: Boolean(env.VP_MODE),
@@ -559,6 +572,7 @@ export function envFlags(env: NodeJS.ProcessEnv = process.env): {
 		maxBatch: env.VP_MAX_BATCH !== undefined,
 		cacheSize: env.VP_CACHE_SIZE !== undefined,
 		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
+		baseUrl: env.VP_BASE_URL !== undefined,
 	};
 }
 
@@ -637,8 +651,7 @@ function fallbackGroundingModels(
 }
 
 function fallbackBaseUrl(value: unknown): string {
-	if (typeof value === "string" && value) return value;
-	return DEFAULT_CONFIG.baseUrl;
+	return typeof value === "string" ? value : DEFAULT_CONFIG.baseUrl;
 }
 
 export function sanitize(config: VisionConfig): VisionConfig {
@@ -808,6 +821,308 @@ function mimeTypeForExt(filePath: string): string | undefined {
 	return EXT_TO_MIME[extname(filePath).toLowerCase()];
 }
 
+async function sniffMimeType(content: Buffer): Promise<string | undefined> {
+	try {
+		const m = await sharp(content).metadata();
+		if (m.mediaType && /^image\//.test(m.mediaType)) return m.mediaType;
+	} catch {
+		// Not an image or not parseable — fall through
+	}
+	return undefined;
+}
+
+/**
+ * Returns true if the given IPv4/IPv6 address is in a range that must not be
+ * fetched from a CLI tool: loopback, link-local, private, carrier-grade NAT,
+ * unique-local IPv6, unspecified, IPv4-mapped IPv6 (::ffff:a.b.c.d), NAT64
+ * translation addresses (64:ff9b::/96), or the metadata service
+ * (169.254.169.254). Accepts bracketed IPv6 literals.
+ *
+ * @tags security, ssrf, net
+ */
+export function isRestrictedAddress(ip: string): boolean {
+	// Strip brackets from IPv6 literals (e.g., [::1], [fe80::1]).
+	let normalizedIp = ip;
+	if (normalizedIp.startsWith("[") && normalizedIp.endsWith("]")) {
+		normalizedIp = normalizedIp.slice(1, -1);
+	}
+	normalizedIp = normalizedIp.toLowerCase();
+
+	// IPv6 special forms.
+	if (isIPv6(normalizedIp)) {
+		const groups = expandIpv6Groups(normalizedIp);
+		if (!groups) return true; // malformed → treat as unsafe
+		if (groups.every((g) => g === 0)) return true; // unspecified ::
+		if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) return true; // loopback ::1
+		const lead = groups[0];
+		// Link-local fe80::/10 (fe80-febf) and deprecated site-local fec0::/10
+		// (fec0-feff).
+		if (lead >= 0xfe80 && lead <= 0xfeff) return true;
+		if ((lead & 0xfe00) === 0xfc00) return true; // unique-local fc00::/7
+		if ((lead & 0xff00) === 0xff00) return true; // multicast ff00::/8 (e.g. ff02::1 all-nodes)
+		// IPv4-mapped (::ffff:a.b.c.d) and the deprecated IPv4-compatible
+		// (::a.b.c.d) forms: evaluate the embedded IPv4 against the IPv4
+		// restrictions. Handles both the hex form produced by URL
+		// canonicalization (::ffff:7f00:1, ::7f00:1) and the RFC-5952 dotted
+		// form returned by DNS resolution (::ffff:127.0.0.1).
+		if (groups.slice(0, 5).every((g) => g === 0) && (groups[5] === 0 || groups[5] === 0xffff)) {
+			const hi = groups[6];
+			const lo = groups[7];
+			const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
+			// The IPv4-compatible form already has an all-zero head, so its
+			// embedded tail must skip the "this network" rule that would
+			// otherwise flag every such address (e.g. ::10, ::1:1).
+			const restricted =
+				groups[5] === 0 ? isRestrictedRoutableIpv4(octets) : isRestrictedIpv4(octets.join("."));
+			if (restricted) return true;
+		}
+		// NAT64 well-known translation prefix (64:ff9b::/96): evaluate the
+		// embedded IPv4 against the IPv4 restrictions before a CLAT/NAT64
+		// gateway translates it.
+		if (lead === 0x0064 && groups[1] === 0xff9b) {
+			const hi = groups[6];
+			const lo = groups[7];
+			const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
+			if (isRestrictedIpv4(octets.join("."))) return true;
+		}
+		return false;
+	}
+
+	if (isIPv4(normalizedIp)) return isRestrictedIpv4(normalizedIp);
+	return false;
+}
+
+/**
+ * Expand an IPv6 address into its eight 16-bit groups. Accepts compressed
+ * (`::`) notation and a trailing dotted-quad tail (e.g. `::ffff:127.0.0.1`).
+ * Returns null if the address cannot be parsed into exactly eight groups.
+ */
+function expandIpv6Groups(ip: string): number[] | null {
+	const halves = ip.split("::");
+	if (halves.length > 2) return null;
+	const left = halves[0] === "" ? [] : halves[0].split(":");
+	const right = halves.length === 2 ? (halves[1] === "" ? [] : halves[1].split(":")) : [];
+	// A trailing dotted-quad counts as two 16-bit groups.
+	let dotted: [number, number] | null = null;
+	const lastList = right.length > 0 ? right : left;
+	if (lastList.length > 0 && lastList[lastList.length - 1].includes(".")) {
+		const octets = (lastList.pop() as string).split(".");
+		if (octets.length !== 4) return null;
+		const nums = octets.map((p) => (/^\d{1,3}$/.test(p) ? Number.parseInt(p, 10) : -1));
+		if (nums.some((n) => n < 0 || n > 255)) return null;
+		dotted = [((nums[0] << 8) | nums[1]) >>> 0, ((nums[2] << 8) | nums[3]) >>> 0];
+	}
+	const fill = 8 - left.length - right.length - (dotted ? 2 : 0);
+	if (halves.length === 2 ? fill < 0 : fill !== 0) return null;
+	const groups: number[] = [];
+	for (const g of [...left, ...Array(Math.max(fill, 0)).fill("0"), ...right]) {
+		if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+		groups.push(Number.parseInt(g, 16));
+	}
+	if (dotted) groups.push(dotted[0], dotted[1]);
+	return groups.length === 8 ? groups : null;
+}
+
+/** Reject restricted IPv4 ranges for dotted-quad literals. */
+function isRestrictedIpv4(ip: string): boolean {
+	const parts = ip.split(".").map((p) => Number.parseInt(p, 10));
+	if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+		return true; // malformed → treat as unsafe
+	}
+	if (ip.startsWith("0.")) return true; // "this" network / unspecified
+	return isRestrictedRoutableIpv4(parts);
+}
+
+/** Reject routable restricted IPv4 ranges: loopback, private, CGNAT, link-local. */
+function isRestrictedRoutableIpv4(parts: number[]): boolean {
+	if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+		return true; // malformed → treat as unsafe
+	}
+	const ip = parts.join(".");
+	if (ip.startsWith("127.")) return true; // loopback
+	if (ip.startsWith("10.")) return true; // RFC1918 private
+	if (ip.startsWith("192.168.")) return true; // RFC1918 private
+	if (ip.startsWith("169.254.")) return true; // link-local + cloud metadata
+	if (ip.startsWith("100.") && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
+	if (ip.startsWith("172.") && parts[1] >= 16 && parts[1] <= 31) return true; // RFC1918 private
+	return false;
+}
+
+/**
+ * Rejects URLs whose host resolves to a restricted address (loopback, link-local,
+ * private, metadata). An empty host or non-IP host that resolves to a restricted
+ * address is also rejected. This prevents the URL-download path from being used
+ * as an SSRF pivot to internal services.
+ */
+async function isSafeUrl(str: string): Promise<boolean> {
+	if (!isUrl(str)) return false;
+	const u = new URL(str);
+	const host = u.hostname;
+	if (!host) return false;
+
+	// Handle IPv6 literals with brackets (e.g., [::1], [2001:db8::1]).
+	let normalizedHost = host;
+	if (host.startsWith("[") && host.endsWith("]")) {
+		normalizedHost = host.slice(1, -1);
+	}
+
+	// Literal IP in the URL — check directly.
+	if (isIPv4(normalizedHost) || isIPv6(normalizedHost)) {
+		return !isRestrictedAddress(normalizedHost);
+	}
+
+	// Hostname — resolve and reject if any address is restricted.
+	try {
+		const records = await lookup(host, { all: true });
+		if (records.length === 0) return false;
+		return !records.some((r) => isRestrictedAddress(r.address));
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Download an image from a URL with SSRF protection, redirect limits, size caps,
+ * and content-type/sniffing MIME resolution.
+ *
+ * Redirects are followed manually (redirect: "manual") so each hop is re-validated
+ * against the SSRF allow-list. Returns null if the host is restricted, any hop
+ * fails safety, the response is non-OK, the body exceeds the size limit, or the
+ * resolved MIME type is not in the supported image allow-list.
+ */
+async function downloadImageFromUrl(
+	url: string,
+	maxRedirects = 3,
+): Promise<{ content: Buffer; mimeType: string; filename: string } | null> {
+	let currentUrl = url;
+	for (let redirect = 0; redirect <= maxRedirects; redirect++) {
+		if (!(await isSafeUrl(currentUrl))) return null;
+		try {
+			const controller = new AbortController();
+			// Keep the timeout armed until the body is fully consumed so a slow or
+			// stalled download cannot hang the CLI indefinitely.
+			const timeout = setTimeout(() => controller.abort(), downloadTimeoutMs());
+
+			try {
+				const response = await fetch(currentUrl, {
+					redirect: "manual",
+					signal: controller.signal,
+					headers: {
+						"User-Agent": "vision-proxy/0.1.0",
+					},
+				});
+
+				// Handle manual redirects by re-validating each hop.
+				if (response.status >= 300 && response.status < 400) {
+					// Release the connection before following the next hop so sockets
+					// are not held open across redirects.
+					await response.body?.cancel().catch(() => {});
+					const location = response.headers.get("location");
+					if (!location) return null;
+					try {
+						currentUrl = new URL(location, currentUrl).toString();
+					} catch {
+						return null;
+					}
+					continue;
+				}
+
+				if (!response.ok) {
+					// Consume/cancel the error body so the connection is not leaked.
+					await response.body?.cancel().catch(() => {});
+					return null;
+				}
+
+				// Check content-length if available
+				const contentLength = response.headers.get("content-length");
+				const maxBytes = maxImageFileBytes();
+				if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+					// Release the connection so a rejected download does not leak a socket.
+					await response.body?.cancel().catch(() => {});
+					return null;
+				}
+
+				// Stream with size limit
+				const chunks: Uint8Array[] = [];
+				let totalBytes = 0;
+
+				if (!response.body) {
+					return null;
+				}
+
+				const reader = response.body.getReader();
+				let oversize = false;
+				try {
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+
+						totalBytes += value.length;
+						if (totalBytes > maxBytes) {
+							oversize = true;
+							return null;
+						}
+						chunks.push(value);
+					}
+				} finally {
+					// Always release the underlying socket, even on oversize abort.
+					if (oversize) {
+						await reader.cancel().catch(() => {});
+					}
+				}
+
+				const content = Buffer.concat(chunks);
+
+				// Determine mime type from content-type header or URL
+				let mimeType = response.headers.get("content-type") || "";
+				mimeType = mimeType.split(";")[0].trim().toLowerCase();
+
+				if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+					// Try to guess from URL extension
+					const urlPath = new URL(currentUrl).pathname;
+					mimeType = mimeTypeForExt(urlPath) || "";
+				}
+
+				if (!mimeType || !Object.values(EXT_TO_MIME).includes(mimeType)) {
+					// Default to sniffing, but only accept formats in the allow-list.
+					// sharp reports mediaType for SVG as "image/svg+xml", which is NOT a
+					// supported input format and must not slip through as "an image".
+					const detected = await sniffMimeType(content);
+					if (!detected || !Object.values(EXT_TO_MIME).includes(detected)) return null;
+					mimeType = detected;
+				}
+
+				// Extract filename from URL
+				const urlPath = new URL(currentUrl).pathname;
+				const filename = basename(urlPath) || "download";
+
+				return { content, mimeType, filename };
+			} finally {
+				clearTimeout(timeout);
+			}
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
+function isUrl(str: string): boolean {
+	try {
+		const u = new URL(str);
+		return u.protocol === "http:" || u.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
+function strictMimeEnabled(): boolean {
+	const raw = process.env.VP_STRICT_MIME;
+	if (raw === undefined) return false;
+	const v = raw.toLowerCase();
+	return TRUE_STRINGS.has(v);
+}
+
 function maxImageFileBytes(): number {
 	const raw = process.env.VP_MAX_IMAGE_BYTES;
 	if (raw) {
@@ -817,19 +1132,30 @@ function maxImageFileBytes(): number {
 	return 10 * 1024 * 1024;
 }
 
+function downloadTimeoutMs(): number {
+	const raw = process.env.VP_DOWNLOAD_TIMEOUT;
+	if (raw) {
+		const n = Number.parseInt(raw, 10);
+		if (Number.isFinite(n) && n > 0) return n;
+	}
+	return 30_000;
+}
+
 export type ReadImageReason =
 	| "not-an-image"
 	| "denied"
 	| "not-found"
 	| "unreadable"
 	| "empty"
-	| "too-large";
+	| "too-large"
+	| "mime-mismatch";
 
 export interface ReadImageResult {
 	image: ImageContent | null;
 	reason?: ReadImageReason;
 	bytes?: number;
 	filename?: string;
+	detectedMimeType?: string;
 }
 
 function isLocalAbsolutePath(resolved: string): boolean {
@@ -905,9 +1231,60 @@ async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 }
 
 export async function readImageFileWithReason(rawPath: string): Promise<ReadImageResult> {
+	// Handle URLs. Split URL detection from SSRF safety so a blocked host
+	// returns reason "denied" instead of falling through to local-path handling
+	// (which would misreport it as "not-found").
+	if (isUrl(rawPath)) {
+		if (!(await isSafeUrl(rawPath))) {
+			return { image: null, reason: "denied" };
+		}
+		const downloaded = await downloadImageFromUrl(rawPath);
+		if (!downloaded) {
+			return { image: null, reason: "unreadable" };
+		}
+
+		let { content, mimeType, filename } = downloaded;
+
+		// Enforce the same size bounds as the local-path branch (e.g. reject an
+		// empty body served with an allow-listed Content-Type).
+		const sizeReason = imageSizeReason(content);
+		if (sizeReason) {
+			return { image: null, reason: sizeReason, bytes: content.length, filename };
+		}
+
+		// Content sniffing on downloaded content
+		const detectedMimeType = await sniffMimeType(content);
+		if (detectedMimeType && detectedMimeType !== mimeType) {
+			// If the sniffed format is not a supported image input (e.g. an SVG
+			// body served with a spoofed image/png Content-Type), reject it
+			// regardless of strict mode. The allow-list must hold for the final
+			// type; only relabel between two *supported* image formats.
+			if (!Object.values(EXT_TO_MIME).includes(detectedMimeType)) {
+				return { image: null, reason: "unreadable" };
+			}
+			if (strictMimeEnabled()) {
+				return {
+					image: null,
+					reason: "mime-mismatch",
+					bytes: content.length,
+					filename,
+				};
+			}
+			mimeType = detectedMimeType;
+		}
+
+		return {
+			image: { type: "image", data: content.toString("base64"), mimeType },
+			bytes: content.length,
+			filename,
+			detectedMimeType,
+		};
+	}
+
+	// Local file path handling
 	const filePath = cleanFilePath(rawPath);
 
-	const mimeType = mimeTypeForExt(filePath);
+	let mimeType = mimeTypeForExt(filePath);
 	if (!mimeType) return { image: null, reason: "not-an-image" };
 
 	try {
@@ -931,21 +1308,40 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 	}
 
 	const content = bytesResult.content;
+
+	// Content-sniff the actual format via sharp to detect extension/mime mismatches.
+	const detectedMimeType = await sniffMimeType(content);
+	if (detectedMimeType && detectedMimeType !== mimeType) {
+		// A sniffed type outside the supported allow-list is rejected in both
+		// strict and non-strict modes (e.g. SVG content in a .png file).
+		if (!Object.values(EXT_TO_MIME).includes(detectedMimeType)) {
+			return { image: null, reason: "unreadable" };
+		}
+		if (strictMimeEnabled()) {
+			return { image: null, reason: "mime-mismatch" };
+		}
+		// In non-strict mode, prefer the content-detected type but still return.
+		mimeType = detectedMimeType;
+	}
+
 	return {
 		image: { type: "image", data: content.toString("base64"), mimeType },
 		bytes: content.length,
 		filename: basename(filePath),
+		detectedMimeType,
 	};
 }
 
 const READ_REASON_MESSAGES: Record<ReadImageReason, string> = {
 	denied:
-		"path is not a local absolute path (e.g. a network share or a Windows drive with VP_ALLOW_DRIVES=0)",
+		"access denied: not a local absolute path (e.g. a network share or a Windows drive with VP_ALLOW_DRIVES=0), or the URL host is in a restricted/internal range (SSRF protection)",
 	unreadable: "could not read file",
 	empty: "file is empty",
 	"not-an-image": "unsupported extension",
 	"not-found": "file not found",
 	"too-large": "",
+	"mime-mismatch":
+		"file extension does not match actual image content (set VP_STRICT_MIME=1 to reject)",
 };
 
 export function describeReadReason(reason: ReadImageReason, bytes?: number): string {
@@ -1303,23 +1699,31 @@ function isOversized(width: number, height: number): boolean {
 	return width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION;
 }
 
-async function safeCropImage(
-	imageBytes: Buffer,
-	crop: ResolvedCrop,
-): Promise<ImageScriptImage | null> {
+async function safeCropImage(imageBytes: Buffer, crop: ResolvedCrop): Promise<Buffer | null> {
 	const dims = extractDimensions(imageBytes);
 	if (dims && isOversized(dims.width, dims.height)) return null;
-
-	const { Image } = await import("imagescript");
-	const img = await Image.decode(new Uint8Array(imageBytes));
-	if (isOversized(img.width, img.height)) return null;
-
-	return img.crop(crop.x, crop.y, crop.width, crop.height);
+	try {
+		const { width, height } = await sharp(imageBytes).metadata();
+		if (width === undefined || height === undefined || isOversized(width, height)) return null;
+		const buf = await sharp(imageBytes)
+			.extract({
+				left: crop.x,
+				top: crop.y,
+				width: crop.width,
+				height: crop.height,
+			})
+			.toBuffer();
+		return buf;
+	} catch {
+		return null;
+	}
 }
 
-async function encodeCroppedImage(cropped: ImageScriptImage, mimeType?: string): Promise<Buffer> {
-	const encoded = mimeType === "image/png" ? await cropped.encode(1) : await cropped.encodeJPEG(90);
-	return Buffer.from(encoded);
+async function encodeCroppedImage(cropped: Buffer, mimeType?: string): Promise<Buffer> {
+	if (mimeType === "image/png") {
+		return sharp(cropped).png().toBuffer();
+	}
+	return sharp(cropped).jpeg({ quality: 90 }).toBuffer();
 }
 
 export async function cropImage(

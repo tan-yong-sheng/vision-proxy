@@ -31,7 +31,7 @@ npm link
 
 Updating depends on how you installed `vp`:
 
-- **curl installer**: `vp update` (or `vp update --check` to preview, `vp update --version <tag>` to pin, `vp update --force` to reinstall).
+- **curl installer**: `vp update` (or `vp update --check` to preview, `vp update --version <tag>` to pin, `vp update --force` to reinstall, `vp update --beta` for the latest pre-release).
 - **Homebrew**: `brew upgrade vision-proxy`.
 - **npm**: `npm install -g vision-proxy`.
 - **Source build**: pull latest changes and run `npm run build`.

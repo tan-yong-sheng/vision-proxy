@@ -38,6 +38,7 @@ How you update depends on how you installed vision-proxy:
   - `vp update --check` (`-c`) reports whether an update is available without modifying anything.
   - `vp update --version <tag>` installs a specific release (e.g. `vp update --version v0.1.0`).
   - `vp update --force` (`-f`) reinstalls even when already on the latest.
+  - `vp update --beta` installs the latest pre-release instead of the latest stable (combines with `--check` and `--force`).
 - **Homebrew**: `brew upgrade vision-proxy`.
 - **npm**: `npm install -g vision-proxy`.
 - **Source build**: pull latest changes and run `npm run build`.

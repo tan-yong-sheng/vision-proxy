@@ -44,6 +44,8 @@ export interface UpdateOptions {
 	version?: string;
 	/** `--force` / `-f`: reinstall even when already at the latest. */
 	force?: boolean;
+	/** `--beta`: install the latest pre-release instead of the latest stable. */
+	beta?: boolean;
 	/** Resolved realpath of the running CLI binary. Defaults to realpath(argv[1]). */
 	binPath?: string;
 	/** Override the install script URL (used in tests). */
@@ -105,13 +107,18 @@ async function defaultProbe(url: string): Promise<string | null> {
 	return decodeURIComponent(tag).replace(/\/$/, "");
 }
 
-/** Resolve the latest release tag from the GitHub `/releases/latest` redirect. */
-export async function fetchLatestVersion(
-	repo = DEFAULT_REPO,
-	probe: (url: string) => Promise<string | null> = defaultProbe,
+/**
+ * Resolve a release tag by probing a GitHub release URL with retries.
+ *
+ * Shared by the stable and pre-release resolvers so the retry/backoff and error
+ * shaping live in exactly one place.
+ */
+async function resolveReleaseTag(
+	url: string,
+	probe: (url: string) => Promise<string | null>,
+	context: string,
 	attempts = 3,
 ): Promise<string> {
-	const url = `https://github.com/${repo}/releases/latest`;
 	let lastErr: unknown;
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		try {
@@ -122,9 +129,49 @@ export async function fetchLatestVersion(
 		}
 		if (attempt < attempts) await new Promise((r) => setTimeout(r, 2000));
 	}
-	const detail =
-		lastErr instanceof Error ? lastErr.message : String(lastErr ?? "no redirect header");
-	throw new UpdateError(`could not resolve latest release from ${url} (${detail})`);
+	const detail = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "no response");
+	throw new UpdateError(`could not resolve ${context} from ${url} (${detail})`);
+}
+
+/** Resolve the latest release tag from the GitHub `/releases/latest` redirect. */
+export async function fetchLatestVersion(
+	repo = DEFAULT_REPO,
+	probe: (url: string) => Promise<string | null> = defaultProbe,
+	attempts = 3,
+): Promise<string> {
+	const url = `https://github.com/${repo}/releases/latest`;
+	return resolveReleaseTag(url, probe, "latest release", attempts);
+}
+
+/**
+ * Resolve the latest pre-release tag from the GitHub pre-release Atom feed.
+ *
+ * `/releases/latest` excludes pre-releases by design, so beta updates read the
+ * `prereleases.atom` feed (newest entry first) instead of hitting the rate
+ * limited GitHub API. The default probe returns the first entry's tag.
+ */
+export async function fetchLatestPrerelease(
+	repo = DEFAULT_REPO,
+	probe: (url: string) => Promise<string | null> = defaultPrereleaseProbe,
+	attempts = 3,
+): Promise<string> {
+	const url = `https://github.com/${repo}/releases/prereleases.atom`;
+	return resolveReleaseTag(url, probe, "latest pre-release", attempts);
+}
+
+/** Probe the GitHub pre-release Atom feed and return the newest entry's tag. */
+async function defaultPrereleaseProbe(url: string): Promise<string | null> {
+	const res = await fetch(url, {
+		redirect: "manual",
+		method: "GET",
+		signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+	});
+	if (!res.ok) return null;
+	const xml = await res.text();
+	// Each <entry> is ordered newest-first; the tag is the <title>.
+	const title = xml.match(/<entry>[\s\S]*?<title>([^<]+)<\/title>/);
+	if (!title) return null;
+	return title[1]!.trim();
 }
 
 /** Validate a release tag to keep it safe inside a shell pipeline. */
@@ -187,6 +234,16 @@ export async function runUpdate(opts: UpdateOptions = {}): Promise<UpdateResult>
 	let latest: string;
 	if (targetVersion) {
 		latest = targetVersion;
+	} else if (opts.beta) {
+		try {
+			latest = await fetchLatestPrerelease(repo, opts.httpProbe);
+		} catch (e) {
+			return {
+				ok: false,
+				message: `update failed: ${e instanceof Error ? e.message : String(e)}`,
+				code: 1,
+			};
+		}
 	} else {
 		try {
 			latest = await fetchLatestVersion(repo, opts.httpProbe);
@@ -200,6 +257,7 @@ export async function runUpdate(opts: UpdateOptions = {}): Promise<UpdateResult>
 	}
 
 	const upToDate = normalizeVersion(latest) === normalizeVersion(currentVersion);
+	const channel = opts.beta ? "pre-release" : "version";
 
 	if (opts.check) {
 		if (upToDate) {
@@ -211,7 +269,7 @@ export async function runUpdate(opts: UpdateOptions = {}): Promise<UpdateResult>
 		}
 		return {
 			ok: true,
-			message: `A new version of vision-proxy is available: ${latest}. Run 'vp update' to upgrade.`,
+			message: `A new ${channel} of vision-proxy is available: ${latest}. Run 'vp update${opts.beta ? " --beta" : ""}' to upgrade.`,
 			code: 0,
 		};
 	}

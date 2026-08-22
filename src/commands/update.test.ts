@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	checkAutoUpdateNotification,
 	detectInstallMethod,
+	fetchLatestPrerelease,
 	fetchLatestVersion,
 	isNewerVersion,
 	isNotifierSuppressed,
@@ -113,6 +114,24 @@ describe("fetchLatestVersion", () => {
 		};
 		assert.equal(await fetchLatestVersion("tan-yong-sheng/vision-proxy", probe), "v1.0.0");
 		assert.equal(calls, 2);
+	});
+});
+
+describe("fetchLatestPrerelease", () => {
+	it("extracts the newest entry title from the prerelease feed", async () => {
+		const probe = async (url: string) => {
+			assert.match(url, /\/releases\/prereleases\.atom$/);
+			return "v0.3.0-rc.1";
+		};
+		assert.equal(await fetchLatestPrerelease("tan-yong-sheng/vision-proxy", probe), "v0.3.0-rc.1");
+	});
+
+	it("throws after exhausting retries with no feed entry", async () => {
+		const probe = async () => null;
+		await assert.rejects(
+			() => fetchLatestPrerelease("tan-yong-sheng/vision-proxy", probe),
+			/resolve latest pre-release/,
+		);
 	});
 });
 
@@ -273,6 +292,62 @@ describe("runUpdate - curl install", () => {
 		});
 		assert.equal(r.ok, false);
 		assert.match(r.message, /update failed/);
+	});
+
+	it("--beta installs the latest pre-release", async () => {
+		const probe = async () => "v0.3.0-rc.1";
+		let ran: string[] | null = null;
+		const r = await runUpdate({
+			binPath: curlBin,
+			currentVersion: "0.1.0",
+			beta: true,
+			httpProbe: probe,
+			runner: async (args) => {
+				ran = args;
+				return 0;
+			},
+		});
+		assert.equal(r.ok, true);
+		assert.match(r.message, /updated to v0.3.0-rc.1/);
+		assert.ok(ran !== null);
+		assert.equal(ran?.[ran.length - 1], "v0.3.0-rc.1");
+	});
+
+	it("--beta --check reports the pre-release without installing", async () => {
+		const probe = async () => "v0.3.0-rc.1";
+		let installed = false;
+		const r = await runUpdate({
+			binPath: curlBin,
+			currentVersion: "0.1.0",
+			beta: true,
+			check: true,
+			httpProbe: probe,
+			runner: async () => {
+				installed = true;
+				return 0;
+			},
+		});
+		assert.equal(installed, false);
+		assert.match(r.message, /A new pre-release of vision-proxy is available: v0.3.0-rc.1/);
+		assert.match(r.message, /vp update --beta/);
+	});
+
+	it("--beta --force reinstalls even when already on the pre-release", async () => {
+		const probe = async () => "v0.3.0-rc.1";
+		let ran = false;
+		const r = await runUpdate({
+			binPath: curlBin,
+			currentVersion: "0.3.0-rc.1",
+			beta: true,
+			force: true,
+			httpProbe: probe,
+			runner: async () => {
+				ran = true;
+				return 0;
+			},
+		});
+		assert.equal(ran, true);
+		assert.match(r.message, /updated to v0.3.0-rc.1/);
 	});
 });
 

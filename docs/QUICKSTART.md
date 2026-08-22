@@ -4,11 +4,20 @@ Get from install to your first image description.
 
 ## 1. Install
 
+### Homebrew (macOS / Linux)
+
 ```bash
-npm install -g vision-proxy
+brew tap tan-yong-sheng/vision-proxy https://github.com/tan-yong-sheng/vision-proxy
+brew install tan-yong-sheng/vision-proxy/vision-proxy
 ```
 
-Or build from source:
+### curl installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh -s -- --add-to-path
+```
+
+### From source
 
 ```bash
 git clone https://github.com/tan-yong-sheng/vision-proxy.git

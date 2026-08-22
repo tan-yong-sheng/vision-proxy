@@ -1,6 +1,6 @@
 {
 	"name": "vision-proxy",
-	"version": "0.1.0-rc.2",
+	"version": "0.1.1",
 	"description": "Standalone CLI that routes images to a vision model and prints a fenced, UNTRUSTED description. Drives agent UserPromptSubmit hooks so any coding agent can get image context.",
 	"keywords": [
 		"vision",

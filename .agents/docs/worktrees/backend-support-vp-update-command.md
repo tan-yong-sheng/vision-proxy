@@ -47,8 +47,8 @@ Add background auto-update notification check (via `~/.vision-proxy/update-check
 ## Status
 
 - [x] Branch created from `main`
-- [ ] Implementation complete
-- [ ] Local checks pass (`npm test`, `npm run typecheck`, `biome check`, `fallow audit`)
+- [x] Implementation complete
+- [x] Local checks pass (`npm test`, `npm run typecheck`, `biome check`, `fallow audit`)
 - [ ] Merged into `main`
 - [ ] `/review-gate` complete
 

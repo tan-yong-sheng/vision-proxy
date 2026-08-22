@@ -1,5 +1,5 @@
 /**
- * `vp update` — self-update for curl-installed CLI binaries, with package
+ * `vp update` - self-update for curl-installed CLI binaries, with package
  * manager guidance for Homebrew, npm, and source builds.
  *
  * Install method is detected from the realpath of the running binary:

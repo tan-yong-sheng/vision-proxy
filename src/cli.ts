@@ -10,6 +10,7 @@ import { basename } from "node:path";
  *   provider list | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]
  *   integration install | show | list | status | uninstall <agent>
+ *   update [--check] [--version <tag>] [--force]
  *   version | help
  */
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
@@ -24,6 +25,7 @@ import {
 	providerListKeys,
 	providerStoreKey,
 } from "./commands/provider.ts";
+import { runUpdate } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
 import { isKnownProvider } from "./provider.ts";
@@ -70,6 +72,7 @@ const VALUE_FLAGS = new Set([
 	"apiKey",
 	"older",
 	"crop",
+	"version",
 ]);
 
 export function parseFlags(args: string[]): FlagParse {
@@ -140,6 +143,7 @@ Usage:
   vp config <init|get|set|validate> ...
   vp provider <list|check|store-key|delete-key|list-keys> ...
   vp cache <status|clear|prune> ...
+  vp update [--check] [--version <tag>] [--force]
 
 analyze options:
   --format <name>    plain | qwen_pixels | molmo_points | deepseek_bbox | internvl_pixels | gemini_normalized_1000
@@ -171,6 +175,11 @@ cache options:
   status                     hit rate + size
   clear                      drop all entries
   prune [--older <days>]     evict entries older than N days (default 30)
+
+update options:
+  --check, -c                check for updates without modifying files
+  --version <tag>            install a specific release tag (e.g. v0.1.0)
+  --force, -f                reinstall even when already up to date
 
 integration options:
   install <agent>            install vision-proxy for pi | claude-code | codex
@@ -508,6 +517,27 @@ output (fail-open), so the agent proceeds unchanged.
 
 Options:
   -h, --help          show this help`,
+
+	update: `vp update [--check] [--version <tag>] [--force]
+
+Self-update vision-proxy, or print package-manager guidance.
+
+Usage:
+  vp update                        check for a newer release and install it
+  vp update --check (-c)           report only; never modify files
+  vp update --version <tag>        install a specific release tag (e.g. v0.1.0)
+  vp update --force (-f)           reinstall even when already up to date
+
+Options:
+  --check, -c         check for updates without modifying files
+  --version <tag>     install a specific release tag (e.g. v0.1.0)
+  --force, -f         reinstall even when already up to date
+  -h, --help          show this help
+
+Notes:
+  The curl installer (~/.local/share/vision-proxy) is updated in place.
+  Homebrew, npm, and source builds are detected and the appropriate update
+  command is printed instead of performing an install.`,
 };
 
 function print(msg: string): void {
@@ -725,6 +755,21 @@ export async function main(argv: string[]): Promise<void> {
 				return;
 			}
 			runHook(readEvent());
+			return;
+		}
+
+		case "update": {
+			const { flags } = parseFlags(rest);
+			if (wantsHelp(flags, rest)) {
+				print(renderHelp(["update"]));
+				return;
+			}
+			const result = await runUpdate({
+				check: bool(flags, "check", false) || bool(flags, "c", false),
+				version: str(flags, "version"),
+				force: bool(flags, "force", false) || bool(flags, "f", false),
+			});
+			handle(result);
 			return;
 		}
 

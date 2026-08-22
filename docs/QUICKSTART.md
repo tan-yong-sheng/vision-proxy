@@ -27,7 +27,16 @@ pnpm run build
 npm link
 ```
 
-## 2. Set a provider
+## 2. Update
+
+Updating depends on how you installed `vp`:
+
+- **curl installer**: `vp update` (or `vp update --check` to preview, `vp update --version <tag>` to pin, `vp update --force` to reinstall).
+- **Homebrew**: `brew upgrade vision-proxy`.
+- **npm**: `npm install -g vision-proxy`.
+- **Source build**: pull latest changes and run `npm run build`.
+
+## 3. Set a provider
 
 Pick one provider and set its API key.
 
@@ -55,13 +64,13 @@ vp config set provider google
 vp config set modelId gemini-2.5-pro
 ```
 
-## 3. Analyze an image
+## 4. Analyze an image
 
 ```bash
 vp analyze screenshot.png
 ```
 
-## 4. (Optional) Add an agent integration
+## 5. (Optional) Add an agent integration
 
 ```bash
 vp integration install claude-code

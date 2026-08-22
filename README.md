@@ -29,6 +29,21 @@ curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/sc
 Restart your shell or source your profile after installation so `vp` is available on your `PATH`.
 To install a specific release or pre-release, pass `--version <tag>` (for example `--version v0.1.0-rc.1`).
 
+## Updating
+
+How you update depends on how you installed vision-proxy:
+
+- **curl installer** (`~/.local/share/vision-proxy`): `vp` self-updates in place.
+  - `vp update` checks for a newer release and installs it.
+  - `vp update --check` (`-c`) reports whether an update is available without modifying anything.
+  - `vp update --version <tag>` installs a specific release (e.g. `vp update --version v0.1.0`).
+  - `vp update --force` (`-f`) reinstalls even when already on the latest.
+- **Homebrew**: `brew upgrade vision-proxy`.
+- **npm**: `npm install -g vision-proxy`.
+- **Source build**: pull latest changes and run `npm run build`.
+
+`vp update` detects your install method automatically and prints the right command if it cannot self-update.
+
 ## Quick start
 
 1. Provide an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`):
@@ -76,6 +91,7 @@ See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for troubleshooting and detai
 | `vp config <cmd>` | Manage configuration (`init`, `get`, `set`, `validate`). |
 | `vp provider <cmd>` | Manage provider auth and keys (`list`, `check`, `store-key`, `delete-key`, `list-keys`). |
 | `vp cache <cmd>` | Manage perceptual-hash description cache (`status`, `clear`, `prune`). |
+| `vp update [--check] [--version <tag>] [--force]` | Self-update (curl install) or print package-manager guidance. |
 
 Run `vp --help` or `vp <command> --help` for detailed flag usage.
 

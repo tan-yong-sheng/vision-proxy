@@ -109,7 +109,24 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_BASE_URL` | `baseUrl` | `VP_BASE_URL=http://localhost:8000/v1` |
 | `VP_DOWNLOAD_TIMEOUT` | - | `VP_DOWNLOAD_TIMEOUT=30000` |
 | `VP_STRICT_MIME` | - | `VP_STRICT_MIME=1` |
+| `VP_NO_UPDATE_NOTIFIER` | - | `VP_NO_UPDATE_NOTIFIER=1` disables the background update check and notice. |
 | `VP_CLAUDE_CONFIG_DIR` | - | `VP_CLAUDE_CONFIG_DIR=/custom/.claude` |
+
+### Update notifier
+
+`vp` keeps the latest known release tag in `~/.vision-proxy/update-check.json` (`{ "checked_at": "<ISO-timestamp>", "latest_version": "<tag>" }`).
+On startup it reads that file locally and prints a one-line notice on stderr when a newer release is cached.
+When the file is missing or older than 24 hours, a detached background process refreshes it, so no command ever waits on the network.
+
+The notice and the background refresh are both skipped when:
+
+- the command is `vp hook`, keeping agent hook stdout and stderr clean
+- `--json` is in effect
+- `CI` is set
+- `VP_NO_UPDATE_NOTIFIER` is set
+- stderr is not a TTY
+
+Deleting `~/.vision-proxy/update-check.json` is safe; it is recreated on the next check.
 
 ### Example
 

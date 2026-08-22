@@ -2,13 +2,31 @@
  * Tests for `vp update`.
  *
  * Covers install-method detection across path shapes, version comparison,
- * GitHub release-header resolution, and the update dispatch / dry-run behavior
- * for each install method (curl, homebrew, npm, source).
+ * GitHub release-header resolution, the update dispatch / dry-run behavior
+ * for each install method (curl, homebrew, npm, source), and the background
+ * update notifier (cache round-trip, TTL, banner, and suppression rules).
  */
 import { strict as assert } from "node:assert";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { detectInstallMethod, fetchLatestVersion, normalizeVersion, runUpdate } from "./update.ts";
+import {
+	checkAutoUpdateNotification,
+	detectInstallMethod,
+	fetchLatestVersion,
+	isNewerVersion,
+	isNotifierSuppressed,
+	isUpdateCacheStale,
+	loadUpdateCache,
+	normalizeVersion,
+	renderUpdateNotice,
+	runBackgroundCheck,
+	runUpdate,
+	saveUpdateCache,
+	UPDATE_CHECK_TTL_MS,
+} from "./update.ts";
 
 describe("detectInstallMethod", () => {
 	let home: string;
@@ -255,5 +273,301 @@ describe("runUpdate - curl install", () => {
 		});
 		assert.equal(r.ok, false);
 		assert.match(r.message, /update failed/);
+	});
+});
+
+describe("update cache", () => {
+	let dir: string;
+
+	beforeEach(() => {
+		dir = mkdtempSync(path.join(os.tmpdir(), "vp-update-cache-"));
+	});
+
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("returns null when the cache file is missing", () => {
+		assert.equal(loadUpdateCache({ cacheDir: dir }), null);
+	});
+
+	it("round-trips checked_at and latest_version", () => {
+		const cache = { checked_at: "2026-08-22T00:00:00.000Z", latest_version: "v0.2.0" };
+		saveUpdateCache(cache, { cacheDir: dir });
+		assert.deepEqual(loadUpdateCache({ cacheDir: dir }), cache);
+	});
+
+	it("writes update-check.json into the cache dir", () => {
+		saveUpdateCache(
+			{ checked_at: "2026-08-22T00:00:00.000Z", latest_version: "v9.9.9" },
+			{
+				cacheDir: dir,
+			},
+		);
+		const raw = JSON.parse(readFileSync(path.join(dir, "update-check.json"), "utf8"));
+		assert.equal(raw.latest_version, "v9.9.9");
+	});
+
+	it("returns null for malformed JSON", () => {
+		writeFileSync(path.join(dir, "update-check.json"), "{not json");
+		assert.equal(loadUpdateCache({ cacheDir: dir }), null);
+	});
+
+	it("returns null when required fields are missing", () => {
+		writeFileSync(
+			path.join(dir, "update-check.json"),
+			JSON.stringify({ latest_version: "v1.0.0" }),
+		);
+		assert.equal(loadUpdateCache({ cacheDir: dir }), null);
+	});
+});
+
+describe("isUpdateCacheStale", () => {
+	const now = Date.parse("2026-08-22T12:00:00.000Z");
+
+	it("treats a missing cache as stale", () => {
+		assert.equal(isUpdateCacheStale(null, now), true);
+	});
+
+	it("keeps a cache written one hour ago fresh", () => {
+		const checked = new Date(now - 60 * 60 * 1000).toISOString();
+		assert.equal(isUpdateCacheStale({ checked_at: checked, latest_version: "v1" }, now), false);
+	});
+
+	it("marks a cache older than the 24h TTL as stale", () => {
+		const checked = new Date(now - UPDATE_CHECK_TTL_MS - 1).toISOString();
+		assert.equal(isUpdateCacheStale({ checked_at: checked, latest_version: "v1" }, now), true);
+	});
+
+	it("marks a cache exactly at the TTL boundary as stale", () => {
+		const checked = new Date(now - UPDATE_CHECK_TTL_MS).toISOString();
+		assert.equal(isUpdateCacheStale({ checked_at: checked, latest_version: "v1" }, now), true);
+	});
+
+	it("treats an unparseable timestamp as stale", () => {
+		assert.equal(isUpdateCacheStale({ checked_at: "yesterday", latest_version: "v1" }, now), true);
+	});
+});
+
+describe("isNewerVersion", () => {
+	it("detects a newer patch release", () => {
+		assert.equal(isNewerVersion("v0.1.2", "0.1.1"), true);
+	});
+
+	it("returns false for the same version", () => {
+		assert.equal(isNewerVersion("v0.1.1", "0.1.1"), false);
+	});
+
+	it("returns false for an older version", () => {
+		assert.equal(isNewerVersion("v0.1.0", "0.1.1"), false);
+	});
+
+	it("compares numerically, not lexically", () => {
+		assert.equal(isNewerVersion("v0.10.0", "0.9.0"), true);
+		assert.equal(isNewerVersion("v0.9.0", "0.10.0"), false);
+	});
+
+	it("returns false for an unparseable tag", () => {
+		assert.equal(isNewerVersion("nightly", "0.1.1"), false);
+	});
+});
+
+describe("renderUpdateNotice", () => {
+	it("names both versions and the upgrade command", () => {
+		const notice = renderUpdateNotice("v0.1.2", "0.1.1");
+		assert.match(notice, /A new version of vision-proxy is available: v0\.1\.2/);
+		assert.match(notice, /\(current: v0\.1\.1\)/);
+		assert.match(notice, /Run 'vp update' to upgrade\./);
+	});
+
+	it("renders a single line", () => {
+		assert.equal(renderUpdateNotice("v0.1.2", "v0.1.1").includes("\n"), false);
+	});
+});
+
+describe("isNotifierSuppressed", () => {
+	const tty = { env: {} as NodeJS.ProcessEnv, isTTY: true };
+
+	it("allows the notifier on an interactive terminal", () => {
+		assert.equal(isNotifierSuppressed(tty), false);
+	});
+
+	it("suppresses during vp hook", () => {
+		assert.equal(isNotifierSuppressed({ ...tty, command: "hook" }), true);
+	});
+
+	it("suppresses for --json output", () => {
+		assert.equal(isNotifierSuppressed({ ...tty, json: true }), true);
+	});
+
+	it("suppresses under CI", () => {
+		assert.equal(isNotifierSuppressed({ ...tty, env: { CI: "1" } }), true);
+	});
+
+	it("suppresses when VP_NO_UPDATE_NOTIFIER is set", () => {
+		assert.equal(isNotifierSuppressed({ ...tty, env: { VP_NO_UPDATE_NOTIFIER: "1" } }), true);
+	});
+
+	it("suppresses when stderr is not a TTY", () => {
+		assert.equal(isNotifierSuppressed({ ...tty, isTTY: false }), true);
+	});
+});
+
+describe("checkAutoUpdateNotification", () => {
+	let dir: string;
+	let warnings: string[];
+	let spawns: string[][];
+
+	function opts(over: Record<string, unknown> = {}) {
+		return {
+			cacheDir: dir,
+			env: {} as NodeJS.ProcessEnv,
+			isTTY: true,
+			currentVersion: "0.1.1",
+			warn: (m: string) => warnings.push(m),
+			spawner: (_c: string, args: string[]) => spawns.push(args),
+			...over,
+		};
+	}
+
+	beforeEach(() => {
+		dir = mkdtempSync(path.join(os.tmpdir(), "vp-notify-"));
+		warnings = [];
+		spawns = [];
+	});
+
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("warns when the cached release is newer", () => {
+		saveUpdateCache(
+			{ checked_at: new Date().toISOString(), latest_version: "v0.2.0" },
+			{
+				cacheDir: dir,
+			},
+		);
+		checkAutoUpdateNotification(opts());
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0]!, /A new version of vision-proxy is available: v0\.2\.0/);
+	});
+
+	it("stays silent when already on the latest", () => {
+		saveUpdateCache(
+			{ checked_at: new Date().toISOString(), latest_version: "v0.1.1" },
+			{
+				cacheDir: dir,
+			},
+		);
+		checkAutoUpdateNotification(opts());
+		assert.deepEqual(warnings, []);
+	});
+
+	it("does not spawn a refresh while the cache is fresh", () => {
+		saveUpdateCache(
+			{ checked_at: new Date().toISOString(), latest_version: "v0.1.1" },
+			{
+				cacheDir: dir,
+			},
+		);
+		checkAutoUpdateNotification(opts());
+		assert.deepEqual(spawns, []);
+	});
+
+	it("spawns a background check when the cache is missing", () => {
+		checkAutoUpdateNotification(opts());
+		assert.equal(spawns.length, 1);
+		assert.deepEqual(spawns[0]?.slice(-2), ["update", "--background-check"]);
+	});
+
+	it("spawns a background check when the cache is past the TTL", () => {
+		const stale = new Date(Date.now() - UPDATE_CHECK_TTL_MS - 1000).toISOString();
+		saveUpdateCache({ checked_at: stale, latest_version: "v0.1.1" }, { cacheDir: dir });
+		checkAutoUpdateNotification(opts());
+		assert.equal(spawns.length, 1);
+	});
+
+	it("neither warns nor spawns during vp hook", () => {
+		saveUpdateCache(
+			{ checked_at: new Date().toISOString(), latest_version: "v0.2.0" },
+			{
+				cacheDir: dir,
+			},
+		);
+		checkAutoUpdateNotification(opts({ command: "hook" }));
+		assert.deepEqual(warnings, []);
+		assert.deepEqual(spawns, []);
+	});
+
+	it("neither warns nor spawns for --json", () => {
+		saveUpdateCache(
+			{ checked_at: new Date().toISOString(), latest_version: "v0.2.0" },
+			{
+				cacheDir: dir,
+			},
+		);
+		checkAutoUpdateNotification(opts({ json: true }));
+		assert.deepEqual(warnings, []);
+		assert.deepEqual(spawns, []);
+	});
+
+	it("neither warns nor spawns under CI", () => {
+		saveUpdateCache(
+			{ checked_at: new Date().toISOString(), latest_version: "v0.2.0" },
+			{
+				cacheDir: dir,
+			},
+		);
+		checkAutoUpdateNotification(opts({ env: { CI: "1" } }));
+		assert.deepEqual(warnings, []);
+		assert.deepEqual(spawns, []);
+	});
+
+	it("marks the spawned child with VP_NO_UPDATE_NOTIFIER so it cannot recurse", () => {
+		let childEnv: NodeJS.ProcessEnv | undefined;
+		checkAutoUpdateNotification(
+			opts({
+				spawner: (_c: string, _a: string[], env: NodeJS.ProcessEnv) => {
+					childEnv = env;
+				},
+			}),
+		);
+		assert.equal(childEnv?.VP_NO_UPDATE_NOTIFIER, "1");
+	});
+});
+
+describe("runBackgroundCheck", () => {
+	let dir: string;
+
+	beforeEach(() => {
+		dir = mkdtempSync(path.join(os.tmpdir(), "vp-bgcheck-"));
+	});
+
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("writes the resolved tag with a fresh timestamp", async () => {
+		await runBackgroundCheck({ cacheDir: dir, httpProbe: async () => "v0.3.0" });
+		const cache = loadUpdateCache({ cacheDir: dir });
+		assert.equal(cache?.latest_version, "v0.3.0");
+		assert.equal(isUpdateCacheStale(cache), false);
+	});
+
+	it("leaves the previous cache intact when the probe fails", async () => {
+		const prior = { checked_at: "2026-08-01T00:00:00.000Z", latest_version: "v0.1.0" };
+		saveUpdateCache(prior, { cacheDir: dir });
+		await runBackgroundCheck({ cacheDir: dir, httpProbe: async () => null });
+		assert.deepEqual(loadUpdateCache({ cacheDir: dir }), prior);
+	});
+
+	it("never throws when the probe rejects", async () => {
+		await runBackgroundCheck({
+			cacheDir: dir,
+			httpProbe: async () => {
+				throw new Error("offline");
+			},
+		});
+		assert.equal(loadUpdateCache({ cacheDir: dir }), null);
 	});
 });

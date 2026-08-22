@@ -36,32 +36,54 @@ Updating depends on how you installed `vp`:
 - **npm**: `npm install -g vision-proxy`.
 - **Source build**: pull latest changes and run `npm run build`.
 
+`vp` refreshes a cached release check in the background at most once a day and prints a one-line stderr notice when a newer version exists.
+Set `VP_NO_UPDATE_NOTIFIER=1` to disable it; it is already suppressed during `vp hook`, with `--json`, in CI, and on non-interactive streams.
+
 ## 3. Set a provider
 
-Pick one provider and set its API key.
+Configure the provider and its API key in `~/.vision-proxy/config.json` so every invocation, including agent hooks running in isolated subshells, picks them up:
+
+```json
+{
+  "provider": "google",
+  "apiKey": "AIzaSy..."
+}
+```
+
+The same values via the CLI:
+
+```bash
+vp config set provider google
+vp config set apiKey AIzaSy...
+```
+
+`apiKey` is stored as plain text.
+For stronger handling, use `vp provider store-key google` to put the key in your OS keyring, or export the provider env var for a single session.
+
+Per-provider defaults:
+
+### Google
+
+```bash
+vp config set provider google
+vp config set modelId gemini-2.5-pro
+vp config set apiKey AIzaSy...      # or: export GOOGLE_API_KEY="AIzaSy..."
+```
 
 ### OpenAI
 
 ```bash
-export OPENAI_API_KEY="sk-..."
 vp config set provider openai
 vp config set modelId gpt-4o
+vp config set apiKey sk-...         # or: export OPENAI_API_KEY="sk-..."
 ```
 
 ### Anthropic
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
 vp config set provider anthropic
 vp config set modelId claude-sonnet-4-5
-```
-
-### Google
-
-```bash
-export GOOGLE_API_KEY="..."
-vp config set provider google
-vp config set modelId gemini-2.5-pro
+vp config set apiKey sk-ant-...     # or: export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 ## 4. Analyze an image

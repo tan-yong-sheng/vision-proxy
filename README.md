@@ -44,13 +44,30 @@ How you update depends on how you installed vision-proxy:
 
 `vp update` detects your install method automatically and prints the right command if it cannot self-update.
 
+`vp` also checks for new releases in the background (at most once every 24 hours) and prints a one-line notice on stderr when one is available.
+The check never blocks a command, and is skipped during `vp hook`, with `--json`, in CI, and when stderr is not a terminal.
+Set `VP_NO_UPDATE_NOTIFIER=1` to turn it off entirely.
+
 ## Quick start
 
-1. Provide an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`):
+1. Configure a provider and API key in `~/.vision-proxy/config.json`:
+
+```json
+{
+  "provider": "google",
+  "apiKey": "AIzaSy..."
+}
+```
+
+Or set the same values from the CLI:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+vp config set provider google
+vp config set apiKey AIzaSy...
 ```
+
+Because this file is read on every invocation, agents that run `vp hook` in isolated subshells pick the settings up automatically.
+Prefer `vp provider store-key google` to keep the key in your OS keyring instead of plain text, or export `GOOGLE_API_KEY` for a single session.
 
 2. Analyze an image:
 
@@ -58,7 +75,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 vp analyze screenshot.png
 ```
 
-The default model is `anthropic/claude-sonnet-4-5`.
+`provider` accepts `google`, `openai`, or `anthropic`; see [`docs/QUICKSTART.md`](docs/QUICKSTART.md) for per-provider settings.
 
 ## Agent Integrations
 
@@ -110,6 +127,8 @@ vp config set modelId gpt-4o
 # Store API keys securely in the OS keyring
 echo -n "$KEY" | vp provider store-key openai
 ```
+
+Set `VP_NO_UPDATE_NOTIFIER=1` to suppress the background update notice.
 
 See [`docs/SETUP.md`](docs/SETUP.md) for setup guides and [`docs/CONFIG.md`](docs/CONFIG.md) for all config keys and environment variables.
 

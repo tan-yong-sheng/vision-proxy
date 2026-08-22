@@ -12,6 +12,9 @@ import { basename } from "node:path";
  *   integration install | show | list | status | uninstall <agent>
  *   update [--check] [--version <tag>] [--force]
  *   version | help
+ *
+ * Every command except `hook` (and any `--json` invocation) runs the cached
+ * update-notifier check first; see commands/update.ts for the suppression rules.
  */
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
@@ -25,7 +28,7 @@ import {
 	providerListKeys,
 	providerStoreKey,
 } from "./commands/provider.ts";
-import { runUpdate } from "./commands/update.ts";
+import { checkAutoUpdateNotification, runBackgroundCheck, runUpdate } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
 import { isKnownProvider } from "./provider.ts";
@@ -537,7 +540,10 @@ Options:
 Notes:
   The curl installer (~/.local/share/vision-proxy) is updated in place.
   Homebrew, npm, and source builds are detected and the appropriate update
-  command is printed instead of performing an install.`,
+  command is printed instead of performing an install.
+
+  vp also prints a one-line notice on stderr when a cached release check
+  finds a newer version. Set VP_NO_UPDATE_NOTIFIER=1 to disable it.`,
 };
 
 function print(msg: string): void {
@@ -565,6 +571,16 @@ function fail(msg: string, code = 1): void {
 
 export async function main(argv: string[]): Promise<void> {
 	const [command, ...rest] = argv;
+	const env = process.env;
+
+	// Cached, non-blocking check, before any command runs. Suppressed for
+	// `hook`, `--json`, and the notifier's own worker so machine consumers and
+	// agent hook streams stay byte-for-byte clean.
+	const machineReadable = rest.some(
+		(a) => a === "--json" || a.startsWith("--json=") || a === "--background-check",
+	);
+	checkAutoUpdateNotification({ env, command, json: machineReadable });
+
 	if (!command || command === "help" || command === "-h" || command === "--help") {
 		print(HELP);
 		return;
@@ -573,8 +589,6 @@ export async function main(argv: string[]): Promise<void> {
 		print(VERSION);
 		return;
 	}
-
-	const env = process.env;
 
 	switch (command) {
 		case "analyze": {
@@ -762,6 +776,11 @@ export async function main(argv: string[]): Promise<void> {
 			const { flags } = parseFlags(rest);
 			if (wantsHelp(flags, rest)) {
 				print(renderHelp(["update"]));
+				return;
+			}
+			// Internal: refresh the notifier cache. Spawned detached, emits nothing.
+			if (bool(flags, "background-check", false)) {
+				await runBackgroundCheck({ env });
 				return;
 			}
 			const result = await runUpdate({

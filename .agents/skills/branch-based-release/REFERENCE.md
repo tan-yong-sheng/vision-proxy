@@ -58,8 +58,8 @@ Examples:
 
 | `package.json` version | Tag | Pre-release? |
 |---|---|---|
-| `0.1.0` | `v0.1.0` | No |
-| `0.1.0-rc.1` | `v0.1.0-rc.1` | Yes |
+| `0.1.1` | `v0.1.1` | No |
+| `0.1.1-rc.1` | `v0.1.1-rc.1` | Yes |
 | `0.2.0-beta.3` | `v0.2.0-beta.3` | Yes |
 
 ## Branch naming
@@ -68,8 +68,8 @@ Use these prefixes for clarity. The automation does not enforce them.
 
 | Type | Prefix | Example |
 |---|---|---|
-| Stable | `release/` | `release/v0.1.0` |
-| Pre-release | `prerelease/` | `prerelease/v0.1.0-rc.1` |
+| Stable | `release/` | `release/v0.1.1` |
+| Pre-release | `prerelease/` | `prerelease/v0.1.1-rc.1` |
 
 ## Release PR enforcement
 
@@ -86,7 +86,7 @@ A release or pre-release PR must only change the allowed version config files.
 
 ```bash
 # list files changed on the release branch
-git diff --name-only main..release/v0.1.0
+git diff --name-only main..release/v0.1.1
 ```
 
 If the list includes anything outside the allowed files, revert or move it to a feature branch.
@@ -120,3 +120,13 @@ verify-release-pr:
 ```
 
 Replace `Formula/<project>.rb` with the actual formula path, or remove it if the project has no Homebrew formula.
+
+## Release Notes & Changelog Generation
+
+Use GitHub's release notes generation API to preview release notes and populate the PR description:
+
+```bash
+notes=$(gh api "repos/{owner}/{repo}/releases/generate-notes" -f tag_name="v0.1.1" -f previous_tag_name="$latest_tag" --jq .body)
+```
+
+This ensures reviewers see all merged PRs directly in the release PR before merging.

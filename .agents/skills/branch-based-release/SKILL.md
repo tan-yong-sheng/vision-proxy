@@ -10,38 +10,48 @@ Release from the default branch using a branch-based, auto-tagging workflow.
 
 | Branch prefix | Example | Purpose |
 |---|---|---|
-| `release/v*` | `release/v0.1.0` | Stable release. Merging to `main` creates `v0.1.0`, publishes GitHub release, and backfills `Formula/vision-proxy.rb` sha256 values. |
-| `prerelease/v*` | `prerelease/v0.1.0-rc.1` | Pre-release. Merging to `main` creates `v0.1.0-rc.1` as a GitHub pre-release and skips the Homebrew formula update. |
+| `release/v*` | `release/v0.1.1` | Stable release. Merging to `main` creates `v0.1.1`, publishes GitHub release, and backfills `Formula/vision-proxy.rb` sha256 values. |
+| `prerelease/v*` | `prerelease/v0.1.1-rc.1` | Pre-release. Merging to `main` creates `v0.1.1-rc.1` as a GitHub pre-release and skips the Homebrew formula update. |
 
-The branch name is for human clarity only. The real release decision is made from `package.json`:
+The branch name is for human clarity only.
+The real release decision is made from `package.json`:
 
-- A `version` containing `-` (for example `0.1.0-rc.1`) is treated as a pre-release.
-- A plain semver `version` (for example `0.1.0`) is treated as stable.
+- A `version` containing `-` (for example `0.1.1-rc.1`) is treated as a pre-release.
+- A plain semver `version` (for example `0.1.1`) is treated as stable.
 
-## Release PR contents
+## Version Discovery & Semantic Versioning
 
-A release/pre-release PR changes only version config files.
-Examples:
+To avoid version hallucinations or stale local git tag confusion:
 
-- `package.json` - bump `"version"`.
-- `Formula/<project>.rb` - bump `version "..."` for stable releases only.
-- `Cargo.toml`, `pyproject.toml`, or a plain `VERSION` file for other ecosystems.
+1. **Always query the remote release as the source of truth**:
+   Do not rely on local `git tag -l` which may contain stale, unpushed tags.
+   Fetch and prune remote tags:
+   ```bash
+   git fetch origin main --tags --prune
+   ```
+   Query the latest published release tag:
+   ```bash
+   latest_tag=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.0.0")
+   ```
 
-No code, test, or documentation changes belong in a release PR.
+2. **Increment according to Semantic Versioning**:
+   - `patch` (bug fixes, docs, maintenance): `0.1.0` -> `0.1.1`
+   - `minor` (new backwards-compatible features): `0.1.0` -> `0.2.0`
+   - `major` (breaking changes): `0.1.0` -> `1.0.0`
+   - `prerelease` / `rc`: `0.1.0` -> `0.1.1-rc.1` (or `0.1.1-rc.1` -> `0.1.1-rc.2`)
 
-## Enforcement
+## Release PR Contents & Enforcement
 
-A release/pre-release branch must be limited to version config changes.
-Anything else is a release-process violation and should be rejected or moved to a feature branch.
+A release/pre-release PR changes **only version config files**.
 
 ### Allowed files
 
-| Branch type | Allowed changes (example) |
+| Branch type | Allowed changes |
 |---|---|
 | `release/v*` | canonical version file + packaging metadata (e.g. `package.json`, `Formula/<project>.rb`) |
-| `prerelease/v*` | canonical version file only |
+| `prerelease/v*` | canonical version file only (`package.json`) |
 
-The Homebrew formula is skipped for pre-releases because pre-releases are not installable through the default curl installer or Homebrew tap.
+No code, test, or documentation changes belong in a release PR.
 
 ### Validation before committing
 
@@ -51,109 +61,102 @@ After editing version files and before committing, run:
 git diff --name-only
 ```
 
-The output must contain only the allowed files for the branch type. If any other file appears, revert it or move it to a separate feature branch.
+The output must contain only the allowed files for the branch type.
+If any other file appears, revert it or move it to a separate feature branch.
 
-You can also enforce this in CI with a path filter on release PRs. See the workflow setup section below.
+## Automated Workflow (Recommended)
 
-## Workflow
+Use `scripts/release.sh` to automatically compute the next semver, edit version files, validate constraints, generate changelog notes, and open the PR:
+
+```bash
+# Cut a patch release (e.g. 0.1.0 -> 0.1.1)
+./scripts/release.sh patch
+
+# Cut a minor release (e.g. 0.1.0 -> 0.2.0)
+./scripts/release.sh minor
+
+# Cut a pre-release (e.g. 0.1.0 -> 0.1.1-rc.1)
+./scripts/release.sh rc
+
+# Cut a specific version
+./scripts/release.sh 0.1.1
+```
+
+## Manual Workflow
+
+If cutting a release manually, follow these steps:
 
 ### Stable release
 
 ```bash
-git checkout -b release/v0.1.0 <default-branch>
-# Edit the canonical version file(s), e.g.:
-#   package.json -> "version": "0.1.0"
-#   Formula/<project>.rb -> version "0.1.0"
-git add <version-files>
-git commit -m "release: v0.1.0"
-git push -u origin release/v0.1.0
-gh pr create --base <default-branch> --title "release: v0.1.0" --body "Bumps version to v0.1.0."
+# 1. Fetch latest release and sync
+git fetch origin main --tags --prune
+latest_tag=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.0.0")
+
+# 2. Create release branch
+git checkout -b release/v0.1.1 origin/main
+
+# 3. Edit canonical version files
+#   package.json -> "version": "0.1.1"
+#   Formula/<project>.rb -> version "0.1.1"
+
+# 4. Verify only version files changed
+git diff --name-only
+
+# 5. Commit and push
+git add package.json Formula/vision-proxy.rb
+git commit -m "release: v0.1.1"
+git push -u origin release/v0.1.1
+
+# 6. Generate changelog preview for PR description
+notes=$(gh api "repos/{owner}/{repo}/releases/generate-notes" -f tag_name="v0.1.1" -f previous_tag_name="$latest_tag" --jq .body)
+
+# 7. Create PR with changelog notes
+gh pr create --base main --title "release: v0.1.1" --body "$notes"
 gh pr merge --squash
 ```
 
-Merging triggers the release automation (for example `.github/workflows/auto-tag.yml`), which reads the canonical version source, creates the `v0.1.0` tag, and calls the release workflow via `workflow_call`.
+Merging triggers the release automation (`.github/workflows/auto-tag.yml`), which reads `package.json`, creates the `v0.1.1` tag, and calls `release.yml` via `workflow_call`.
 
 ### Pre-release
 
 ```bash
-git checkout -b prerelease/v0.1.0-rc.1 <default-branch>
-# Edit the canonical version file, e.g.:
-#   package.json -> "version": "0.1.0-rc.1"
-git add <version-file>
-git commit -m "prerelease: v0.1.0-rc.1"
-git push -u origin prerelease/v0.1.0-rc.1
-gh pr create --base <default-branch> --title "prerelease: v0.1.0-rc.1" --body "Bumps version to v0.1.0-rc.1."
+# 1. Fetch latest release and sync
+git fetch origin main --tags --prune
+latest_tag=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.0.0")
+
+# 2. Create pre-release branch
+git checkout -b prerelease/v0.1.1-rc.1 origin/main
+
+# 3. Edit canonical version file
+#   package.json -> "version": "0.1.1-rc.1"
+
+# 4. Verify only version file changed
+git diff --name-only
+
+# 5. Commit and push
+git add package.json
+git commit -m "prerelease: v0.1.1-rc.1"
+git push -u origin prerelease/v0.1.1-rc.1
+
+# 6. Generate changelog preview for PR description
+notes=$(gh api "repos/{owner}/{repo}/releases/generate-notes" -f tag_name="v0.1.1-rc.1" -f previous_tag_name="$latest_tag" --jq .body)
+
+# 7. Create PR with changelog notes
+gh pr create --base main --title "prerelease: v0.1.1-rc.1" --body "$notes"
 gh pr merge --squash
 ```
 
-The workflow creates `v0.1.0-rc.1` as a GitHub pre-release and does not update the Homebrew formula.
+The workflow creates `v0.1.1-rc.1` as a GitHub pre-release and skips the Homebrew formula update.
 
 ## Setting up branch-based release in a new repository
 
-To reuse this convention in another project, copy and adapt the following pieces.
+To reuse this convention in another project, copy and adapt the following pieces:
 
-### 1. Required files
-
-Copy these files from the vision-proxy repo and adjust names/paths:
-
-- `.github/workflows/auto-tag.yml`
-- `.github/workflows/release.yml`
-
-If the project ships a Homebrew formula, also create:
-
-- `Formula/<project>.rb`
-
-### 2. Version source
-
-Ensure the workflows read the version from a single source of truth. vision-proxy uses `package.json`. For other ecosystems you may read from:
-
-- `Cargo.toml` for Rust,
-- `pyproject.toml` for Python,
-- a dedicated `VERSION` file for generic projects.
-
-Update `auto-tag.yml` to parse that source and pass it to `release.yml`.
-
-### 3. Release artifacts
-
-Edit `release.yml` to build and publish the artifacts your project needs. vision-proxy builds cross-platform tarballs and publishes a GitHub release. Replace the build matrix and artifact upload steps with whatever fits your project.
-
-### 4. Branch protection and CI enforcement
-
-Add a CI job that fails a release PR if it changes anything other than the allowed version files:
-
-```yaml
-jobs:
-  verify-release-pr:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify release PR only changes version files
-        run: |
-          changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
-          allowed="<version-file>"
-          if [ "${{ startsWith(github.head_ref, 'release/') }}" = "true" ]; then
-            allowed="<version-file> <packaging-file>"
-          fi
-          for f in $changed; do
-            if [[ " $allowed " != *" $f "* ]]; then
-              echo "Release PR must not change $f" >&2
-              exit 1
-            fi
-          done
-```
-
-### 5. Local scripts
-
-Add helper scripts so humans can cut releases without remembering the file list:
-
-- `scripts/bump-version.sh` - edit `package.json` (and formula for stable releases).
-- `scripts/release.sh` - create the branch, push, and open the PR.
-
-Keep these scripts minimal; the automation does the real work after the PR merges.
-
-## Why `workflow_call`
-
-A tag created with the default `GITHUB_TOKEN` cannot trigger another workflow. Therefore `auto-tag.yml` creates the tag and immediately calls `release.yml` through `workflow_call` instead of relying on `on: push: tags`.
+1. **Required workflows**: `.github/workflows/auto-tag.yml`, `.github/workflows/release.yml`.
+2. **Formula (optional)**: `Formula/<project>.rb`.
+3. **Helper script**: `scripts/release.sh`.
+4. **CI path enforcement**: Add a check that release PRs only touch allowed version files.
 
 ## Failure handling
 

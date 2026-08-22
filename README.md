@@ -20,8 +20,14 @@ brew install tan-yong-sheng/vision-proxy/vision-proxy
 curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh
 ```
 
-Pass `--add-to-path` to automatically append `~/.local/bin` to your shell profile.
-To test a pre-release, pass `--version <tag>` (for example `--version v0.1.0-rc.1`).
+To automatically append `~/.local/bin` to your shell profile, pass `--add-to-path`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tan-yong-sheng/vision-proxy/main/scripts/install.sh | sh -s -- --add-to-path
+```
+
+Restart your shell or source your profile after installation so `vp` is available on your `PATH`.
+To install a specific release or pre-release, pass `--version <tag>` (for example `--version v0.1.0-rc.1`).
 
 ## Quick start
 
@@ -65,8 +71,8 @@ See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for troubleshooting and detai
 
 | Command | Description |
 |---------|-------------|
-| `vp analyze <paths...>` | Describe one or more images (`--crop`, `--format`, `--json`, `--model`, `--provider`). |
-| `vp integration <cmd> <agent>` | Manage agent integrations (`install`, `status`, `list`, `show`, `uninstall`). |
+| `vp analyze <paths...>` | Describe one or more images (`--crop`, `--format`, `--json`, `--model`, `--provider`, `--no-fence`). |
+| `vp integration <cmd> [agent]` | Manage agent integrations (`install`, `status`, `list`, `show`, `uninstall`). |
 | `vp config <cmd>` | Manage configuration (`init`, `get`, `set`, `validate`). |
 | `vp provider <cmd>` | Manage provider auth and keys (`list`, `check`, `store-key`, `delete-key`, `list-keys`). |
 | `vp cache <cmd>` | Manage perceptual-hash description cache (`status`, `clear`, `prune`). |
@@ -93,11 +99,13 @@ See [`docs/SETUP.md`](docs/SETUP.md) for setup guides and [`docs/CONFIG.md`](doc
 
 ## Security & Output
 
-- Descriptions are wrapped in `<vision_proxy_description>` fences with image metadata.
-- Output originates from external vision models and is marked UNTRUSTED for downstream agents.
+- Descriptions in standard output are wrapped in `<vision_proxy_description>` fences with image metadata (`--no-fence` drops wrapping for debugging).
+- When using `--json`, `records[].description` contains raw text; consumers should treat each description as independently untrusted.
+- Output originates from external vision models and must be treated as UNTRUSTED by downstream agents.
 - Image cropping, hashing, and URL downloads are handled locally before upload.
-- URL downloads enforce SSRF restrictions against internal and private network addresses.
-- File paths are restricted to local absolute paths by default.
+- Images are sent to the configured provider API (Anthropic, OpenAI, or Google); review your provider's data retention and privacy policies before sending sensitive images.
+- URL downloads enforce SSRF restrictions against internal, loopback, and private network addresses.
+- File paths must resolve to local filesystem paths (network shares are restricted by default).
 
 ## License
 

@@ -103,7 +103,14 @@ export function resolveImageRefs(prompt: string, sessionId: string | undefined):
 	const paths: string[] = [];
 	const seen = new Set<string>();
 	if (!sessionId) return paths;
-	if (sessionId.includes("/") || sessionId.includes("\\") || sessionId.includes("..")) return paths;
+	if (
+		sessionId.includes("/") ||
+		sessionId.includes("\\") ||
+		sessionId.includes("..") ||
+		sessionId === "." ||
+		sessionId.trim() === ""
+	)
+		return paths;
 	const sessionDir = join(imageCacheDir(), sessionId);
 	if (!existsSync(sessionDir)) return paths;
 	for (const m of prompt.matchAll(IMAGE_REF_RE)) {

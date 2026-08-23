@@ -37,8 +37,8 @@ user types out by hand.
      `getClaudeConfigHomeDir()` returning `process.env.CLAUDE_CONFIG_DIR ??
      join(homedir(), '.claude')`.
   2. Live verification on this machine: after pasting an image into a session
-     (`session_id = 38646690-0fba-4b89-b9a7-fca771e606ea`), Claude Code created
-     `~/.claude/image-cache/38646690-0fba-4b89-b9a7-fca771e606ea/1.png` - a valid
+     (`session_id = <session_id>`), Claude Code created
+     `~/.claude/image-cache/<session_id>/1.png` - a valid
      555x602 RGB PNG (`file` magic `89 50 4E 47`, perms `-rw-------`). The
      directory name is the exact `session_id` that appears 14 times in
      `~/.claude/history.jsonl` for the running session.
@@ -60,7 +60,7 @@ user types out by hand.
 
 ### Verified storage mechanism
 
-```
+```text
 ~/.claude/image-cache/
 └── <session_id>/          # == UserPromptSubmit event.session_id
     └── <N>.<ext>          # [Image #N] -> <N>.<ext> (ext from media type, default png)

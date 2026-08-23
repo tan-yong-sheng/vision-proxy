@@ -23,7 +23,7 @@ images, then commit the branch.
 ## Branch
 
 `feat/hook-claude-image-refs` (worktree at
-`/home/tys203831/Documents/Coding/vision-proxy/.worktrees/feat-hook-claude-image-refs`).
+`<worktree-path>`).
 
 ## Tools / MCP / Skills
 
@@ -33,7 +33,7 @@ images, then commit the branch.
 ## Tasks
 
 - [x] Confirm Claude Code's real image-cache path (`<config>/image-cache/<session_id>/<N>.<ext>`) from leaked source.
-- [x] Live-verify by pasting an image into this session: `~/.claude/image-cache/38646690-0fba-4b89-b9a7-fca771e606ea/1.png` created (valid 555x602 PNG, perms `600`).
+- [x] Live-verify by pasting an image into this session: `~/.claude/image-cache/<session_id>/1.png` created (valid 555x602 PNG, perms `600`).
 - [x] Implement `resolveImageRefs(prompt, sessionId)` in `src/commands/hook.ts` (read-only, fail-open, multi-extension probe).
 - [x] Wire into `UserPromptSubmit` branch of `runHook`; honor `CLAUDE_CONFIG_DIR` / `VP_CLAUDE_CONFIG_DIR`.
 - [x] Add 3 unit tests in `src/commands/hook.test.ts`.

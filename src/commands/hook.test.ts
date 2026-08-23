@@ -87,6 +87,10 @@ test("resolveImageRefs empty when no session id or no refs", () => {
 	assert.deepEqual(resolveImageRefs("look [Image #3]", undefined), []);
 	// session id set but cache dir does not exist
 	assert.deepEqual(resolveImageRefs("look [Image #3]", "nope"), []);
+	// session id with path separators is rejected (path traversal guard)
+	assert.deepEqual(resolveImageRefs("[Image #1]", "../escape"), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "sess/../escape"), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "sess\\escape"), []);
 });
 
 test("resolveImageRefs resolves cached Claude Code image files", () => {

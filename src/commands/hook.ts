@@ -103,13 +103,13 @@ export function resolveImageRefs(prompt: string, sessionId: string | undefined):
 	const paths: string[] = [];
 	const seen = new Set<string>();
 	if (!sessionId) return paths;
+	if (sessionId.includes("/") || sessionId.includes("\\")) return paths;
 	const sessionDir = join(imageCacheDir(), sessionId);
 	if (!existsSync(sessionDir)) return paths;
 	for (const m of prompt.matchAll(IMAGE_REF_RE)) {
 		const id = Number(m[1]);
 		if (!Number.isFinite(id)) continue;
-		const exts = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "avif", "ico"];
-		for (const ext of exts) {
+		for (const ext of IMAGE_EXT) {
 			const candidate = join(sessionDir, `${id}.${ext}`);
 			if (existsSync(candidate)) {
 				if (!seen.has(candidate)) {

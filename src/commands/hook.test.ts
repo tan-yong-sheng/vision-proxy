@@ -91,6 +91,10 @@ test("resolveImageRefs empty when no session id or no refs", () => {
 	assert.deepEqual(resolveImageRefs("[Image #1]", "../escape"), []);
 	assert.deepEqual(resolveImageRefs("[Image #1]", "sess/../escape"), []);
 	assert.deepEqual(resolveImageRefs("[Image #1]", "sess\\escape"), []);
+	// session id with dot-dot sequences is rejected (path traversal guard)
+	assert.deepEqual(resolveImageRefs("[Image #1]", ".."), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "../.."), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "sess.."), []);
 });
 
 test("resolveImageRefs resolves cached Claude Code image files", () => {

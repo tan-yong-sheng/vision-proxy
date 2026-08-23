@@ -109,6 +109,7 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_BASE_URL` | `baseUrl` | `VP_BASE_URL=http://localhost:8000/v1` |
 | `VP_DOWNLOAD_TIMEOUT` | - | `VP_DOWNLOAD_TIMEOUT=30000` |
 | `VP_STRICT_MIME` | - | `VP_STRICT_MIME=1` |
+| `VP_CLAUDE_CONFIG_DIR` | - | `VP_CLAUDE_CONFIG_DIR=/custom/.claude` |
 
 ### Example
 

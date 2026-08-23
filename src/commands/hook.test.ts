@@ -13,7 +13,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -24,6 +24,7 @@ import {
 	readEvent,
 	readToolFilePath,
 	resolveImagePath,
+	resolveImageRefs,
 	runHook,
 	vpEntryToSpawn,
 } from "./hook.ts";
@@ -80,6 +81,82 @@ function captureStdout(fn: () => void): string {
 	}
 	return chunks.join("");
 }
+
+test("resolveImageRefs empty when no session id or no refs", () => {
+	assert.deepEqual(resolveImageRefs("no refs here", undefined), []);
+	assert.deepEqual(resolveImageRefs("look [Image #3]", undefined), []);
+	// session id set but cache dir does not exist
+	assert.deepEqual(resolveImageRefs("look [Image #3]", "nope"), []);
+	// session id with path separators is rejected (path traversal guard)
+	assert.deepEqual(resolveImageRefs("[Image #1]", "../escape"), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "sess/../escape"), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "sess\\escape"), []);
+	// session id with dot-dot sequences is rejected (path traversal guard)
+	assert.deepEqual(resolveImageRefs("[Image #1]", ".."), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "../.."), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "sess.."), []);
+	// session id of '.' (current dir) is rejected (path traversal guard)
+	assert.deepEqual(resolveImageRefs("[Image #1]", "."), []);
+	// session id of whitespace-only is rejected
+	assert.deepEqual(resolveImageRefs("[Image #1]", " "), []);
+	assert.deepEqual(resolveImageRefs("[Image #1]", "\t"), []);
+});
+
+test("resolveImageRefs resolves cached Claude Code image files", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vp-imgref-"));
+	const session = "sess-abc-123";
+	const sessionDir = join(dir, "image-cache", session);
+	mkdirSync(sessionDir, { recursive: true });
+	const pngPath = join(sessionDir, "1.png");
+	writeFileSync(pngPath, "fake-png-bytes");
+	const jpgPath = join(sessionDir, "2.jpg");
+	writeFileSync(jpgPath, "fake-jpg-bytes");
+	const prev = process.env.VP_CLAUDE_CONFIG_DIR;
+	process.env.VP_CLAUDE_CONFIG_DIR = dir;
+	try {
+		const got = resolveImageRefs("see [Image #1] and [Image #2]", session);
+		assert.deepEqual(got.sort(), [jpgPath, pngPath].sort());
+		// ref to a missing id yields nothing (fail-open)
+		assert.deepEqual(resolveImageRefs("[Image #9]", session), []);
+		// de-duped when a ref appears twice
+		assert.deepEqual(resolveImageRefs("[Image #1] [Image #1]", session), [pngPath]);
+	} finally {
+		if (prev === undefined) delete process.env.VP_CLAUDE_CONFIG_DIR;
+		else process.env.VP_CLAUDE_CONFIG_DIR = prev;
+	}
+});
+
+test("UserPromptSubmit with [Image #N] refs emits additionalContext", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vp-hook-ref-"));
+	const vpBin = writeFakeVp(dir);
+	const session = "sess-ref-1";
+	const sessionDir = join(dir, "image-cache", session);
+	mkdirSync(sessionDir, { recursive: true });
+	writeFileSync(join(sessionDir, "1.png"), "fake-png");
+	const event = {
+		hook_event_name: "UserPromptSubmit",
+		session_id: session,
+		prompt: "What is in [Image #1]?",
+	};
+	const out = captureStdout(() => {
+		const prevVpBin = process.env.VP_BIN;
+		const prevCfg = process.env.VP_CLAUDE_CONFIG_DIR;
+		process.env.VP_BIN = vpBin;
+		process.env.VP_CLAUDE_CONFIG_DIR = dir;
+		try {
+			runHook(event);
+		} finally {
+			if (prevVpBin === undefined) delete process.env.VP_BIN;
+			else process.env.VP_BIN = prevVpBin;
+			if (prevCfg === undefined) delete process.env.VP_CLAUDE_CONFIG_DIR;
+			else process.env.VP_CLAUDE_CONFIG_DIR = prevCfg;
+		}
+	});
+	assert.equal(out.trim() !== "", true);
+	const parsed = JSON.parse(out.trim());
+	assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+	assert.match(parsed.hookSpecificOutput.additionalContext, /red square on white/);
+});
 
 test("isImagePath recognizes known extensions and rejects others", () => {
 	assert.equal(isImagePath("/a/b.png"), true);

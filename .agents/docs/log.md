@@ -201,3 +201,11 @@ Append-only lifecycle journal; oldest at top, newest at bottom.
 - 2026-08-18: scaffold-worktrees plans/backend-resolve-pr33-merge-and-coderabbit-fixes.md -> worktrees/backend-dev-main-merge.md
 - 2026-08-18: archive plans/backend-resolve-pr33-merge-and-coderabbit-fixes.md -> archive/plan-backend-resolve-pr33-merge-and-coderabbit-fixes.md (complete)
 - 2026-08-18: archive worktrees/backend-dev-main-merge.md -> archive/worktree-backend-dev-main-merge.md (landed)
+- 2026-08-22: new plan plans/backend-support-vp-update-command.md
+- 2026-08-22: scaffold-worktrees plans/backend-support-vp-update-command.md -> worktrees/backend-create-update-command-module-with-install-detector-version-checker-and-installer.md
+- 2026-08-22: scaffold-worktrees plans/backend-support-vp-update-command.md -> worktrees/backend-wire-update-subcommand-help-index-and-flag-parsing-into-cli-entrypoint.md
+- 2026-08-22: scaffold-worktrees plans/backend-support-vp-update-command.md -> worktrees/backend-add-unit-and-integration-tests-for-install-detection-version-parsing-and-update.md
+- 2026-08-22: scaffold-worktrees plans/backend-support-vp-update-command.md -> worktrees/backend-update-user-facing-documentation-with-vp-update-usage.md
+- 2026-08-22: new worktree worktrees/backend-support-vp-update-command.md
+- 2026-08-23: new plan plans/backend-resolve-claude-image-refs.md
+- 2026-08-23: new worktree worktrees/backend-resolve-claude-image-refs.md

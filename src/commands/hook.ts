@@ -7,8 +7,10 @@
  * as context.
  *
  * Supported event types:
- *   - `UserPromptSubmit`  extract image paths from `event.prompt`, run
- *                         `vp analyze`, emit the fenced description.
+ *   - `UserPromptSubmit`  extract image paths and `[Image #N]` refs from
+ *                         `event.prompt`, resolve refs via Claude Code's
+ *                         `image-cache/<session>/`, run `vp analyze`, emit
+ *                         the fenced description.
  *   - `PreToolUse`        when `tool_name === "Read"` and `tool_input.file_path`
  *                         is an image, run `vp analyze`, emit the description.
  *
@@ -17,8 +19,9 @@
  * stays on.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 /** Known image file extensions (lowercased, no dot). */
 const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "ico", "avif"];
@@ -58,6 +61,75 @@ export function isImagePath(p: string | undefined | null): boolean {
 	if (!p || typeof p !== "string") return false;
 	const ext = p.split(".").pop()?.toLowerCase();
 	return !!ext && IMAGE_EXT.includes(ext);
+}
+
+/**
+ * Resolve `[Image #N]` references in prompt text to on-disk image file paths
+ * produced by Claude Code's image cache
+ * (`<CLAUDE_CONFIG_DIR | ~/.claude>/image-cache/<session>/<N>.<ext>`).
+ *
+ * Claude Code renders pasted/attached images as `[Image #N]` in the
+ * user-facing prompt while storing the actual file under its config home's
+ * `image-cache` directory, keyed by the session id and the numeric image id.
+ * The CLI (running as the hook process) receives `session_id` in the
+ * UserPromptSubmit event, so we can map each ref to its cached file and feed
+ * the path to `vp analyze`.
+ *
+ * The config home honors `CLAUDE_CONFIG_DIR` (as Claude Code does) and falls
+ * back to `~/.claude`. The default is overridable via `VP_CLAUDE_CONFIG_DIR`
+ * for testing or non-standard installs.
+ */
+const CLAUDE_CONFIG_ENV = "CLAUDE_CONFIG_DIR";
+const CLAUDE_CONFIG_DIR_ENV = "VP_CLAUDE_CONFIG_DIR";
+
+function claudeConfigHome(): string {
+	const override = process.env[CLAUDE_CONFIG_DIR_ENV] || process.env[CLAUDE_CONFIG_ENV];
+	if (override?.trim()) return resolve(override.trim());
+	return join(homedir(), ".claude");
+}
+
+function imageCacheDir(): string {
+	return join(claudeConfigHome(), "image-cache");
+}
+
+/** Match Claude Code's `[Image #N]` ref syntax. */
+const IMAGE_REF_RE = /\[Image #(\d+)\]/g;
+
+/**
+ * Resolve `[Image #N]` references against Claude Code's image cache for the
+ * given session. Returns a list of existing image file paths (one per ref, in
+ * order, de-duplicated). Refs whose cached file is missing are skipped so the
+ * hook fails open rather than blocking on a stale prompt.
+ */
+export function resolveImageRefs(prompt: string, sessionId: string | undefined): string[] {
+	const paths: string[] = [];
+	const seen = new Set<string>();
+	if (!sessionId) return paths;
+	if (
+		sessionId.includes("/") ||
+		sessionId.includes("\\") ||
+		sessionId.includes("..") ||
+		sessionId === "." ||
+		sessionId.trim() === ""
+	)
+		return paths;
+	const sessionDir = join(imageCacheDir(), sessionId);
+	if (!existsSync(sessionDir)) return paths;
+	for (const m of prompt.matchAll(IMAGE_REF_RE)) {
+		const id = Number(m[1]);
+		if (!Number.isFinite(id)) continue;
+		for (const ext of IMAGE_EXT) {
+			const candidate = join(sessionDir, `${id}.${ext}`);
+			if (existsSync(candidate)) {
+				if (!seen.has(candidate)) {
+					seen.add(candidate);
+					paths.push(candidate);
+				}
+				break;
+			}
+		}
+	}
+	return paths;
 }
 
 /** Extract candidate absolute/absolute-like image paths from prompt text. */
@@ -217,10 +289,16 @@ export function runHook(event: Record<string, unknown> | null): void {
 	if (eventName === "UserPromptSubmit") {
 		const prompt = typeof event.prompt === "string" ? event.prompt : "";
 		const images = extractImagePaths(prompt);
-		if (images.length === 0) return;
+		// Claude Code represents pasted/attached images as `[Image #N]` refs that
+		// resolve to files in its image cache. Expand those when the hook event
+		// carries the session id so vision-proxy can analyze them too.
+		const sessionId = (event.session_id ?? event.sessionId) as string | undefined;
+		const refImages = resolveImageRefs(prompt, sessionId);
+		const allImages = [...images, ...refImages];
+		if (allImages.length === 0) return;
 		// Pass the user's prompt as the analysis question so the vision model
 		// can tailor the description to what the user is asking.
-		const description = runAnalyze(images, prompt);
+		const description = runAnalyze(allImages, prompt);
 		if (!description) return;
 		emit("UserPromptSubmit", withImageInstruction(description));
 		return;

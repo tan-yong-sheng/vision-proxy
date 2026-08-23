@@ -492,6 +492,12 @@ Events:
   UserPromptSubmit   image paths in the prompt are analyzed
   PreToolUse Read    an image file_path read by the Read tool is analyzed
 
+In a UserPromptSubmit event, Claude Code represents pasted or attached images
+as '[Image #N]' references while storing the actual file under
+'<CLAUDE_CONFIG_DIR | ~/.claude>/image-cache/<session>/<N>.<ext>'. vp hook
+resolves those refs to file paths (using the session_id from the event) so the
+images are analyzed too. Override the config home with VP_CLAUDE_CONFIG_DIR.
+
 Usage:
   vp hook < event.json
 

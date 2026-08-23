@@ -62,7 +62,7 @@ vp integration status
 vp integration uninstall <agent>
 ```
 
-- **Claude Code & Codex**: Registers `UserPromptSubmit` and `PreToolUse Read` hooks that invoke `vp hook`.
+- **Claude Code & Codex**: Registers `UserPromptSubmit` and `PreToolUse Read` hooks that invoke `vp hook`. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache`.
 - **Pi**: Installs an auto-discovered `analyze_image` extension into `~/.pi/agent/extensions/`.
 
 See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for troubleshooting and details.

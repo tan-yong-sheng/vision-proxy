@@ -7,8 +7,10 @@
  * as context.
  *
  * Supported event types:
- *   - `UserPromptSubmit`  extract image paths from `event.prompt`, run
- *                         `vp analyze`, emit the fenced description.
+ *   - `UserPromptSubmit`  extract image paths and `[Image #N]` refs from
+ *                         `event.prompt`, resolve refs via Claude Code's
+ *                         `image-cache/<session>/`, run `vp analyze`, emit
+ *                         the fenced description.
  *   - `PreToolUse`        when `tool_name === "Read"` and `tool_input.file_path`
  *                         is an image, run `vp analyze`, emit the description.
  *

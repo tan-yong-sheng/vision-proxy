@@ -489,7 +489,7 @@ Agent hook dispatcher. Read a hook event JSON from stdin and emit
 hookSpecificOutput.additionalContext with an image description.
 
 Events:
-  UserPromptSubmit   image paths in the prompt are analyzed
+  UserPromptSubmit   image paths and [Image #N] refs in the prompt are analyzed
   PreToolUse Read    an image file_path read by the Read tool is analyzed
 
 In a UserPromptSubmit event, Claude Code represents pasted or attached images

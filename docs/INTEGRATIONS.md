@@ -6,7 +6,7 @@ Install `vp` into an agent so it can see images in your prompts.
 
 Registers two hooks in `~/.claude/settings.json`, both invoking the absolute `vp hook` path:
 
-- `UserPromptSubmit` - describes images mentioned in the prompt.
+- `UserPromptSubmit` - describes images mentioned in the prompt, plus pasted/attached images (rendered as `[Image #N]` refs) resolved via Claude Code's `image-cache/<session>/<N>.<ext>`.
 - `PreToolUse Read` - describes an image read via the `Read` tool (`file_path`).
 
 ```bash

@@ -17,22 +17,22 @@ class VisionProxy < Formula
   on_macos do
     on_arm do
       url "https://github.com/tan-yong-sheng/vision-proxy/releases/download/v#{version}/vision-proxy-darwin-arm64.tar.gz"
-      sha256 "96b9bddd47aecded5e6c830bbe4d1d552e1ba635d112210d720198b382c869ac"
+      sha256 "be4626f31f877fddb3e2da8f8617818b52993ad7c71e08900a5f42784ee5e975"
     end
     on_intel do
       url "https://github.com/tan-yong-sheng/vision-proxy/releases/download/v#{version}/vision-proxy-darwin-x64.tar.gz"
-      sha256 "e0e3e1e8e05bdf14de103442f48a47c017f9e02b5b72f36306179864e000e3ff"
+      sha256 "06b198937b69e0c0f97ee3753045c18ad1e58bb2257bb83fc84189f4f3f32218"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/tan-yong-sheng/vision-proxy/releases/download/v#{version}/vision-proxy-linux-arm64.tar.gz"
-      sha256 "5fc759cf586679843d82a172e696e0fc63db5aad3bbddbb98f6b401e2c954be0"
+      sha256 "8cf4bb6dd6049ec61843e1861abbfa7307bd1aff2d6c61b1c7e583bdd596df30"
     end
     on_intel do
       url "https://github.com/tan-yong-sheng/vision-proxy/releases/download/v#{version}/vision-proxy-linux-x64.tar.gz"
-      sha256 "6bb01e19daa971f40773339705c17e18a4bec20e3b09412eb8a4ce2eab049fcd"
+      sha256 "8c622b2a82e03f139dd74cd36789ab2965956c3bb095872320e10d1b589d3d52"
     end
   end
 

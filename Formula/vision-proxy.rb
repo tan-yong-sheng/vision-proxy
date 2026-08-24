@@ -11,7 +11,7 @@
 class VisionProxy < Formula
   desc "CLI that routes images to a vision model for agent UserPromptSubmit hooks"
   homepage "https://github.com/tan-yong-sheng/vision-proxy"
-  version "0.1.1"
+  version "0.1.2"
   license "MIT"
 
   on_macos do

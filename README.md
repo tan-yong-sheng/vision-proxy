@@ -98,7 +98,7 @@ vp integration uninstall <agent>
 - **Claude Code & Codex**: Registers `UserPromptSubmit` and `PreToolUse Read` hooks that invoke `vp hook`. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache`.
 - **Pi**: Installs an auto-discovered `analyze_image` extension into `~/.pi/agent/extensions/`.
 
-Caveat: For Claude Code, it only supports image path on user prompt and doesn't support to render [Image #N] because Claude Code `UserPromptSubmit` hook doesn't support to alter the user prompt it sends to llm api.
+Caveat: For Claude Code, images can only be referenced by file path in the user prompt. It does not support rendering `[Image #N]` because the `UserPromptSubmit` hook cannot modify the user prompt before it is sent to the LLM API.
 
 See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for troubleshooting and details.
 

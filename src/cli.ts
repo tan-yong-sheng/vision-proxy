@@ -10,7 +10,11 @@ import { basename } from "node:path";
  *   provider list | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]
  *   integration install | show | list | status | uninstall <agent>
+ *   update [--check] [--version <tag>] [--force] [--beta]
  *   version | help
+ *
+ * Every command except `hook` (and any `--json` invocation) runs the cached
+ * update-notifier check first; see commands/update.ts for the suppression rules.
  */
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
@@ -24,6 +28,7 @@ import {
 	providerListKeys,
 	providerStoreKey,
 } from "./commands/provider.ts";
+import { checkAutoUpdateNotification, runBackgroundCheck, runUpdate } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
 import { isKnownProvider } from "./provider.ts";
@@ -70,6 +75,7 @@ const VALUE_FLAGS = new Set([
 	"apiKey",
 	"older",
 	"crop",
+	"version",
 ]);
 
 export function parseFlags(args: string[]): FlagParse {
@@ -140,6 +146,7 @@ Usage:
   vp config <init|get|set|validate> ...
   vp provider <list|check|store-key|delete-key|list-keys> ...
   vp cache <status|clear|prune> ...
+  vp update [--check] [--version <tag>] [--force] [--beta]
 
 analyze options:
   --format <name>    plain | qwen_pixels | molmo_points | deepseek_bbox | internvl_pixels | gemini_normalized_1000
@@ -171,6 +178,12 @@ cache options:
   status                     hit rate + size
   clear                      drop all entries
   prune [--older <days>]     evict entries older than N days (default 30)
+
+update options:
+  --check, -c                check for updates without modifying files
+  --version <tag>            install a specific release tag (e.g. v0.1.0)
+  --force, -f                reinstall even when already up to date
+  --beta                     install the latest pre-release instead of stable
 
 integration options:
   install <agent>            install vision-proxy for pi | claude-code | codex
@@ -508,6 +521,32 @@ output (fail-open), so the agent proceeds unchanged.
 
 Options:
   -h, --help          show this help`,
+
+	update: `vp update [--check] [--version <tag>] [--force] [--beta]
+
+Self-update vision-proxy, or print package-manager guidance.
+
+Usage:
+  vp update                        check for a newer release and install it
+  vp update --check (-c)           report only; never modify files
+  vp update --version <tag>        install a specific release tag (e.g. v0.1.0)
+  vp update --force (-f)           reinstall even when already up to date
+  vp update --beta                 install the latest pre-release instead of stable
+
+Options:
+  --check, -c         check for updates without modifying files
+  --version <tag>     install a specific release tag (e.g. v0.1.0)
+  --force, -f         reinstall even when already up to date
+  --beta              install the latest pre-release instead of stable
+  -h, --help          show this help
+
+Notes:
+  The curl installer (~/.local/share/vision-proxy) is updated in place.
+  Homebrew, npm, and source builds are detected and the appropriate update
+  command is printed instead of performing an install.
+
+  vp also prints a one-line notice on stderr when a cached release check
+  finds a newer version. Set VP_NO_UPDATE_NOTIFIER=1 to disable it.`,
 };
 
 function print(msg: string): void {
@@ -535,6 +574,16 @@ function fail(msg: string, code = 1): void {
 
 export async function main(argv: string[]): Promise<void> {
 	const [command, ...rest] = argv;
+	const env = process.env;
+
+	// Cached, non-blocking check, before any command runs. Suppressed for
+	// `hook`, `--json`, and the notifier's own worker so machine consumers and
+	// agent hook streams stay byte-for-byte clean.
+	const machineReadable = rest.some(
+		(a) => a === "--json" || a.startsWith("--json=") || a === "--background-check",
+	);
+	checkAutoUpdateNotification({ env, command, json: machineReadable });
+
 	if (!command || command === "help" || command === "-h" || command === "--help") {
 		print(HELP);
 		return;
@@ -543,8 +592,6 @@ export async function main(argv: string[]): Promise<void> {
 		print(VERSION);
 		return;
 	}
-
-	const env = process.env;
 
 	switch (command) {
 		case "analyze": {
@@ -725,6 +772,27 @@ export async function main(argv: string[]): Promise<void> {
 				return;
 			}
 			runHook(readEvent());
+			return;
+		}
+
+		case "update": {
+			const { flags } = parseFlags(rest);
+			if (wantsHelp(flags, rest)) {
+				print(renderHelp(["update"]));
+				return;
+			}
+			// Internal: refresh the notifier cache. Spawned detached, emits nothing.
+			if (bool(flags, "background-check", false)) {
+				await runBackgroundCheck({ env });
+				return;
+			}
+			const result = await runUpdate({
+				check: bool(flags, "check", false) || bool(flags, "c", false),
+				version: str(flags, "version"),
+				force: bool(flags, "force", false) || bool(flags, "f", false),
+				beta: bool(flags, "beta", false),
+			});
+			handle(result);
 			return;
 		}
 

@@ -31,9 +31,9 @@ export const OPENCODE_PLUGIN_SOURCE = `/**
  *
  * No new analyze_image tool - agent uses native Read which hook intercepts.
  */
-import type { Hooks, Part, UserMessage, Message, ToolDefinition } from "@opencode-ai/plugin";
+import type { Hooks } from "@opencode-ai/plugin";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -101,9 +101,10 @@ function extractImagePaths(text: string): string[] {
   const add = (p: string) => { const t = (p || "").trim(); if (t) paths.add(t); };
   const re1 = /(?:^[\\s"'])([a-zA-Z]:[/\\\\][^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+|\\/[^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+)/gim;
   for (const m of text.matchAll(re1)) add(m[1]);
-  const re2 = new RegExp(\`(?:^[\\\\s"'(])((?:[a-zA-Z]:[/\\\\\\\\]|/|~)[^"'*?|\\\\n]*?[/\\\\\\\\][^"'*?|\\\\n]*?\\\\.(?:jpg|jpeg|png|gif|webp|bmp|tiff|tif|ico|avif))\\\\b\`, "gi");
+  const extPattern = IMAGE_EXT.join("|");
+  const re2 = new RegExp(\`(?:^[\\\\s"'(])((?:[a-zA-Z]:[/\\\\\\\\]|/|~)[^"'*?|\\\\n]*?[/\\\\\\\\][^"'*?|\\\\n]*?\\\\.(?:${extPattern}))\\\\b\`, "gi");
   for (const m of text.matchAll(re2)) add(m[1]);
-  const re3 = new RegExp(\`(?:^[\\\\s"'(])(\\\\.\\\\.?/[^"'*?|\\\\n]*?\\\\.(?:jpg|jpeg|png|gif|webp|bmp|tiff|tif|ico|avif))\\\\b\`, "gi");
+  const re3 = new RegExp(\`(?:^[\\\\s"'(])(\\\\.\\\\.?/[^"'*?|\\\\n]*?\\\\.(?:${extPattern}))\\\\b\`, "gi");
   for (const m of text.matchAll(re3)) add(m[1]);
   return [...paths];
 }
@@ -149,11 +150,6 @@ function withImageInstruction(description: string): string {
   );
 }
 
-function emitAdditionalContext(additionalContext: string): void {
-  // opencode plugin returns additionalContext in the output object
-  // This is handled by the hook returning the modified output
-}
-
 const messageHook: Hooks["chat.message"] = async (input, output) => {
   const prompt = output.message.content;
   if (typeof prompt !== "string") return;
@@ -176,8 +172,6 @@ function readToolFilePath(toolName: string, toolInput: Record<string, unknown>, 
 
 const toolExecuteBeforeHook: Hooks["tool.execute.before"] = async (input, output) => {
   const tool = input.tool;
-  const callID = input.callID;
-  const sessionID = input.sessionID;
   // Find cwd from session or use process.cwd()
   const cwd = process.cwd();
   const file = readToolFilePath(tool, output.args as Record<string, unknown>, cwd);

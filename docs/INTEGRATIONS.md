@@ -44,8 +44,11 @@ vp integration uninstall codex
 
 Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
 
-- `before_agent_start` — extracts images attached to or referenced in the prompt, runs `vp analyze`, strips image bytes/paths, and injects the fenced UNTRUSTED description into the system prompt.
-- `tool_call` + `tool_result` — intercepts `read` tool calls on image files and replaces the tool result with the fenced description so no image bytes reach the model.
+- `input` — extracts images attached to the submission plus image paths referenced in the text, runs `vp analyze`, and strips the image bytes and path mentions from the submission.
+- `before_agent_start` — appends the fenced UNTRUSTED description from the analyzed submission to the system prompt.
+- `tool_result` — intercepts `read` tool results on image files and replaces the tool result content with the fenced description so no image bytes reach the model.
+
+If `vp analyze` fails or `VP_MODE=off`, the extension fails open and Pi proceeds unchanged.
 
 ```bash
 vp integration install pi
@@ -62,8 +65,9 @@ Restart Pi after installing.
 
 Configuration options (via environment variables):
 - `VP_MODE` - Controls whether the Pi extension is active (`always` | `off`, default: `always`)
+- `VP_MAX_OUTPUT_TOKENS` - Max output tokens for `vp analyze` (default: 2000)
 - `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
-- `VP_BIN` - Path to vp binary (default: "vp")
+- `VP_BIN` - Path to vp binary (default: "vp"; a `.js` entry point is run with the current Node executable)
 
 ## opencode (v1)
 

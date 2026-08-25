@@ -1,13 +1,12 @@
 /**
  * Unit tests for `vp integration` install/show/list/uninstall.
  *
- * Exercises the generated Pi extension, the generated opencode plugin, and the
- * Claude Code / Codex hook registrations against an isolated temp HOME so we
- * never touch a real ~/.claude, ~/.codex, ~/.pi, or ~/.config/opencode. Validates:
- *   - install pi writes a valid extension and cleans up an empty extensions dir
- *   - install opencode writes an executable plugin: chat.message describes
- *     prompt paths + attached images (removing their parts) and
- *     tool.execute.before denies reads on images with the description
+ * Exercises the generated Pi extension and the Claude Code / Codex hook
+ * registrations against an isolated temp HOME so we never touch a real
+ * ~/.claude, ~/.codex, or ~/.pi. Validates:
+ *   - install pi writes an executable extension: its input handler strips
+ *     attached/referenced images, before_agent_start injects the description
+ *     into the system prompt once, and tool_result replaces image reads
  *   - install claude-code/codex registers both hooks (UserPromptSubmit +
  *     PreToolUse Read) in the agent config with the absolute `vp hook` path
  *   - uninstall removes only our registrations (idempotent, leaves others intact)
@@ -18,8 +17,8 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { runIntegration } from "../commands/integration.ts";
@@ -78,51 +77,6 @@ function parseHooks(raw: string): any {
 }
 
 /**
- * Execute the generated Pi extension with stubbed dependencies to verify it
- * conforms to the Pi extension public interface contract: a default export
- * function that hooks into before_agent_start, tool_call, and tool_result
- * lifecycle events (no tool registration).
- */
-async function assertValidPiExtension(source: string, home: string): Promise<void> {
-	const dir = join(home, "ext-test");
-	mkdirSync(dir, { recursive: true });
-
-	// Redirect imports to local stubs so the generated extension can be loaded
-	// and executed without real dependencies or subprocesses.
-	const testSource = source.replace(/"node:child_process"/g, '"./mock-child-process.ts"');
-
-	writeFileSync(join(dir, "vision-proxy.ts"), testSource);
-	writeFileSync(
-		join(dir, "mock-child-process.ts"),
-		`let nextResult;
-export function setNextResult(r) { nextResult = r; }
-export function spawnSync(..._args) { return nextResult; }
-`,
-	);
-
-	const mod = await import(join(dir, "vision-proxy.ts"));
-	// Pi extension lifecycle events are invoked as setup(pi).
-	const events: Array<{ name: string; handler: (...args: unknown[]) => unknown }> = [];
-	const mockPi = {
-		on: (name: string, handler: (...args: unknown[]) => unknown) => events.push({ name, handler }),
-	};
-
-	assert.equal(
-		typeof mod.default,
-		"function",
-		"generated extension must export a default setup function",
-	);
-	mod.default(mockPi);
-
-	// Should register zero tools and three lifecycle handlers
-	const eventNames = events.map((e) => e.name);
-	assert.ok(!eventNames.includes("analyze_image"), "must not register analyze_image tool");
-	assert.ok(eventNames.includes("before_agent_start"), "must register before_agent_start handler");
-	assert.ok(eventNames.includes("tool_call"), "must register tool_call handler");
-	assert.ok(eventNames.includes("tool_result"), "must register tool_result handler");
-}
-
-/**
  * Execute a generated source (Pi extension or opencode plugin) with a stubbed
  * `node:child_process` module so handlers can run without spawning real vp
  * processes. Returns the loaded module plus controls for the spawn stub.
@@ -152,7 +106,6 @@ async function loadGeneratedSource(
 			"let nextResult;",
 			"export function setNextResult(r) { nextResult = r; }",
 			"export function spawnSync(command, args) { calls.push([command, args]); return nextResult; }",
-			'export function execFile(command, args, _opts, cb) { calls.push([command, args]); const r = nextResult ?? {}; if (cb) cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""); else return Promise.resolve([r.stdout ?? "", r.stderr ?? ""]); }',
 			"",
 		].join("\n"),
 	);
@@ -173,6 +126,47 @@ function fakeImage(dir: string, ...segments: string[]): string {
 	return p;
 }
 
+/**
+ * Load the generated Pi extension and capture its lifecycle handlers.
+ * Verifies the public interface contract: a default export setup function
+ * registering input, before_agent_start, and tool_result handlers (no tools).
+ */
+/**
+ * Shape of the generated Pi extension's default export: a setup function
+ * receiving an emitter with an `on` registration method.
+ */
+type PiExtensionSetup = (input: {
+	on: (name: string, handler: (event: any) => Promise<unknown>) => void;
+}) => unknown;
+
+async function loadPiExtension(source: string, home: string) {
+	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
+		source,
+		home,
+		"vision-proxy",
+	);
+	assert.equal(
+		typeof mod.default,
+		"function",
+		"generated extension must export a default setup function",
+	);
+	const events: Record<string, Array<(event: any) => Promise<unknown>>> = {};
+	(mod.default as PiExtensionSetup)({
+		on: (name: string, handler: (event: any) => Promise<unknown>) => {
+			if (!events[name]) {
+				events[name] = [];
+			}
+			events[name].push(handler);
+		},
+	});
+	const eventNames = Object.keys(events);
+	assert.ok(!eventNames.includes("registerTool"), "must not register analyze_image tool");
+	for (const required of ["input", "before_agent_start", "tool_result"]) {
+		assert.ok(eventNames.includes(required), `must register ${required} handler`);
+	}
+	return { events, dir, calls, setNextResult };
+}
+
 test("install pi writes the vision-proxy extension file with valid source", async () => {
 	const home = isolate();
 	const dir = installDir(home);
@@ -181,7 +175,182 @@ test("install pi writes the vision-proxy extension file with valid source", asyn
 	const target = join(dir, "vision-proxy.ts");
 	assert.equal(existsSync(target), true);
 	const written = readFileSync(target, "utf8");
-	await assertValidPiExtension(written, home);
+	await loadPiExtension(written, home);
+	reset();
+});
+
+test("pi extension input handler strips attached and referenced images", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const written = readFileSync(join(dir, "vision-proxy.ts"), "utf8");
+	const { events, dir: testDir, calls, setNextResult } = await loadPiExtension(written, home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
+	const b64 = Buffer.from("fakepng").toString("base64");
+	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
+
+	const result = (await events.input[0]({
+		type: "input",
+		text: `look at ${imagePath} please`,
+		images: [{ type: "image", data: b64, mimeType: "image/png" }],
+	})) as { action: string; text: string; images: string[] };
+
+	assert.equal(result.action, "transform");
+	// The existing referenced path is stripped from the text...
+	assert.equal(result.text.includes(imagePath), false);
+	assert.match(result.text, /look at\s+please/);
+	// ...and attached image bytes are dropped entirely.
+	assert.equal(result.images.length, 0);
+	// One analyze invocation covering the temp copy of the attachment plus the
+	// referenced file (the config-get probe is a separate call).
+	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeCalls.length, 1);
+	const analyzed = analyzeCalls[0]![1];
+	assert.equal(analyzed[0], "analyze");
+	assert.ok(analyzed.includes(imagePath));
+	// The attachment is analyzed via a temp copy (a path outside the test dir).
+	assert.ok(analyzed.some((a) => a.startsWith(tmpdir()) && a !== imagePath));
+	reset();
+});
+
+test("pi extension injects the description into the system prompt exactly once", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "pic.png");
+	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+	const transformed = (await events.input[0]({
+		type: "input",
+		text: `see ${imagePath}`,
+		images: [],
+	})) as any;
+	assert.equal(transformed.action, "transform");
+
+	const first = await events.before_agent_start[0]({
+		type: "before_agent_start",
+		prompt: transformed.text,
+		systemPrompt: "BASE",
+	});
+	assert.match((first as any).systemPrompt, /^BASE\n\n@@FENCE desc@@$/);
+	// The stash is consumed: a second agent start in the same session is clean.
+	const second = await events.before_agent_start[0]({
+		type: "before_agent_start",
+		prompt: "x",
+		systemPrompt: "BASE",
+	});
+	assert.equal(second, undefined);
+	reset();
+});
+
+test("pi extension fails open on analyze failure and respects mode off", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	const imagePath = fakeImage(testDir, "pic.png");
+	const b64 = Buffer.from("x").toString("base64");
+
+	// vp exits non-zero -> no transform, no stash.
+	process.env.VP_MODE = "always";
+	setNextResult({ status: 1, stdout: "" });
+	const failed = await events.input[0]({ type: "input", text: `see ${imagePath}`, images: [] });
+	assert.equal(failed, undefined);
+
+	// mode off -> no-op even when analysis would succeed.
+	process.env.VP_MODE = "off";
+	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+	const disabled = await events.input[0]({
+		type: "input",
+		text: `see ${imagePath}`,
+		images: [{ type: "image", data: b64, mimeType: "image/png" }],
+	});
+	assert.equal(disabled, undefined);
+	delete process.env.VP_MODE;
+	reset();
+});
+
+test("pi extension passes through attachments it cannot analyze", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "pic.png");
+	const unsupported = {
+		type: "image" as const,
+		data: Buffer.from("svg").toString("base64"),
+		mimeType: "image/svg+xml",
+	};
+
+	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+	const result = (await events.input[0]({
+		type: "input",
+		text: `see ${imagePath}`,
+		images: [unsupported],
+	})) as { action: string; text: string; images: unknown[] };
+	assert.equal(result.action, "transform");
+	// The referenced path is still stripped and described...
+	assert.equal(result.text.includes(imagePath), false);
+	// ...and the un-analyzable attachment survives instead of being dropped.
+	assert.equal(result.images.length, 1);
+	reset();
+});
+
+test("pi extension replaces read results on image files only", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "pic.png");
+
+	setNextResult({ status: 0, stdout: "@@FENCE pic desc@@" });
+	const replaced = (await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: "rawbytes", mimeType: "image/png" }],
+		isError: false,
+	})) as any;
+	assert.match(replaced.content[0].text, /@@FENCE pic desc@@/);
+
+	// Non-image reads pass through untouched.
+	const untouched = await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: join(testDir, "notes.txt") },
+		content: [{ type: "text", text: "plain" }],
+		isError: false,
+	});
+	assert.equal(untouched, undefined);
+	// Other tools pass through untouched.
+	const otherTool = await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "bash",
+		input: { command: "ls" },
+		content: [{ type: "text", text: "out" }],
+		isError: false,
+	});
+	assert.equal(otherTool, undefined);
 	reset();
 });
 
@@ -526,395 +695,5 @@ test("status reads claude-code version from the hooks config, not a marker file"
 	assert.equal(r.ok, true);
 	assert.match(r.message, new RegExp(`✓ claude-code\\s+${VERSION.replace(/\./g, "\\.")}`));
 	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
-	reset();
-});
-
-/**
- * Shape of the generated opencode plugin's default export: an async factory
- * receiving plugin options and returning the hooks record.
- */
-type OpencodePluginFactory = (input: {
-	directory: string;
-}) => Promise<Record<string, (input: any, output: any) => Promise<void>>>;
-
-/**
- * Load the generated opencode plugin with stubbed spawnSync and return its
- * hooks. Verifies the plugin factory contract: an async default export
- * returning chat.message and tool.execute.before hooks.
- */
-async function loadOpencodePlugin(source: string, home: string) {
-	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
-		source,
-		home,
-		"vision-proxy",
-	);
-	assert.equal(
-		typeof mod.default,
-		"function",
-		"generated plugin must export a default factory function",
-	);
-	const hooks = await (mod.default as OpencodePluginFactory)({ directory: dir });
-	assert.ok(Object.keys(hooks).includes("chat.message"), "must register chat.message hook");
-	assert.ok(
-		Object.keys(hooks).includes("tool.execute.before"),
-		"must register tool.execute.before hook",
-	);
-	return { hooks, dir, calls, setNextResult };
-}
-
-const TINY_PNG_B64 =
-	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-
-test("install opencode writes the vision-proxy plugin file with valid source", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	const r = await runIntegration("install", "opencode", dir);
-	assert.equal(r.ok, true);
-	const target = join(dir, "vision-proxy.ts");
-	assert.equal(existsSync(target), true);
-	const written = readFileSync(target, "utf8");
-	// The version placeholder must be replaced with a concrete marker; this is
-	// the only file-content property not covered by the load + hook tests below.
-	assert.doesNotMatch(written, /__VP_VERSION__PLACEHOLDER__/);
-	assert.match(written, /__VP_VERSION__:/);
-	await loadOpencodePlugin(written, home);
-	reset();
-});
-
-test("opencode chat.message describes prompt paths and attached images", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const {
-		hooks,
-		dir: testDir,
-		calls,
-		setNextResult,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
-	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
-	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
-
-	const parts = [
-		{
-			id: "prt-1",
-			sessionID: "ses-1",
-			messageID: "msg-1",
-			type: "text",
-			text: `look at ${imagePath} please`,
-		},
-		{
-			id: "prt-2",
-			sessionID: "ses-1",
-			messageID: "msg-1",
-			type: "file",
-			mime: "image/png",
-			url: `data:image/png;base64,${TINY_PNG_B64}`,
-		},
-	];
-	await hooks["chat.message"](
-		{ sessionID: "ses-1", messageID: "msg-1" },
-		{ message: { sessionID: "ses-1" }, parts },
-	);
-
-	// The attached image part was removed and a synthetic context part appended.
-	const fileParts = parts.filter((p) => p.type === "file");
-	assert.equal(
-		fileParts.length,
-		0,
-		"attached image part must be removed so bytes never reach the model",
-	);
-	const synthetic = parts.find((p) => p.type === "text" && (p as any).synthetic === true) as any;
-	assert.ok(synthetic, "description must be appended as a synthetic text part");
-	assert.match(synthetic.id, /^prt-/);
-	assert.equal(synthetic.sessionID, "ses-1");
-	assert.match(synthetic.text, /@@FENCE red square@@/);
-	assert.equal(
-		calls.length,
-		1,
-		"vp analyze must run exactly once, deduping the temp copy of the attachment with the referenced path",
-	);
-	const analyzeArgs = calls[0]?.[1] ?? [];
-	assert.equal(analyzeArgs[0], "analyze", "vp analyze must be invoked with the analyze subcommand");
-	assert.ok(
-		analyzeArgs.includes(imagePath),
-		"vp analyze must receive the unique image path resolved from the prompt",
-	);
-	assert.ok(
-		analyzeArgs.some((a: string) => /vp-opencode-.*image\.png$/.test(a)),
-		"vp analyze must also receive the temp file decoded from the attached data URL",
-	);
-	reset();
-});
-
-test("opencode chat.message passes the user prompt as --question for tailoring", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const {
-		hooks,
-		dir: testDir,
-		calls,
-		setNextResult,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
-	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
-	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
-
-	const parts = [
-		{
-			id: "prt-1",
-			sessionID: "ses-1",
-			messageID: "msg-1",
-			type: "text",
-			text: `what is in ${imagePath}?`,
-		},
-	];
-	await hooks["chat.message"](
-		{ sessionID: "ses-1", messageID: "msg-1" },
-		{ message: { sessionID: "ses-1" }, parts },
-	);
-
-	// Parity with the claude-code/codex UserPromptSubmit hook: the user's own
-	// prompt text is forwarded as --question so the vision model tailors the
-	// description to what the user is asking.
-	const analyzeArgs = calls[0]?.[1] ?? [];
-	const qIndex = analyzeArgs.indexOf("--question");
-	assert.ok(qIndex !== -1, "vp analyze must receive --question");
-	assert.equal(analyzeArgs[qIndex + 1], `what is in ${imagePath}?`);
-	reset();
-});
-
-test("opencode chat.message is a no-op when there are no images or analysis fails", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const {
-		hooks,
-		dir: testDir,
-		setNextResult,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
-	// No images in text -> untouched.
-	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
-	const plainParts = [{ id: "prt-1", type: "text", text: "no images here" }] as any[];
-	await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts: plainParts });
-	assert.equal(plainParts.length, 1);
-
-	// Analysis failure -> fail-open, image part stays for native handling.
-	setNextResult({ status: 1, stdout: "" });
-	const imagePath = fakeImage(testDir, "pic.png");
-	const failingParts = [{ id: "prt-1", type: "text", text: `look at ${imagePath}` }] as any[];
-	await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts: failingParts });
-	assert.equal(failingParts.length, 1);
-	assert.equal((failingParts[0] as any).text.includes(imagePath), true);
-	reset();
-});
-
-test("opencode chat.message strips its own prior injection instead of duplicating it", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const {
-		hooks,
-		dir: testDir,
-		calls,
-		setNextResult,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
-	const imagePath = fakeImage(testDir, "again.png");
-
-	// First delivery: analysis runs, one description is appended.
-	setNextResult({ status: 0, stdout: "@@FENCE first desc@@" });
-	const parts = [{ id: "prt-1", type: "text", text: `look at ${imagePath}` }] as any[];
-	await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts });
-	assert.equal(parts.filter((p) => (p as any).synthetic === true).length, 1);
-
-	// Re-delivery of the same message (retry/re-fire): the stale injection must
-	// be removed so exactly one description remains, carrying the newest text.
-	setNextResult({ status: 0, stdout: "@@FENCE second desc@@" });
-	await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts });
-	const synthetics = parts.filter((p) => (p as any).synthetic === true);
-	assert.equal(synthetics.length, 1, "prior injections must be stripped, never duplicated");
-	assert.match(synthetics[0].text, /@@FENCE second desc@@/);
-	assert.doesNotMatch(synthetics[0].text, /@@FENCE first desc@@/);
-	// Prompt text itself must not accumulate stale injections either.
-	const promptPart = parts.find((p) => p.type === "text" && !(p as any).synthetic) as any;
-	assert.doesNotMatch(promptPart.text, /\[vision-proxy:image\]/);
-	assert.equal(calls.length, 2, "each delivery analyzes once");
-	reset();
-});
-
-test("opencode chat.message expands tilde paths before analyzing", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const { hooks, calls, setNextResult } = await loadOpencodePlugin(
-		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
-		home,
-	);
-	const tildePath = join(homedir(), "vp-test-tilde.png");
-	writeFileSync(tildePath, Buffer.from(TINY_PNG_B64, "base64"));
-	try {
-		setNextResult({ status: 0, stdout: "@@FENCE tilde desc@@" });
-		const parts = [{ id: "prt-1", type: "text", text: "see ~/vp-test-tilde.png" }] as any[];
-		await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts });
-		const synth = parts.find((p) => (p as any).synthetic === true) as any;
-		assert.ok(synth, "tilde image must be analyzed and described");
-		assert.match(synth.text, /@@FENCE tilde desc@@/);
-		assert.equal(calls.length, 1, "vp analyze must run once for the tilde path");
-		assert.ok(
-			calls[0][1].includes(tildePath),
-			"vp analyze must receive the tilde-expanded absolute path",
-		);
-	} finally {
-		rmSync(tildePath, { force: true });
-		reset();
-	}
-});
-
-test("opencode tool.execute.before denies read on tilde image paths", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const { hooks, setNextResult } = await loadOpencodePlugin(
-		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
-		home,
-	);
-	const tildePath = join(homedir(), "vp-test-tilde2.png");
-	writeFileSync(tildePath, Buffer.from(TINY_PNG_B64, "base64"));
-	try {
-		setNextResult({ status: 0, stdout: "@@FENCE t2@@" });
-		await assert.rejects(
-			hooks["tool.execute.before"](
-				{ tool: "read" },
-				{ args: { filePath: "~/vp-test-tilde2.png" } },
-			),
-			/@@FENCE t2@@/,
-		);
-	} finally {
-		rmSync(tildePath, { force: true });
-		reset();
-	}
-});
-
-test("generated opencode plugin stays free of modality detection", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const written = readFileSync(join(dir, "vision-proxy.ts"), "utf8");
-	assert.doesNotMatch(
-		written,
-		/modalit|capabilit/,
-		"always-analyze is a locked decision: the plugin must never branch on model modality metadata",
-	);
-	reset();
-});
-
-test("opencode tool.execute.before denies reads on images and passes others through", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const {
-		hooks,
-		dir: testDir,
-		setNextResult,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
-	const imagePath = fakeImage(testDir, "pic.png");
-
-	// Image read: denied by throw; the thrown message carries the description.
-	setNextResult({ status: 0, stdout: "@@FENCE pic desc@@" });
-	await assert.rejects(
-		hooks["tool.execute.before"](
-			{ tool: "read", sessionID: "s", callID: "c" },
-			{ args: { filePath: imagePath } },
-		),
-		/@@FENCE pic desc@@/,
-	);
-
-	// Non-image read passes through (no throw).
-	setNextResult({ status: 0, stdout: "@@FENCE x@@" });
-	await hooks["tool.execute.before"](
-		{ tool: "read" },
-		{ args: { filePath: join(testDir, "notes.txt") } },
-	);
-
-	// Other tools pass through regardless of args shape.
-	await hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "ls" } });
-
-	// Analysis failure on an image read fails open (original read allowed).
-	fakeImage(testDir, "other.png");
-	setNextResult({ status: 1, stdout: "" });
-	await hooks["tool.execute.before"](
-		{ tool: "read" },
-		{ args: { filePath: join(testDir, "other.png") } },
-	);
-	reset();
-});
-
-test("install opencode is idempotent (no error on re-install)", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	const first = await runIntegration("install", "opencode", dir);
-	assert.equal(first.ok, true);
-	const second = await runIntegration("install", "opencode", dir);
-	assert.equal(second.ok, true);
-	const target = join(dir, "vision-proxy.ts");
-	assert.equal(existsSync(target), true);
-	reset();
-});
-
-test("uninstall opencode removes the file and cleans up empty plugins directory", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const target = join(dir, "vision-proxy.ts");
-	assert.equal(existsSync(target), true);
-	const r = await runIntegration("uninstall", "opencode", dir);
-	assert.equal(r.ok, true);
-	assert.equal(existsSync(target), false);
-	assert.equal(existsSync(dir), false);
-	reset();
-});
-
-test("show opencode prints plugin info without writing to disk", async () => {
-	const _home = isolate();
-	const r = await runIntegration("show", "opencode");
-	assert.equal(r.ok, true);
-	assert.match(r.message, /vision-proxy/);
-	assert.match(r.message, /chat\.message/);
-	assert.match(r.message, /tool\.execute\.before/);
-	assert.match(r.message, /VP_MAX_OUTPUT_TOKENS/);
-	reset();
-});
-
-test("list shows opencode installed state", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const r = await runIntegration("list", "", dir);
-	assert.match(r.message, /✓ opencode/);
-	reset();
-});
-
-test("status reports opencode version from plugin file", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const r = await runIntegration("status", "", dir);
-	assert.equal(r.ok, true);
-	assert.match(r.message, new RegExp(`✓ opencode\\s+${VERSION.replace(/\./g, "\\.")}`));
-	reset();
-});
-
-test("status flags stale opencode plugin version", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await runIntegration("install", "opencode", dir);
-	const target = join(dir, "vision-proxy.ts");
-	writeFileSync(
-		target,
-		readFileSync(target, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"),
-	);
-	const r = await runIntegration("status", "", dir);
-	assert.equal(r.ok, true);
-	assert.match(r.message, /! opencode\s+0\.0\.9/);
-	assert.match(r.message, /out of date/);
 	reset();
 });

@@ -80,8 +80,8 @@ function parseHooks(raw: string): any {
 /**
  * Execute the generated Pi extension with stubbed dependencies to verify it
  * conforms to the Pi extension public interface contract: a default export
- * function that registers an `analyze_image` tool whose `execute` handler
- * returns the standard AgentToolResult shape.
+ * function that hooks into before_agent_start, tool_call, and tool_result
+ * lifecycle events (no tool registration).
  */
 async function assertValidPiExtension(source: string, home: string): Promise<void> {
 	const dir = join(home, "ext-test");
@@ -101,16 +101,10 @@ export function spawnSync(..._args) { return nextResult; }
 	);
 
 	const mod = await import(join(dir, "vision-proxy.ts"));
-	// Pi extension tools are invoked as execute(toolCallId, params, signal).
-	const registered: Array<{
-		name: string;
-		execute: (toolCallId: string, params: unknown, signal?: unknown) => Promise<unknown>;
-	}> = [];
+	// Pi extension lifecycle events are invoked as setup(pi).
+	const events: Array<{ name: string; handler: (...args: unknown[]) => unknown }> = [];
 	const mockPi = {
-		registerTool: (tool: {
-			name: string;
-			execute: (toolCallId: string, params: unknown, signal?: unknown) => Promise<unknown>;
-		}) => registered.push(tool),
+		on: (name: string, handler: (...args: unknown[]) => unknown) => events.push({ name, handler }),
 	};
 
 	assert.equal(
@@ -120,34 +114,12 @@ export function spawnSync(..._args) { return nextResult; }
 	);
 	mod.default(mockPi);
 
-	assert.equal(registered.length, 1, "setup must register exactly one tool");
-	assert.equal(registered[0]!.name, "analyze_image", "registered tool name must be analyze_image");
-
-	const mockCp = await import(join(dir, "mock-child-process.ts"));
-
-	mockCp.setNextResult({
-		status: 0,
-		stdout: JSON.stringify({
-			cacheHit: true,
-			records: [{ hash: "abc", description: "an image description" }],
-		}),
-		stderr: "",
-		error: undefined,
-	});
-	const result = await registered[0]!.execute("call-1", { paths: ["/tmp/img.png"] }, undefined);
-	assert.ok(result, "execute must return a result");
-	assert.ok(Array.isArray(result.content), "result.content must be an array");
-	assert.equal(result.content.length, 1);
-	assert.equal(result.content[0]!.type, "text");
-	assert.equal(result.content[0]!.text, "an image description");
-	assert.ok(result.details, "result.details must be defined");
-	assert.equal(result.details.cacheHit, true);
-	assert.ok(Array.isArray(result.details.records));
-
-	await assert.rejects(
-		async () => registered[0]!.execute("call-2", { paths: [] }, undefined),
-		/requires at least one image path/,
-	);
+	// Should register zero tools and three lifecycle handlers
+	const eventNames = events.map((e) => e.name);
+	assert.ok(!eventNames.includes("analyze_image"), "must not register analyze_image tool");
+	assert.ok(eventNames.includes("before_agent_start"), "must register before_agent_start handler");
+	assert.ok(eventNames.includes("tool_call"), "must register tool_call handler");
+	assert.ok(eventNames.includes("tool_result"), "must register tool_result handler");
 }
 
 /**

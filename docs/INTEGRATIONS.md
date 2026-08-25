@@ -42,7 +42,10 @@ vp integration uninstall codex
 
 ## Pi
 
-Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`.
+Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
+
+- `before_agent_start` — extracts images attached to or referenced in the prompt, runs `vp analyze`, strips image bytes/paths, and injects the fenced UNTRUSTED description into the system prompt.
+- `tool_call` + `tool_result` — intercepts `read` tool calls on image files and replaces the tool result with the fenced description so no image bytes reach the model.
 
 ```bash
 vp integration install pi
@@ -54,6 +57,8 @@ Uninstall:
 ```bash
 vp integration uninstall pi
 ```
+
+Restart Pi after installing.
 
 ## opencode (v1)
 
@@ -99,4 +104,5 @@ Configuration options (via environment variables):
 | `vp hook` not found | Re-run `vp integration install <agent>` so the absolute binary path is written into the config, or ensure `vp` is on PATH. |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |
+| Pi images not described | Check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |
 | opencode plugin not loading | Run `opencode plugin list` to verify installation; restart opencode after installing. |

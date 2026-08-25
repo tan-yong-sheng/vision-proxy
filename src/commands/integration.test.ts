@@ -544,7 +544,7 @@ test("uninstall opencode removes the file and cleans up empty plugins directory"
 });
 
 test("show opencode prints plugin info without writing to disk", async () => {
-	const home = isolate();
+	const _home = isolate();
 	const r = await runIntegration("show", "opencode");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /vision-proxy/);

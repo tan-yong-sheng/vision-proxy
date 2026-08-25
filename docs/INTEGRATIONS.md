@@ -70,11 +70,13 @@ vp integration uninstall pi
 
 Installs the `vision-proxy.ts` plugin into `~/.config/opencode/plugins/`.
 
-The plugin registers hooks for **strict parity with claude-code/codex**:
-- `chat.message` hook - like `UserPromptSubmit`: extracts image paths from user prompt, runs `vp analyze`, injects description as additional context
-- `tool.execute.before` hook (Read) - like `PreToolUse Read`: intercepts `Read` tool calls on image files, runs `vp analyze`, injects description as additional context, denies the native Read
+The plugin registers hooks for **parity with claude-code/codex**:
+- `chat.message` hook - like `UserPromptSubmit`: extracts image paths from the user text, decodes attached image parts (data URLs), runs `vp analyze`, removes the analyzed image parts from the message so no bytes reach the model, and appends the fenced description as a synthetic text part.
+- `tool.execute.before` hook (`read`) - like `PreToolUse Read`: intercepts `read` tool calls on image files, runs `vp analyze`, and denies the read by throwing an error whose message carries the instruction and description.
 
-No new `analyze_image` tool is registered - the agent uses its native Read tool which the hook intercepts and replaces with vision-proxy description.
+No new `analyze_image` tool is registered - the agent uses its native Read tool which the hook intercepts.
+
+If `vp analyze` fails, the plugin fails open: the original message parts and tool calls proceed unchanged.
 
 ```bash
 vp integration install opencode
@@ -94,4 +96,4 @@ The plugin requires:
 Configuration options (via environment variables):
 - `VP_MAX_OUTPUT_TOKENS` - Max output tokens for `vp analyze` (default: 2000)
 - `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
-- `VP_BIN` - Path to vp binary (default: "vp")
+- `VP_BIN` - Path to vp binary (default: "vp"; a `.js` entry point is run with the current Node executable)

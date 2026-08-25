@@ -94,13 +94,13 @@ function extractImagePaths(text: string): string[] {
   const prefix = "[" + BS + "s" + SQ + DQ + "(" + "]";
   const middle = "[^" + SQ + DQ + "*?|" + BS + "n]*?";
   const re2 = new RegExp(
-    "(?:^" + prefix + ")((?:[a-zA-Z]:[/]|/|~)" + middle + "[/]" + middle + "\\.(?:" + extPattern + "))\\b",
+    "(?:^|" + prefix + ")((?:[a-zA-Z]:[/]|/|~)" + middle + "[/]" + middle + "\\.(?:" + extPattern + "))\\b",
     "gi",
   );
   for (const m of text.matchAll(re2)) add(m[1]);
   // Pass 3: relative ./ and ../ paths.
   const re3 = new RegExp(
-    "(?:^" + prefix + ")(\\./?" + middle + "\\.(?:" + extPattern + "))\\b",
+    "(?:^|" + prefix + ")(\\./?" + middle + "\\.(?:" + extPattern + "))\\b",
     "gi",
   );
   for (const m of text.matchAll(re3)) add(m[1]);
@@ -111,7 +111,7 @@ function extractImagePaths(text: string): string[] {
 function resolveVpBin(): string {
   const env = process.env.VP_BIN;
   if (env?.trim()) return env;
-  return process.argv[1] ?? "vp";
+  return "vp";
 }
 
 /** Run \`vp analyze\` and return the fenced description, or null on failure. */

@@ -19,12 +19,18 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { OPENCODE_PLUGIN_SOURCE } from "../opencode-plugin.ts";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
 import { extractMarkerVersion, renderVersionMarker, VERSION } from "../version.ts";
 
-const SUPPORTED = ["pi", "claude-code", "codex"];
+const SUPPORTED = ["pi", "claude-code", "codex", "opencode"];
 const PI_EXTENSION_FILENAME = "vision-proxy.ts";
 const HOOK_TIMEOUT_SEC = 30;
+
+/** Returns the home directory, respecting process.env.HOME for test isolation. */
+function getHomeDir(): string {
+	return process.env.HOME ?? homedir();
+}
 
 export interface IntegrationResult {
 	ok: boolean;
@@ -52,21 +58,21 @@ interface AgentSpec {
 	/** Remove our registrations from the config; returns new serialized config + whether anything was removed. */
 	remove(raw: string): { raw: string; removed: boolean };
 	/** Whether the config currently contains our hook registrations. */
-	isInstalled(raw: string): boolean;
+	isInstalled(raw?: string): boolean;
 	/** Version stamped into the marker file, or undefined if absent/unstamped. */
 	installedVersion(opts: { installDir?: string }): string | undefined;
 }
 
 function piExtensionsDir(): string {
-	return join(homedir(), ".pi", "agent", "extensions");
+	return join(getHomeDir(), ".pi", "agent", "extensions");
 }
 
 function claudeCodeConfigPath(): string {
-	return join(homedir(), ".claude", "settings.json");
+	return join(getHomeDir(), ".claude", "settings.json");
 }
 
 function codexConfigPath(): string {
-	return join(homedir(), ".codex", "hooks.json");
+	return join(getHomeDir(), ".codex", "hooks.json");
 }
 
 /**
@@ -242,7 +248,7 @@ function hooksInstalled(raw: string): boolean {
  * both install and uninstall so a fresh hooks.json isn't shadowed by it.
  */
 function removeLegacyCodexConfigToml(): void {
-	const p = join(homedir(), ".codex", "config.toml");
+	const p = join(getHomeDir(), ".codex", "config.toml");
 	if (!existsSync(p)) return;
 	const raw = readFileSync(p, "utf8");
 	if (!raw.includes("vision-proxy")) return;
@@ -307,7 +313,7 @@ function makeHookAgentSpec(opts: {
 		hookCommand: makeHookCommand,
 		apply: (raw) => applyHooks(raw, makeHookCommand()),
 		remove: (raw) => removeHooks(raw),
-		isInstalled: (raw) => hooksInstalled(raw),
+		isInstalled: (raw?: string) => hooksInstalled(raw ?? ""),
 		installedVersion: () => {
 			const cfgPath = opts.configPath();
 			// Hook agents (claude-code, codex) store their version inside the host
@@ -342,33 +348,59 @@ function makeHookAgentSpec(opts: {
 	};
 }
 
+function opencodePluginsDir(): string {
+	return join(getHomeDir(), ".config", "opencode", "plugins");
+}
+
+const OPENCODE_PLUGIN_FILENAME = "vision-proxy.ts";
+
+const opencodeSpec: AgentSpec = {
+	id: "opencode",
+	target: ({ installDir }) => join(installDir ?? opencodePluginsDir(), OPENCODE_PLUGIN_FILENAME),
+	locationLabel: ({ installDir }) =>
+		join(installDir ?? opencodePluginsDir(), OPENCODE_PLUGIN_FILENAME),
+	generate: () =>
+		OPENCODE_PLUGIN_SOURCE.replace("__VP_VERSION__PLACEHOLDER__", renderVersionMarker()),
+	readConfig: () => ({ raw: "" }),
+	configPath: () => "",
+	hookCommand: makeHookCommand,
+	apply: (raw) => raw,
+	remove: (raw) => ({ raw, removed: false }),
+	isInstalled: () => existsSync(opencodeSpec.target({})),
+	installedVersion: ({ installDir }) => {
+		const path = opencodeSpec.target({ installDir });
+		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
+	},
+};
+
 const claudeCode: AgentSpec = makeHookAgentSpec({
 	id: "claude-code",
-	markerPath: () => join(homedir(), ".claude", "vision-proxy.hook.json"),
+	markerPath: () => join(getHomeDir(), ".claude", "vision-proxy.hook.json"),
 	configPath: claudeCodeConfigPath,
 });
 
 const codex: AgentSpec = makeHookAgentSpec({
 	id: "codex",
-	markerPath: () => join(homedir(), ".codex", "vision-proxy.hook.json"),
+	markerPath: () => join(getHomeDir(), ".codex", "vision-proxy.hook.json"),
 	configPath: codexConfigPath,
 });
 
 function specFor(agent: string): AgentSpec | undefined {
 	if (agent === "pi") return piSpec;
+	if (agent === "opencode") return opencodeSpec;
 	if (agent === "claude-code") return claudeCode;
 	if (agent === "codex") return codex;
 	return undefined;
 }
 
-function isAgentInstalled(spec: AgentSpec): boolean {
+function isAgentInstalled(spec: AgentSpec, installDir?: string): boolean {
 	const cfgPath = spec.configPath();
 	// Hook agents are "installed" when their config block is present.
 	if (cfgPath) {
 		return existsSync(cfgPath) && spec.isInstalled(spec.readConfig().raw);
 	}
-	// Pi has no host config; the extension file is the install signal.
-	return existsSync(spec.target({}));
+	// Pi and opencode have no host config; the extension file is the install signal.
+	return existsSync(spec.target({ installDir }));
 }
 
 function rejectUnknownAgent(agent: string): IntegrationResult {
@@ -434,6 +466,17 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 			code: 1,
 		};
 	}
+
+	// opencode: show the plugin installation info
+	if (agent === "opencode") {
+		const pluginPath = opencodePluginsDir();
+		return {
+			ok: true,
+			message: `opencode plugin: vision-proxy.ts\n\nInstall location: ${pluginPath}/\n\nThe plugin registers hooks for strict parity with claude-code/codex:\n- chat.message -> like UserPromptSubmit (analyzes images in prompt)\n- tool.execute.before (Read) -> like PreToolUse Read (intercepts Read on images)\n\nConfiguration via environment variables:\n- VP_MODEL (default: gemini-2.5-flash)\n- VP_PROVIDER (default: google)\n- VP_BIN (default: vp on PATH)\n- VP_HOOK_TIMEOUT_MS (default: 30000)`,
+			code: 0,
+		};
+	}
+
 	const command = spec.hookCommand();
 	const { raw } = spec.readConfig();
 	const merged = spec.apply(raw);
@@ -451,11 +494,11 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 }
 
 // fallow-ignore-next-line unused-export
-export async function integrationList(): Promise<IntegrationResult> {
+export async function integrationList(installDir?: string): Promise<IntegrationResult> {
 	const lines: string[] = [];
 	for (const agent of SUPPORTED) {
 		const spec = specFor(agent)!;
-		const installed = isAgentInstalled(spec);
+		const installed = isAgentInstalled(spec, installDir);
 		lines.push(`${installed ? "✓" : " "} ${agent}`);
 	}
 	return { ok: true, message: lines.join("\n"), code: 0 };
@@ -463,24 +506,24 @@ export async function integrationList(): Promise<IntegrationResult> {
 
 /**
  * Report install status per agent, annotated with the vp version embedded in
- * each installed hook group or Pi extension marker, so the user can see which
+ * each installed hook group or Pi/opencode extension marker, so the user can see which
  * integrations predate the installed `vp` and should be refreshed with
  * `vp integration install`.
  */
 // fallow-ignore-next-line unused-export
-export async function integrationStatus(): Promise<IntegrationResult> {
+export async function integrationStatus(installDir?: string): Promise<IntegrationResult> {
 	const lines: string[] = [`vp ${VERSION}`];
 	let outdated = 0;
 	let installedCount = 0;
 	for (const agent of SUPPORTED) {
 		const spec = specFor(agent)!;
-		const installed = isAgentInstalled(spec);
+		const installed = isAgentInstalled(spec, installDir);
 		if (!installed) {
 			lines.push(`✗ ${agent}  not installed`);
 			continue;
 		}
 		installedCount++;
-		const marker = spec.installedVersion({});
+		const marker = spec.installedVersion({ installDir });
 		if (!marker) {
 			lines.push(`✓ ${agent}  installed (version unknown)`);
 			outdated++;
@@ -579,9 +622,9 @@ export async function runIntegration(
 			if (!agent) return { ok: false, message: "usage: vp integration show <agent>", code: 1 };
 			return integrationShow(agent);
 		case "list":
-			return integrationList();
+			return integrationList(installDir);
 		case "status":
-			return integrationStatus();
+			return integrationStatus(installDir);
 		case "uninstall":
 			if (!agent) return { ok: false, message: "usage: vp integration uninstall <agent>", code: 1 };
 			return integrationUninstall(agent, { installDir });

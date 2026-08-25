@@ -59,8 +59,40 @@ vp integration uninstall pi
 
 | Symptom | Fix |
 |---------|-----|
-| Agent CLI not found | Install Claude Code, Codex, or Pi first. |
+| Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
 | Hook not firing | Confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. |
 | `vp hook` not found | Re-run `vp integration install <agent>` so the absolute binary path is written into the config, or ensure `vp` is on PATH. |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |
+| opencode plugin not loading | Run `opencode plugin list` to verify installation; restart opencode after installing. |
+
+## opencode (v1)
+
+Installs the `vision-proxy.ts` plugin into `~/.config/opencode/plugins/`.
+
+The plugin registers hooks for **strict parity with claude-code/codex**:
+- `chat.message` hook - like `UserPromptSubmit`: extracts image paths from user prompt, runs `vp analyze`, injects description as additional context
+- `tool.execute.before` hook (Read) - like `PreToolUse Read`: intercepts `Read` tool calls on image files, runs `vp analyze`, injects description as additional context, denies the native Read
+
+No new `analyze_image` tool is registered - the agent uses its native Read tool which the hook intercepts and replaces with vision-proxy description.
+
+```bash
+vp integration install opencode
+vp integration status opencode
+```
+
+Uninstall:
+
+```bash
+vp integration uninstall opencode
+```
+
+The plugin requires:
+- opencode v1 CLI installed
+- `vp` binary on PATH (or set `VP_BIN` environment variable)
+
+Configuration options (via environment variables):
+- `VP_MODEL` - Vision model to use (default: "gemini-2.5-flash")
+- `VP_PROVIDER` - Provider for the vision model (default: "google")
+- `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
+- `VP_BIN` - Path to vp binary (default: "vp")

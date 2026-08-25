@@ -502,3 +502,90 @@ test("status reads claude-code version from the hooks config, not a marker file"
 	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
 	reset();
 });
+
+test("install opencode writes the vision-proxy plugin file with valid source", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	const r = await runIntegration("install", "opencode", dir);
+	assert.equal(r.ok, true);
+	const target = join(dir, "vision-proxy.ts");
+	assert.equal(existsSync(target), true);
+	const written = readFileSync(target, "utf8");
+	assert.match(written, /chat\.message/);
+	assert.match(written, /tool\.execute\.before/);
+	assert.match(written, /vp analyze/);
+	assert.match(written, /__VP_VERSION__:0\.1\.2/);
+	reset();
+});
+
+test("install opencode is idempotent (no error on re-install)", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	const first = await runIntegration("install", "opencode", dir);
+	assert.equal(first.ok, true);
+	const second = await runIntegration("install", "opencode", dir);
+	assert.equal(second.ok, true);
+	const target = join(dir, "vision-proxy.ts");
+	assert.equal(existsSync(target), true);
+	reset();
+});
+
+test("uninstall opencode removes the file and cleans up empty plugins directory", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const target = join(dir, "vision-proxy.ts");
+	assert.equal(existsSync(target), true);
+	const r = await runIntegration("uninstall", "opencode", dir);
+	assert.equal(r.ok, true);
+	assert.equal(existsSync(target), false);
+	assert.equal(existsSync(dir), false);
+	reset();
+});
+
+test("show opencode prints plugin info without writing to disk", async () => {
+	const home = isolate();
+	const r = await runIntegration("show", "opencode");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /vision-proxy/);
+	assert.match(r.message, /chat\.message/);
+	assert.match(r.message, /tool\.execute\.before/);
+	assert.match(r.message, /VP_MODEL/);
+	assert.match(r.message, /VP_PROVIDER/);
+	reset();
+});
+
+test("list shows opencode installed state", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const r = await runIntegration("list", "", dir);
+	assert.match(r.message, /✓ opencode/);
+	reset();
+});
+
+test("status reports opencode version from plugin file", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const r = await runIntegration("status", "", dir);
+	assert.equal(r.ok, true);
+	assert.match(r.message, new RegExp(`✓ opencode\\s+${VERSION.replace(/\./g, "\\.")}`));
+	reset();
+});
+
+test("status flags stale opencode plugin version", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const target = join(dir, "vision-proxy.ts");
+	writeFileSync(
+		target,
+		readFileSync(target, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"),
+	);
+	const r = await runIntegration("status", "", dir);
+	assert.equal(r.ok, true);
+	assert.match(r.message, /! opencode\s+0\.0\.9/);
+	assert.match(r.message, /out of date/);
+	reset();
+});

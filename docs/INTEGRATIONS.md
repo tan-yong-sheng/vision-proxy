@@ -60,6 +60,11 @@ vp integration uninstall pi
 
 Restart Pi after installing.
 
+Configuration options (via environment variables):
+- `VP_MODE` - Controls whether the Pi extension is active (`always` | `off`, default: `always`)
+- `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
+- `VP_BIN` - Path to vp binary (default: "vp")
+
 ## opencode (v1)
 
 Installs the `vision-proxy.ts` plugin into `~/.config/opencode/plugins/`.

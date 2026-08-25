@@ -99,7 +99,7 @@ function resolveImageRefs(prompt: string, sessionId: string | undefined): string
 function extractImagePaths(text: string): string[] {
   const paths = new Set<string>();
   const add = (p: string) => { const t = (p || "").trim(); if (t) paths.add(t); };
-  const re1 = /(?:^[\\s"'])([a-zA-Z]:[/\\\\][^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+|\\/[^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+)/gim;
+  const re1 = /(?:^|[\\s"'])([a-zA-Z]:[/\\\\][^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+|\\/[^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+)/gim;
   for (const m of text.matchAll(re1)) add(m[1]);
   const extPattern = IMAGE_EXT.join("|");
   const re2 = new RegExp(\`(?:^|[\\\\s"'(])((?:[a-zA-Z]:[/\\\\\\\\]|/|~)[^"'*?|\\\\n]*?[/\\\\\\\\][^"'*?|\\\\n]*?\\\\.(?:${extPattern}))\\\\b\`, "gi");

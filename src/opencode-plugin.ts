@@ -118,13 +118,12 @@ function resolveImagePath(p: string | undefined | null, cwd?: string): string | 
   return p;
 }
 
-function runAnalyze(images: string[], question?: string): string | null {
+function runAnalyze(images: string[]): string | null {
   if (images.length === 0) return null;
   const vp = resolveVpBin();
   const { command, args: prefix } = vpEntryToSpawn(vp);
   const codexCap = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
   const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(codexCap)];
-  if (question?.trim()) args.push("--question", question.trim());
   const result = spawnSync(command, args, { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES });
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -158,7 +157,7 @@ const messageHook: Hooks["chat.message"] = async (input, output) => {
   const refImages = resolveImageRefs(prompt, sessionId);
   const allImages = [...images, ...refImages];
   if (allImages.length === 0) return;
-  const description = runAnalyze(allImages, prompt);
+  const description = runAnalyze(allImages);
   if (!description) return;
   output.additionalContext = withImageInstruction(description);
 };

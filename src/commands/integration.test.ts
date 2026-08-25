@@ -550,8 +550,7 @@ test("show opencode prints plugin info without writing to disk", async () => {
 	assert.match(r.message, /vision-proxy/);
 	assert.match(r.message, /chat\.message/);
 	assert.match(r.message, /tool\.execute\.before/);
-	assert.match(r.message, /VP_MODEL/);
-	assert.match(r.message, /VP_PROVIDER/);
+	assert.match(r.message, /VP_MAX_OUTPUT_TOKENS/);
 	reset();
 });
 

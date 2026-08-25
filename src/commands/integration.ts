@@ -472,7 +472,7 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 		const pluginPath = opencodePluginsDir();
 		return {
 			ok: true,
-			message: `opencode plugin: vision-proxy.ts\n\nInstall location: ${pluginPath}/\n\nThe plugin registers hooks for strict parity with claude-code/codex:\n- chat.message -> like UserPromptSubmit (analyzes images in prompt)\n- tool.execute.before (Read) -> like PreToolUse Read (intercepts Read on images)\n\nConfiguration via environment variables:\n- VP_MODEL (default: gemini-2.5-flash)\n- VP_PROVIDER (default: google)\n- VP_BIN (default: vp on PATH)\n- VP_HOOK_TIMEOUT_MS (default: 30000)`,
+			message: `opencode plugin: vision-proxy.ts\n\nInstall location: ${pluginPath}/\n\nThe plugin registers hooks for strict parity with claude-code/codex:\n- chat.message -> like UserPromptSubmit (analyzes images in prompt)\n- tool.execute.before (Read) -> like PreToolUse Read (intercepts Read on images)\n\nConfiguration via environment variables:\n- VP_MAX_OUTPUT_TOKENS (default: 2000)\n- VP_BIN (default: vp on PATH)\n- VP_HOOK_TIMEOUT_MS (default: 30000)`,
 			code: 0,
 		};
 	}

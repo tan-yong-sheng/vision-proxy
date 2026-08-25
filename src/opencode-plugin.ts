@@ -51,7 +51,7 @@ function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
 function resolveVpBin(): string {
   const env = process.env.VP_BIN;
   if (env?.trim()) return env;
-  return process.argv[1] ?? "vp";
+  return "vp";
 }
 
 function isImagePath(p: string | undefined | null): boolean {
@@ -102,9 +102,9 @@ function extractImagePaths(text: string): string[] {
   const re1 = /(?:^[\\s"'])([a-zA-Z]:[/\\\\][^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+|\\/[^\\s"'*?|]*?pi-clipboard-[a-f0-9-]+\\.[a-zA-Z0-9]+)/gim;
   for (const m of text.matchAll(re1)) add(m[1]);
   const extPattern = IMAGE_EXT.join("|");
-  const re2 = new RegExp(\`(?:^[\\\\s"'(])((?:[a-zA-Z]:[/\\\\\\\\]|/|~)[^"'*?|\\\\n]*?[/\\\\\\\\][^"'*?|\\\\n]*?\\\\.(?:${extPattern}))\\\\b\`, "gi");
+  const re2 = new RegExp(\`(?:^|[\\\\s"'(])((?:[a-zA-Z]:[/\\\\\\\\]|/|~)[^"'*?|\\\\n]*?[/\\\\\\\\][^"'*?|\\\\n]*?\\\\.(?:${extPattern}))\\\\b\`, "gi");
   for (const m of text.matchAll(re2)) add(m[1]);
-  const re3 = new RegExp(\`(?:^[\\\\s"'(])(\\\\.\\\\.?/[^"'*?|\\\\n]*?\\\\.(?:${extPattern}))\\\\b\`, "gi");
+  const re3 = new RegExp(\`(?:^|[\\\\s"'(])(\\\\.\\\\.?/[^"'*?|\\\\n]*?\\\\.(?:${extPattern}))\\\\b\`, "gi");
   for (const m of text.matchAll(re3)) add(m[1]);
   return [...paths];
 }

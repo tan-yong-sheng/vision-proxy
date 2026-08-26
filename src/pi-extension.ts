@@ -329,10 +329,18 @@ function withImageInstruction(description: string): string {
 // new sessions, so each image is described at most once (cost, latency, and no
 // stale duplicate text in the model context).
 const CACHE_CAP = 200;
-const descriptionCachePath = (() => {
+function resolveHomeDir(): string {
+  const env = process.env.HOME;
+  if (env && env.length > 0) return env;
   try {
     const home = homedir();
-    if (home) return join(home, ".vision-proxy", "pi-desc-cache.json");
+    if (home) return home;
+  } catch { /* ignore */ }
+  return tmpdir();
+}
+const descriptionCachePath = (() => {
+  try {
+    return join(resolveHomeDir(), ".vision-proxy", "pi-desc-cache.json");
   } catch { /* ignore */ }
   return join(tmpdir(), "vp-pi-desc-cache.json");
 })();

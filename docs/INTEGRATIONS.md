@@ -55,17 +55,6 @@ Uninstall:
 vp integration uninstall pi
 ```
 
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
-| Hook not firing | Confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. |
-| `vp hook` not found | Re-run `vp integration install <agent>` so the absolute binary path is written into the config, or ensure `vp` is on PATH. |
-| Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
-| Pi extension not loading | Restart Pi after installing. |
-| opencode plugin not loading | Run `opencode plugin list` to verify installation; restart opencode after installing. |
-
 ## opencode (v1)
 
 Installs the `vision-proxy.ts` plugin into `~/.config/opencode/plugins/`.
@@ -97,3 +86,14 @@ Configuration options (via environment variables):
 - `VP_MAX_OUTPUT_TOKENS` - Max output tokens for `vp analyze` (default: 2000)
 - `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
 - `VP_BIN` - Path to vp binary (default: "vp"; a `.js` entry point is run with the current Node executable)
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
+| Hook not firing | Confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. |
+| `vp hook` not found | Re-run `vp integration install <agent>` so the absolute binary path is written into the config, or ensure `vp` is on PATH. |
+| Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
+| Pi extension not loading | Restart Pi after installing. |
+| opencode plugin not loading | Run `opencode plugin list` to verify installation; restart opencode after installing. |

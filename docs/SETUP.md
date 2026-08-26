@@ -20,7 +20,7 @@ How to get a vision-capable model working with `vp`.
 
 Install `vp` into your agent so it can see images in prompts:
 
-- [INTEGRATIONS.md](./INTEGRATIONS.md) - Claude Code, Codex, Pi
+- [INTEGRATIONS.md](./INTEGRATIONS.md) - Claude Code, Codex, Pi, opencode
 
 ## Keyring storage
 

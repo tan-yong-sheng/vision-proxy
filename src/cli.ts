@@ -186,7 +186,7 @@ update options:
   --beta                     install the latest pre-release instead of stable
 
 integration options:
-  install <agent>            install vision-proxy for pi | claude-code | codex
+  install <agent>            install vision-proxy for pi | claude-code | codex | opencode
   show <agent>               print what install would generate
   list                       show which agents have vision-proxy installed
   status                     show installed version markers per agent
@@ -439,6 +439,7 @@ Agents:
   pi                 Pi coding agent (global extensions directory)
   claude-code        Claude Code agent (UserPromptSubmit hook)
   codex              Codex agent (UserPromptSubmit hook)
+  opencode           opencode v1 agent (local TypeScript plugin)
 
 Options:
   -h, --help         show this help`,
@@ -451,7 +452,7 @@ Usage:
   vp integration install <agent>
 
 Arguments:
-  <agent>            supported agent id (currently: pi)`,
+  <agent>            supported agent id: pi | claude-code | codex | opencode`,
 
 	"integration show": `vp integration show <agent>
 
@@ -461,7 +462,7 @@ Usage:
   vp integration show <agent>
 
 Arguments:
-  <agent>            supported agent id (currently: pi)`,
+  <agent>            supported agent id: pi | claude-code | codex | opencode`,
 
 	"integration uninstall": `vp integration uninstall <agent>
 
@@ -471,7 +472,7 @@ Usage:
   vp integration uninstall <agent>
 
 Arguments:
-  <agent>            supported agent id (currently: pi)`,
+  <agent>            supported agent id: pi | claude-code | codex | opencode`,
 
 	"integration list": `vp integration list
 

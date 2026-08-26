@@ -1,27 +1,45 @@
 {
   "findings": [
     {
-      "id": "opencode-plugin-messageid-fallback-undefined",
-      "severity": "error",
-      "file": "src/opencode-plugin.ts",
-      "line": 244,
-      "description": "The synthetic TextPart's `messageID` falls back only to `input.messageID`, which is optional in the opencode chat.message hook signature. When opencode invokes the hook without `messageID` (or when no prior part exists to copy from), the pushed part has `messageID: undefined`. OpenCode's TextPart Zod schema requires `messageID: string` (per @opencode-ai/sdk's TextPart), and as of opencode 1.2.27 the runtime validates part IDs/required fields before save, so the whole user message is rejected with a ZodError and the image description plus the prompt are lost. The hook already has `output.message: UserMessage` whose `id` is always defined and is the canonical source - the fallback chain should be `anchor?.messageID ?? output.message?.id ?? input.messageID`.",
+      "id": "opencode-plugin-show-output-static-vs-generated",
+      "severity": "warning",
+      "file": "src/commands/integration.ts",
+      "line": 470,
+      "description": "integrationShow for the opencode agent returns a hardcoded summary and never displays the actual generated plugin source. Every other agent (pi, claude-code, codex) uses spec.generate()/spec.apply() to render the real file content so the user can review what would be installed. Running `vp integration show opencode` therefore hides the 288-line generated plugin from the user, who has to read ~/.config/opencode/plugins/vision-proxy.ts manually. Either append the real source after the summary (mirroring the pi branch on line 488) or document that the opencode show output is intentionally a summary; the current divergence is an inconsistency the user may not expect.",
+      "action": "ask-user",
+      "review_scope": "source"
+    },
+    {
+      "id": "opencode-test-misleading-spawn-call-comment",
+      "severity": "info",
+      "file": "src/commands/integration.test.ts",
+      "line": 657,
+      "description": "The test 'opencode chat.message describes prompt paths and attached images' ends with the comment '// vp analyze ran once, covering both the temp copy of the attachment and the referenced path.' but never asserts calls.length === 1 nor inspects the args passed to spawnSync - the comment claims a property the test does not verify. The behavioral coverage (file part removed, synthetic part appended) is fine on its own; either add the missing calls assertion or drop the misleading comment.",
       "action": "auto-fix",
       "review_scope": "source"
     },
     {
-      "id": "opencode-plugin-dead-path-fallback",
+      "id": "opencode-test-redundant-substring-assertions",
       "severity": "info",
-      "file": "src/opencode-plugin.ts",
-      "line": 263,
-      "description": "`handleToolExecuteBefore` checks `output.args.path` as a fallback after `filePath`, but opencode's built-in Read tool only ever passes `filePath` (see packages/opencode/src/tool/read.ts: Parameters.filePath is the only string field). The `path` branch is unreachable against the real tool surface and just adds noise to the generated plugin file shipped to users.",
+      "file": "src/commands/integration.test.ts",
+      "line": 601,
+      "description": "The test 'install opencode writes the vision-proxy plugin file with valid source' opens the written plugin and asserts /chat\\.message/, /tool\\.execute\\.before/, /vp analyze/, and /__VP_VERSION__:[0-9.]+/ with substring matches. The immediately following loadOpencodePlugin(written, home) already verifies the plugin loads, exports a default factory, and registers both hook keys behaviorally, and the dedicated 'status reports opencode version from plugin file' test verifies the version marker through the integration status path. The substrings duplicate behavioral coverage and match the test-quality anti-pattern of grepping the source for tokens. Keep only the placeholder-replacement assertion (which is the one property not covered by behavior) and drop the others.",
       "action": "auto-fix",
+      "review_scope": "source"
+    },
+    {
+      "id": "opencode-docs-missing-typescript-plugin-requirement",
+      "severity": "info",
+      "file": "docs/INTEGRATIONS.md",
+      "line": 87,
+      "description": "The opencode (v1) section lists 'opencode v1 CLI installed' as a requirement but does not mention that the plugin is plain TypeScript with no build step (per the top-of-file comment in src/opencode-plugin.ts:38-41 and the String.raw note). If the user's opencode build is configured to load only .js plugins, install succeeds silently and the plugin is ignored. Either add a one-line note (e.g. 'Requires an opencode build that loads TypeScript plugins from ~/.config/opencode/plugins/') or document a build step the user can apply.",
+      "action": "ask-user",
       "review_scope": "source"
     }
   ],
   "tested": [],
-  "testing_summary": "No tests were executed during review (per the review-phase rule). I traced the new logic by reading the generated plugin source, the @opencode-ai/plugin and @opencode-ai/sdk type definitions (text Part schema, chat.message / tool.execute.before hook shapes), the prior opencode community reports of `prt` prefix and `synthetic` part validation, and the integration.test.ts coverage.",
-  "risk_level": "medium",
-  "risk_rationale": "The change adds a substantial new agent integration that spawns a real subprocess per image and mutates opencode's part array, with a reachable bug in the synthetic-part messageID fallback that can break the chat.message hook under opencode's runtime Zod validation; otherwise the design, fail-open semantics, version-marker handling, and test coverage are reasonable.",
+  "testing_summary": "No tests were executed during review (per the review-phase rule). I traced the new code by reading the generated plugin source, the @opencode-ai/plugin and @opencode-ai/sdk type definitions (confirmed PluginInput shape and the TextPart required-field list), the prior diffs, the integration test mocks, and the opencode community plugin samples that confirm `chat.message` and `tool.execute.before` are real hook keys. The two prior-round fixes (messageID fallback chain, removal of the dead `output.args.path` branch) are correctly applied at lines 243 and 261.",
+  "risk_level": "low",
+  "risk_rationale": "The change is well-bounded, the prior round's two errors and the dead branch are correctly fixed, the plugin has solid fail-open semantics, the integration dispatch is consistent with the other agents, and the remaining findings are minor UX/docs/test-cleanup items rather than correctness defects.",
   "risk_scope": "source-or-external"
 }

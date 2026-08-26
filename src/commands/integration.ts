@@ -458,6 +458,7 @@ export async function integrationInstall(
 }
 
 // fallow-ignore-next-line unused-export
+/** Print the install target and (for opencode) the generated plugin source, or the hook command and merged config for other agents. */
 export async function integrationShow(agent: string): Promise<IntegrationResult> {
 	const spec = specFor(agent);
 	if (!spec) {
@@ -468,12 +469,23 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 		};
 	}
 
-	// opencode: show the plugin installation info
+	// opencode: keep the friendly summary but also render the generated source
+	// so the user can review what `vp integration install opencode` writes
+	// (mirrors the pi branch below, which appends spec.generate()).
 	if (agent === "opencode") {
 		const pluginPath = opencodePluginsDir();
 		return {
 			ok: true,
-			message: `opencode plugin: vision-proxy.ts\n\nInstall location: ${pluginPath}/\n\nThe plugin registers hooks for parity with claude-code/codex:\n- chat.message -> like UserPromptSubmit (describes prompt paths and attached images, removes the image parts)\n- tool.execute.before (read) -> like PreToolUse Read (intercepts reads on images)\n\nConfiguration via environment variables:\n- VP_MAX_OUTPUT_TOKENS (default: 2000)\n- VP_BIN (default: vp on PATH)\n- VP_HOOK_TIMEOUT_MS (default: 30000)`,
+			message:
+				`opencode plugin: vision-proxy.ts\n\nInstall location: ${pluginPath}/\n\n` +
+				`The plugin registers hooks for parity with claude-code/codex:\n` +
+				`- chat.message -> like UserPromptSubmit (describes prompt paths and attached images, removes the image parts)\n` +
+				`- tool.execute.before (read) -> like PreToolUse Read (intercepts reads on images)\n\n` +
+				`Configuration via environment variables:\n` +
+				`- VP_MAX_OUTPUT_TOKENS (default: 2000)\n` +
+				`- VP_BIN (default: vp on PATH)\n` +
+				`- VP_HOOK_TIMEOUT_MS (default: 30000)\n\n` +
+				`Generated plugin source:\n${spec.generate()}`,
 			code: 0,
 		};
 	}

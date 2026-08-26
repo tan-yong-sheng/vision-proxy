@@ -241,7 +241,7 @@ async function handleChatMessage(
     output.parts.push({
       id: newPartId(),
       sessionID: anchor?.sessionID ?? output.message?.sessionID ?? input.sessionID,
-      messageID: anchor?.messageID ?? input.messageID,
+      messageID: anchor?.messageID ?? output.message?.id ?? input.messageID,
       type: "text",
       synthetic: true,
       text: withImageInstruction(description),
@@ -260,9 +260,7 @@ async function handleToolExecuteBefore(
   const argPath =
     output.args && typeof output.args.filePath === "string"
       ? output.args.filePath
-      : output.args && typeof output.args.path === "string"
-        ? output.args.path
-        : undefined;
+      : undefined;
   if (!isImagePath(argPath)) return;
   const filePath = resolveImagePath(argPath, cwd);
   if (!filePath || !existsSync(filePath)) return;

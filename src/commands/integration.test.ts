@@ -600,10 +600,8 @@ test("install opencode writes the vision-proxy plugin file with valid source", a
 	const target = join(dir, "vision-proxy.ts");
 	assert.equal(existsSync(target), true);
 	const written = readFileSync(target, "utf8");
-	assert.match(written, /chat\.message/);
-	assert.match(written, /tool\.execute\.before/);
-	assert.match(written, /vp analyze/);
-	// The version placeholder must be replaced with a concrete marker.
+	// The version placeholder must be replaced with a concrete marker; this is
+	// the only file-content property not covered by the load + hook tests below.
 	assert.doesNotMatch(written, /__VP_VERSION__PLACEHOLDER__/);
 	assert.match(written, /__VP_VERSION__:/);
 	await loadOpencodePlugin(written, home);
@@ -617,6 +615,7 @@ test("opencode chat.message describes prompt paths and attached images", async (
 	const {
 		hooks,
 		dir: testDir,
+		calls,
 		setNextResult,
 	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
@@ -656,7 +655,21 @@ test("opencode chat.message describes prompt paths and attached images", async (
 	assert.match(synthetic.id, /^prt-/);
 	assert.equal(synthetic.sessionID, "ses-1");
 	assert.match(synthetic.text, /@@FENCE red square@@/);
-	// vp analyze ran once, covering both the temp copy of the attachment and the referenced path.
+	assert.equal(
+		calls.length,
+		1,
+		"vp analyze must run exactly once, deduping the temp copy of the attachment with the referenced path",
+	);
+	const analyzeArgs = calls[0]?.[1] ?? [];
+	assert.equal(analyzeArgs[0], "analyze", "vp analyze must be invoked with the analyze subcommand");
+	assert.ok(
+		analyzeArgs.includes(imagePath),
+		"vp analyze must receive the unique image path resolved from the prompt",
+	);
+	assert.ok(
+		analyzeArgs.some((a: string) => /vp-opencode-.*image\.png$/.test(a)),
+		"vp analyze must also receive the temp file decoded from the attached data URL",
+	);
 	reset();
 });
 

@@ -18,8 +18,8 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { runIntegration } from "../commands/integration.ts";
@@ -673,6 +673,43 @@ test("opencode chat.message describes prompt paths and attached images", async (
 	reset();
 });
 
+test("opencode chat.message passes the user prompt as --question for tailoring", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const {
+		hooks,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
+	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
+
+	const parts = [
+		{
+			id: "prt-1",
+			sessionID: "ses-1",
+			messageID: "msg-1",
+			type: "text",
+			text: `what is in ${imagePath}?`,
+		},
+	];
+	await hooks["chat.message"](
+		{ sessionID: "ses-1", messageID: "msg-1" },
+		{ message: { sessionID: "ses-1" }, parts },
+	);
+
+	// Parity with the claude-code/codex UserPromptSubmit hook: the user's own
+	// prompt text is forwarded as --question so the vision model tailors the
+	// description to what the user is asking.
+	const analyzeArgs = calls[0]?.[1] ?? [];
+	const qIndex = analyzeArgs.indexOf("--question");
+	assert.ok(qIndex !== -1, "vp analyze must receive --question");
+	assert.equal(analyzeArgs[qIndex + 1], `what is in ${imagePath}?`);
+	reset();
+});
+
 test("opencode chat.message is a no-op when there are no images or analysis fails", async () => {
 	const home = isolate();
 	const dir = installDir(home);
@@ -695,6 +732,105 @@ test("opencode chat.message is a no-op when there are no images or analysis fail
 	await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts: failingParts });
 	assert.equal(failingParts.length, 1);
 	assert.equal((failingParts[0] as any).text.includes(imagePath), true);
+	reset();
+});
+
+test("opencode chat.message strips its own prior injection instead of duplicating it", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const {
+		hooks,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	const imagePath = fakeImage(testDir, "again.png");
+
+	// First delivery: analysis runs, one description is appended.
+	setNextResult({ status: 0, stdout: "@@FENCE first desc@@" });
+	const parts = [{ id: "prt-1", type: "text", text: `look at ${imagePath}` }] as any[];
+	await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts });
+	assert.equal(parts.filter((p) => (p as any).synthetic === true).length, 1);
+
+	// Re-delivery of the same message (retry/re-fire): the stale injection must
+	// be removed so exactly one description remains, carrying the newest text.
+	setNextResult({ status: 0, stdout: "@@FENCE second desc@@" });
+	await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts });
+	const synthetics = parts.filter((p) => (p as any).synthetic === true);
+	assert.equal(synthetics.length, 1, "prior injections must be stripped, never duplicated");
+	assert.match(synthetics[0].text, /@@FENCE second desc@@/);
+	assert.doesNotMatch(synthetics[0].text, /@@FENCE first desc@@/);
+	// Prompt text itself must not accumulate stale injections either.
+	const promptPart = parts.find((p) => p.type === "text" && !(p as any).synthetic) as any;
+	assert.doesNotMatch(promptPart.text, /\[vision-proxy:image\]/);
+	assert.equal(calls.length, 2, "each delivery analyzes once");
+	reset();
+});
+
+test("opencode chat.message expands tilde paths before analyzing", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const { hooks, calls, setNextResult } = await loadOpencodePlugin(
+		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
+		home,
+	);
+	const tildePath = join(homedir(), "vp-test-tilde.png");
+	writeFileSync(tildePath, Buffer.from(TINY_PNG_B64, "base64"));
+	try {
+		setNextResult({ status: 0, stdout: "@@FENCE tilde desc@@" });
+		const parts = [{ id: "prt-1", type: "text", text: "see ~/vp-test-tilde.png" }] as any[];
+		await hooks["chat.message"]({ sessionID: "s" }, { message: {}, parts });
+		const synth = parts.find((p) => (p as any).synthetic === true) as any;
+		assert.ok(synth, "tilde image must be analyzed and described");
+		assert.match(synth.text, /@@FENCE tilde desc@@/);
+		assert.equal(calls.length, 1, "vp analyze must run once for the tilde path");
+		assert.ok(
+			calls[0][1].includes(tildePath),
+			"vp analyze must receive the tilde-expanded absolute path",
+		);
+	} finally {
+		rmSync(tildePath, { force: true });
+		reset();
+	}
+});
+
+test("opencode tool.execute.before denies read on tilde image paths", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const { hooks, setNextResult } = await loadOpencodePlugin(
+		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
+		home,
+	);
+	const tildePath = join(homedir(), "vp-test-tilde2.png");
+	writeFileSync(tildePath, Buffer.from(TINY_PNG_B64, "base64"));
+	try {
+		setNextResult({ status: 0, stdout: "@@FENCE t2@@" });
+		await assert.rejects(
+			hooks["tool.execute.before"](
+				{ tool: "read" },
+				{ args: { filePath: "~/vp-test-tilde2.png" } },
+			),
+			/@@FENCE t2@@/,
+		);
+	} finally {
+		rmSync(tildePath, { force: true });
+		reset();
+	}
+});
+
+test("generated opencode plugin stays free of modality detection", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const written = readFileSync(join(dir, "vision-proxy.ts"), "utf8");
+	assert.doesNotMatch(
+		written,
+		/modalit|capabilit/,
+		"always-analyze is a locked decision: the plugin must never branch on model modality metadata",
+	);
 	reset();
 });
 

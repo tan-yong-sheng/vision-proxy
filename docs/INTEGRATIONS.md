@@ -82,6 +82,7 @@ vp integration uninstall opencode
 
 The plugin requires:
 - opencode v1 CLI installed
+- An opencode build that loads TypeScript plugins from `~/.config/opencode/plugins/` (this plugin is plain TypeScript with no build step; on a `.js`-only build the file is written but silently ignored)
 - `vp` binary on PATH (or set `VP_BIN` environment variable)
 
 Configuration options (via environment variables):

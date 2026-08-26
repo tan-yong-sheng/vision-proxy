@@ -65,6 +65,8 @@ The plugin registers hooks for **parity with claude-code/codex**:
 
 No new `analyze_image` tool is registered - the agent uses its native Read tool which the hook intercepts.
 
+Analysis is **unconditional by design**, matching the claude-code/codex hooks: the plugin never inspects the chat model's modality. Installing the plugin is the explicit opt-in to route every image through vision-proxy; multimodal models receive the fenced description instead of raw image bytes. To restore native image input, uninstall the plugin. Injected descriptions carry a stable `[vision-proxy:image]` marker so prior injections are stripped if the hook ever re-fires for the same message.
+
 If `vp analyze` fails, the plugin fails open: the original message parts and tool calls proceed unchanged.
 
 ```bash

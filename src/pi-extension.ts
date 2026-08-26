@@ -151,13 +151,14 @@ function resolveVpBin(): string {
 }
 
 /** Run vp analyze (async) and return the fenced description, or null on failure. */
-async function runAnalyze(images: string[], signal?: unknown): Promise<string | null> {
+async function runAnalyze(images: string[], signal?: unknown, question?: string): Promise<string | null> {
   return new Promise((resolve) => {
     if (!images || images.length === 0) return resolve(null);
     const vp = resolveVpBin();
     const { command, args: prefix } = vpEntryToSpawn(vp);
     const maxTokens = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
     const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(maxTokens)];
+    if (question && question.trim()) args.push("--question", question.trim());
     let settled = false;
     let timer: unknown = null;
     const finish = (val: string | null) => {
@@ -327,9 +328,17 @@ export default function setup(pi: ExtensionAPI): void {
       if (ctx && ctx.ui && ctx.ui.notify) {
         ctx.ui.notify("[vision-proxy] Analyzing " + uniqueImages.length + " image(s)...", "info");
       }
+      // Pass this message's own text as the analysis question so the vision model
+      // can tailor the description to what the user is asking (parity with the
+      // Claude Code / Codex vp hook UserPromptSubmit behavior).
+      const question = (passthrough as Array<any>)
+        .filter((c) => c && c.type === "text" && typeof c.text === "string")
+        .map((c) => c.text as string)
+        .join("\n");
       const description = await runAnalyze(
         uniqueImages,
         ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
+        question,
       );
       cleanupTempDirs(tempFiles);
       if (!description) {

@@ -256,6 +256,13 @@ test("pi extension analyzes images in the context event without blocking the sub
 	assert.ok(analyzed.includes(imagePath));
 	// The attachment is analyzed via a temp copy (a path outside the test dir).
 	assert.ok(analyzed.some((a) => a.startsWith(tmpdir()) && a !== imagePath));
+	// The user's prompt is forwarded as --question so the vision model can tailor
+	// the description (parity with the Claude Code / Codex vp hook UserPromptSubmit).
+	assert.ok(analyzed.includes("--question"), "--question flag must be forwarded");
+	assert.ok(
+		analyzed.includes(`look at ${imagePath} please`),
+		"prompt text must be forwarded as the question",
+	);
 	reset();
 });
 

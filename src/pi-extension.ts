@@ -61,9 +61,10 @@ export const PI_EXTENSION_SOURCE = String.raw`/**
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, writeFileSync, mkdtempSync, rmSync, readFileSync, mkdirSync } from "node:fs";
+import { join, resolve, dirname } from "node:path";
 import { tmpdir, homedir } from "node:os";
+import { createHash } from "node:crypto";
 
 // __VP_VERSION__PLACEHOLDER__
 
@@ -306,21 +307,55 @@ function withImageInstruction(description: string): string {
   );
 }
 
-// Session-scoped cache of image descriptions, keyed by a stable identity per
-// message (base64 of inline images, resolved absolute path of referenced paths).
-// Pi re-fires the context event for every model call and the original user
-// message still carries its image blocks/paths, so this prevents re-analyzing
-// (and re-notifying) the same image on every turn (cost, latency, and stale
-// duplicate text in the model context).
-const descriptionCache = new Map<string, string>();
+// Persistent cache of image descriptions, keyed by a stable identity per message
+// (base64 of inline images, resolved absolute path of referenced paths).
+//
+// Why disk-backed: Pi re-fires the context event for every model call and the
+// original user message still carries its image blocks/paths. A pure in-memory
+// Map would be reset each time the extension module is re-evaluated (Pi reloads
+// it per event), so the same image would be re-analyzed and re-notified on every
+// turn. Persisting to a file lets the cache survive extension reloads and even
+// new sessions, so each image is described at most once (cost, latency, and no
+// stale duplicate text in the model context).
+const CACHE_CAP = 200;
+const descriptionCachePath = (() => {
+  try {
+    const home = homedir();
+    if (home) return join(home, ".vision-proxy", "pi-desc-cache.json");
+  } catch { /* ignore */ }
+  return join(tmpdir(), "vp-pi-desc-cache.json");
+})();
 
-/** Cache a description, evicting the oldest entry past the cap to bound memory. */
+/** Load the persisted cache; tolerates a missing or unreadable file. */
+function loadDescriptionCache(): Map<string, string> {
+  try {
+    const raw = readFileSync(descriptionCachePath, "utf8");
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      return new Map(Object.entries(obj as Record<string, string>));
+    }
+  } catch { /* no cache yet, or unreadable */ }
+  return new Map();
+}
+
+const descriptionCache = loadDescriptionCache();
+
+/** Persist the cache to disk; best-effort so a write failure never breaks analysis. */
+function persistDescriptionCache(): void {
+  try {
+    mkdirSync(dirname(descriptionCachePath), { recursive: true });
+    writeFileSync(descriptionCachePath, JSON.stringify(Object.fromEntries(descriptionCache)), "utf8");
+  } catch { /* best effort */ }
+}
+
+/** Cache a description, evicting the oldest entry past the cap to bound size. */
 function cacheDescription(key: string, description: string): void {
-  if (descriptionCache.size >= 200) {
+  if (descriptionCache.size >= CACHE_CAP) {
     const oldest = descriptionCache.keys().next().value;
     if (oldest !== undefined) descriptionCache.delete(oldest);
   }
   descriptionCache.set(key, description);
+  persistDescriptionCache();
 }
 
 export default function setup(pi: ExtensionAPI): void {
@@ -353,10 +388,12 @@ export default function setup(pi: ExtensionAPI): void {
       const passthrough: unknown[] = [];
       for (const c of (msg as any).content as Array<any>) {
         if (c && c.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string") {
-          // Identity for an inline image is its raw base64: stable across the
-          // repeated context events Pi fires for one turn, even though the temp
-          // file we write for it is regenerated each time.
-          inlineImages.push({ id: c.data, data: c.data, mimeType: c.mimeType, block: c });
+          // Identity for an inline image is a hash of its raw base64: stable
+          // across the repeated context events Pi fires for one turn, even though
+          // the temp file we write for it is regenerated each time. Hashing keeps
+          // the cache key small and avoids storing the raw image bytes on disk.
+          const id = createHash("sha256").update(c.data).digest("hex");
+          inlineImages.push({ id, data: c.data, mimeType: c.mimeType, block: c });
         } else if (c && c.type === "text" && typeof c.text === "string") {
           const paths = extractImagePaths(c.text)
             .map((p) => resolveImagePath(p, process.cwd()))

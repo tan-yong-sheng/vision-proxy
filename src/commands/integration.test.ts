@@ -249,6 +249,51 @@ test("pi extension injects the description into the system prompt exactly once",
 	reset();
 });
 
+test("pi extension embeds the description in the text for queued streaming prompts and does not leak the stash", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "pic.png");
+	setNextResult({ status: 0, stdout: "@@FENCE queued desc@@" });
+
+	// Queued streaming prompt: input fires with streamingBehavior set, but
+	// before_agent_start is not emitted for queued messages.
+	const transformed = (await events.input[0]({
+		type: "input",
+		text: `see ${imagePath}`,
+		images: [],
+		streamingBehavior: "steer",
+	})) as { action: string; text: string; images: unknown[] };
+	assert.equal(transformed.action, "transform");
+	assert.equal(transformed.text.includes("see "), true, "user text survives");
+	assert.equal(transformed.text.includes(imagePath), false, "image path is stripped");
+	assert.match(transformed.text, /@@FENCE queued desc@@/);
+	assert.match(transformed.text, /Do not use the Read tool on image files/);
+
+	// The stash must remain empty: a subsequent idle prompt that returns
+	// undefined from its own input handler must not see the queued turn's
+	// description injected into its system prompt.
+	const idle = await events.input[0]({
+		type: "input",
+		text: "follow-up text only, no images",
+		images: [],
+	});
+	assert.equal(idle, undefined);
+	const nextStart = await events.before_agent_start[0]({
+		type: "before_agent_start",
+		prompt: "follow-up text only, no images",
+		systemPrompt: "BASE",
+	});
+	assert.equal(nextStart, undefined, "stale queued description must not leak into the next prompt");
+	reset();
+});
+
 test("pi extension fails open on analyze failure and respects mode off", async () => {
 	const home = isolate();
 	const dir = installDir(home);

@@ -11,7 +11,10 @@
  *     image paths referenced in the text, runs `vp analyze`, strips the image
  *     bytes and path mentions from the submission, and stashes the description.
  *     Attachments whose mime type is outside the supported set are forwarded
- *     unchanged to the model instead of being dropped.
+ *     unchanged to the model instead of being dropped. When the submission is
+ *     queued for streaming delivery (event.streamingBehavior set), the fenced
+ *     description is embedded in the transformed text instead of the system
+ *     prompt, because before_agent_start does not fire for queued messages.
  *   - `before_agent_start`: appends the stashed fenced UNTRUSTED description to
  *     the system prompt (the only cross-turn injection channel Pi consumes).
  *   - `tool_result`: intercepts `read` tool results on image files and replaces
@@ -258,9 +261,12 @@ function withImageInstruction(description: string): string {
   );
 }
 
-// Description produced by the most recent analyzed submission. Pi fires the
-// input event before before_agent_start for each submission, so this handoff
-// is sequential per prompt.
+// Description produced by the most recent analyzed submission. For idle
+// prompts, Pi fires the input event before before_agent_start so this handoff
+// is sequential per prompt. For prompts queued while the agent is streaming
+// (event.streamingBehavior set), before_agent_start is never emitted, so the
+// description is embedded in the transformed text and pendingDescription is
+// left untouched to avoid leaking the description into a later idle prompt.
 let pendingDescription: string | null = null;
 
 export default function setup(pi: ExtensionAPI): void {
@@ -300,7 +306,18 @@ export default function setup(pi: ExtensionAPI): void {
 
       let stripped = stripImagePaths(text, referenced);
       if (!stripped.trim() && passthroughImages.length === 0) {
-        stripped = "(images were attached and are described in the system prompt)";
+        stripped = "(images were attached; see the vision-proxy description below)";
+      }
+      // Queued streaming prompts never fire before_agent_start, so embedding
+      // the description in the text is the only channel that reaches the model
+      // for that turn. Stash instead for the idle path so before_agent_start
+      // can append it to the system prompt.
+      if (event.streamingBehavior) {
+        return {
+          action: "transform",
+          text: stripped + "\n\n" + withImageInstruction(description),
+          images: passthroughImages as Array<{ type: "image"; data: string; mimeType: string }>,
+        };
       }
       pendingDescription = description;
       return {

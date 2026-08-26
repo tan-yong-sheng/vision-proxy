@@ -44,11 +44,11 @@ vp integration uninstall codex
 
 Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
 
-- `input` — extracts images attached to the submission plus image paths referenced in the text, runs `vp analyze`, and strips the image bytes and path mentions from the submission. Attachments whose mime type is outside the supported set (jpg, jpeg, png, gif, webp, bmp, tiff, ico, avif) are forwarded to the model unchanged. For idle prompts the description is stashed for the `before_agent_start` event; for prompts queued via the `streamingBehavior` option the description is embedded in the transformed text, because `before_agent_start` does not fire for queued messages.
-- `before_agent_start` — appends the fenced UNTRUSTED description from the analyzed submission to the system prompt.
+- `input` — no-op. Returns immediately so the user's prompt is accepted the instant they press Enter. All analysis is deferred to the `context` event, so prompt submission is never blocked on a `vp analyze` call.
+- `context` — the single analysis point. Fires right before Pi sends the turn's messages to the model. For each user message it finds image attachments (base64 content) and image paths referenced in the text, runs `vp analyze`, and replaces the image attachments with the fenced UNTRUSTED description. The original user text (including any referenced image path) is preserved. Attachments whose mime type is outside the supported set (jpg, jpeg, png, gif, webp, bmp, tiff, ico, avif) are forwarded to the model unchanged.
 - `tool_result` — intercepts `read` tool results on image files and replaces the tool result content with the fenced description so no image bytes reach the model.
 
-The `input` event fires for every `session.prompt()` submission, including ones that arrive while the agent is streaming and are queued via the `streamingBehavior` option. It does not fire for messages dispatched through the separate `session.steer()` or `session.followUp()` APIs (for example the RPC `steer` / `follow_up` commands or queued-message retry paths) — those submissions reach the model with their image attachments intact.
+The analysis happens in the `context` event for every submission Pi assembles for the model, including ones queued via the `streamingBehavior` option while a previous turn is streaming and ones dispatched through `session.steer()` / `session.followUp()` (which route through the same `session.prompt()` path).
 
 If `vp analyze` fails or `VP_MODE=off`, the extension fails open and Pi proceeds unchanged.
 

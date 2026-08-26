@@ -44,9 +44,11 @@ vp integration uninstall codex
 
 Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
 
-- `input` — extracts images attached to the submission plus image paths referenced in the text, runs `vp analyze`, and strips the image bytes and path mentions from the submission.
+- `input` — extracts images attached to the submission plus image paths referenced in the text, runs `vp analyze`, and strips the image bytes and path mentions from the submission. Attachments whose mime type is outside the supported set (jpg, jpeg, png, gif, webp, bmp, tiff, ico, avif) are forwarded to the model unchanged.
 - `before_agent_start` — appends the fenced UNTRUSTED description from the analyzed submission to the system prompt.
 - `tool_result` — intercepts `read` tool results on image files and replaces the tool result content with the fenced description so no image bytes reach the model.
+
+The `input` event fires for every `session.prompt()` submission, including ones that arrive while the agent is streaming and are queued via the `streamingBehavior` option. It does not fire for messages dispatched through the separate `session.steer()` or `session.followUp()` APIs (for example the RPC `steer` / `follow_up` commands or queued-message retry paths) — those submissions reach the model with their image attachments intact.
 
 If `vp analyze` fails or `VP_MODE=off`, the extension fails open and Pi proceeds unchanged.
 

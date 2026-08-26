@@ -10,11 +10,20 @@
  *   - `input`: extracts images attached to the submission (base64 content) plus
  *     image paths referenced in the text, runs `vp analyze`, strips the image
  *     bytes and path mentions from the submission, and stashes the description.
+ *     Attachments whose mime type is outside the supported set are forwarded
+ *     unchanged to the model instead of being dropped.
  *   - `before_agent_start`: appends the stashed fenced UNTRUSTED description to
  *     the system prompt (the only cross-turn injection channel Pi consumes).
  *   - `tool_result`: intercepts `read` tool results on image files and replaces
  *     the tool result content with the fenced description so no image bytes
  *     reach the model.
+ *
+ * Pi fires the `input` event for every `session.prompt()` submission, including
+ * ones that arrive while the agent is streaming and are queued via the
+ * `streamingBehavior` option. The event is NOT fired for messages dispatched
+ * through the separate `session.steer()` / `session.followUp()` APIs (e.g. the
+ * RPC `steer` / `follow_up` commands or queued-message retry paths); those
+ * submissions are forwarded to the model with their attachments intact.
  *
  * No tool is registered, keeping system tokens low.
  *
@@ -35,6 +44,13 @@ export const PI_EXTENSION_SOURCE = String.raw`/**
  *
  * Hooks into Pi lifecycle events to automatically describe images at parity
  * with the Claude Code / Codex vp hook integration. No tool is registered.
+ *
+ * Supported image attachments are analyzed and stripped from the submission;
+ * attachments with an unsupported mime type are forwarded to the model
+ * unchanged. The 'input' event is fired for every session.prompt() submission,
+ * including streaming ones queued via the streamingBehavior option, but NOT
+ * for messages dispatched through session.steer() or session.followUp()
+ * directly (e.g. RPC steer / follow_up commands).
  *
  * The description text returned by vp is attacker-controlled (it comes from
  * an external vision model), so it is forwarded verbatim inside its UNTRUSTED

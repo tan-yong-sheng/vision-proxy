@@ -87,6 +87,7 @@ Install `vp` into your coding agent so it automatically analyzes images from pro
 vp integration install claude-code
 vp integration install codex
 vp integration install pi
+vp integration install opencode
 
 # Check installed integrations and version status
 vp integration status
@@ -97,6 +98,7 @@ vp integration uninstall <agent>
 
 - **Claude Code & Codex**: Registers `UserPromptSubmit` and `PreToolUse Read` hooks that invoke `vp hook`. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache`.
 - **Pi**: Installs an auto-discovered `analyze_image` extension into `~/.pi/agent/extensions/`.
+- **opencode (v1)**: Installs a TypeScript plugin into `~/.config/opencode/plugins/` that registers `chat.message` and `tool.execute.before` hooks for parity with claude-code/codex.
 
 Caveat: For Claude Code, images can only be referenced by file path in the user prompt. It does not support rendering `[Image #N]` because the `UserPromptSubmit` hook cannot modify the user prompt before it is sent to the LLM API.
 

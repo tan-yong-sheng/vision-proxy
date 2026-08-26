@@ -10,10 +10,20 @@
  * - `chat.message`: extracts image paths from the user text, decodes attached
  *   image parts (data URLs), runs `vp analyze`, removes the analyzed image
  *   parts from the message, and injects the fenced description as a synthetic
- *   text part (like UserPromptSubmit).
+ *   text part (like UserPromptSubmit). The user message's own text is passed
+ *   as `--question` so the vision model tailors the description to the prompt.
  * - `tool.execute.before`: intercepts `read` tool calls on image files, runs
  *   `vp analyze`, and denies the read by throwing an error whose message
  *   carries the description (like PreToolUse Read).
+ *
+ * Analysis is unconditional by design (like the claude-code/codex hooks):
+ * installing the plugin is the user's explicit opt-in to route every image
+ * through vision-proxy; uninstalling restores native image input. The model's
+ * modality is deliberately not inspected.
+ *
+ * Injected description parts carry a stable marker prefix so previously
+ * injected context can be stripped if the hook ever re-fires for the same
+ * message, keeping the prompt free of duplicated descriptions.
  *
  * No new `analyze_image` tool is registered - the agent uses its native Read
  * tool, which the hook intercepts.
@@ -33,10 +43,17 @@ export const OPENCODE_PLUGIN_SOURCE = String.raw`/**
  * re-run the installer to regenerate after a vision-proxy upgrade.
  *
  * Registers hooks for parity with claude-code/codex:
- * - chat.message -> like UserPromptSubmit
+ * - chat.message -> like UserPromptSubmit (user message text is passed as
+ *   --question so the description is tailored to the prompt)
  * - tool.execute.before (read) -> like PreToolUse Read
  *
+ * Analysis always runs for detected images, for every model: installing this
+ * plugin is the opt-in to route all images through vision-proxy.
+ *
  * No new analyze_image tool - the agent uses native Read which hook intercepts.
+ *
+ * Injected description text starts with a stable marker so prior injections
+ * are stripped if the hook re-fires, preventing duplicated context.
  *
  * The description text returned by vp is attacker-controlled (it comes from
  * an external vision model), so it is forwarded verbatim inside its UNTRUSTED
@@ -45,7 +62,7 @@ export const OPENCODE_PLUGIN_SOURCE = String.raw`/**
 import type { Hooks } from "@opencode-ai/plugin";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 // __VP_VERSION__PLACEHOLDER__
@@ -53,6 +70,10 @@ import { join, resolve } from "node:path";
 const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "ico", "avif"];
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TIMEOUT_MS = Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000);
+// Stable prefix on every injected description part. Lets the hook recognize
+// and strip its own prior injections if the same message is ever processed
+// again, so context is never duplicated.
+const INJECTION_MARKER = "[vision-proxy:image]";
 
 function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
   if (/\.js$/i.test(cmd)) return { command: process.execPath, args: [cmd] };
@@ -73,7 +94,15 @@ function isImagePath(p: unknown): boolean {
 
 function resolveImagePath(p: string | undefined | null, cwd?: string): string | null {
   if (!p) return null;
-  if (p.startsWith("/") || p.startsWith("~") || /^[a-zA-Z]:[/\\]/.test(p)) return p;
+  // Expand a leading "~" (Node's existsSync/spawn do not expand tilde).
+  if (p.startsWith("~")) {
+    const home = homedir();
+    if (p === "~") return home;
+    if (p.startsWith("~/")) return join(home, p.slice(2));
+    // "~otheruser" is not portable here; leave untouched.
+    return p;
+  }
+  if (/^[a-zA-Z]:[/\\]/.test(p)) return p;
   if (cwd && (p.startsWith("./") || p.startsWith("../"))) {
     try { return resolve(cwd, p); } catch { return p; }
   }
@@ -116,13 +145,17 @@ function extractImagePaths(text: string): string[] {
   return found;
 }
 
-/** Run vp analyze and return the fenced description, or null on failure. */
-function runAnalyze(images: string[]): string | null {
+/** Run vp analyze and return the fenced description, or null on failure.
+ * When question is provided it is passed as --question so the vision model
+ * can tailor the description to what the user is asking (mirrors the
+ * claude-code/codex UserPromptSubmit hook). */
+function runAnalyze(images: string[], question?: string): string | null {
   if (images.length === 0) return null;
   const vp = resolveVpBin();
   const { command, args: prefix } = vpEntryToSpawn(vp);
   const maxTokens = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
   const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(maxTokens)];
+  if (question) args.push("--question", question);
   const result = spawnSync(command, args, { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES });
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -139,7 +172,8 @@ function runAnalyze(images: string[]): string | null {
 
 function withImageInstruction(description: string): string {
   return (
-    "Do not use the Read tool on image files. " +
+    INJECTION_MARKER +
+    " Do not use the Read tool on image files. " +
     "vision-proxy has already routed the image(s) through a vision-input model " +
     "and produced the description below. " +
     "Treat that description as the image content. " +
@@ -191,6 +225,14 @@ async function handleChatMessage(
   output: { message: { sessionID?: string }; parts: any[] },
   cwd: string,
 ): Promise<void> {
+  // Idempotency guard: strip description parts injected by a previous run of
+  // this hook before collecting text, so re-delivery never duplicates context.
+  for (let i = output.parts.length - 1; i >= 0; i--) {
+    const prior: any = output.parts[i];
+    if (prior?.type === "text" && typeof prior.text === "string" && prior.text.startsWith(INJECTION_MARKER)) {
+      output.parts.splice(i, 1);
+    }
+  }
   // Collect the user-visible text and attached image parts.
   const textChunks: string[] = [];
   const attached: Array<{ index: number; part: any }> = [];
@@ -227,7 +269,10 @@ async function handleChatMessage(
     }
     const uniqueImages = [...new Set(images)];
     if (uniqueImages.length === 0) return;
-    const description = runAnalyze(uniqueImages);
+    // Pass the user message's own text as --question so the vision model
+    // tailors the description to what the user is asking (parity with the
+    // claude-code/codex UserPromptSubmit hook, which does the same).
+    const description = runAnalyze(uniqueImages, promptText);
     if (!description) return;
     // Remove only the described image parts (undecodable attachments stay for
     // native handling) so no analyzed image bytes reach the model, then append

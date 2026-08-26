@@ -394,6 +394,31 @@ test("pi extension keeps the prompt submit instant for queued streaming prompts"
 	reset();
 });
 
+test("pi extension input handler never spawns vp (no blocking config lookup)", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const { events, calls, setNextResult } = await loadPiExtension(
+		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
+		home,
+	);
+	process.env.VP_MODE = "always";
+	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+
+	// The input handler must return immediately and must NOT run a `vp config get`
+	// (or any other vp subprocess) synchronously - that blocking lookup used to
+	// delay the prompt submit. The mode check belongs in the context event.
+	const before = calls.length;
+	const inputResult = await events.input[0]({
+		type: "input",
+		text: "look at something please",
+		images: [],
+	});
+	assert.equal(inputResult, undefined, "input must not block the prompt submit");
+	assert.equal(calls.length, before, "input must not spawn vp");
+	reset();
+});
+
 test("pi extension fails open on analyze failure and respects mode off", async () => {
 	const home = isolate();
 	const dir = installDir(home);

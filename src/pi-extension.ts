@@ -206,8 +206,18 @@ async function runAnalyze(images: string[], signal?: unknown, question?: string)
   });
 }
 
-/** Read mode from vp config get --json or VP_MODE. Returns "always" | "off". */
+// Cache the config-derived mode for the process lifetime. Resolving it spawns a
+// vp config get --json subprocess, which is wasteful to repeat on every event.
+let cachedConfigMode: "always" | "off" | null = null;
+
+/** Read mode from VP_MODE (honored live) or vp config get --json (cached). Returns "always" | "off". */
 function getMode(): "always" | "off" {
+  // VP_MODE is a cheap, runtime-overridable env var; always honor it live so a
+  // session can switch modes without restarting.
+  const envMode = process.env.VP_MODE;
+  if (envMode === "always" || envMode === "off") return envMode;
+  if (cachedConfigMode) return cachedConfigMode;
+  let mode: "always" | "off" = "always";
   try {
     const vp = resolveVpBin();
     const { command, args: prefix } = vpEntryToSpawn(vp);
@@ -218,15 +228,14 @@ function getMode(): "always" | "off" {
     });
     if (!result.error && result.status === 0 && result.stdout.trim()) {
       const cfg = JSON.parse(result.stdout);
-      const mode = cfg.mode as string | undefined;
-      if (mode === "always" || mode === "off") return mode;
+      const resolved = cfg.mode as string | undefined;
+      if (resolved === "always" || resolved === "off") mode = resolved;
     }
   } catch {
-    // fall through to env resolution
+    // fall through to the default
   }
-  const envMode = process.env.VP_MODE;
-  if (envMode === "always" || envMode === "off") return envMode;
-  return "always";
+  cachedConfigMode = mode;
+  return mode;
 }
 
 /**
@@ -276,11 +285,11 @@ function withImageInstruction(description: string): string {
 export default function setup(pi: ExtensionAPI): void {
   // --- input: keep prompt submit instant; analysis happens in the context event ---
   pi.on("input", async (_event) => {
-    if (getMode() === "off") return undefined;
-    // Intentionally does no work here: returning undefined immediately lets Pi
-    // accept and submit the user's prompt without waiting on vp analyze. The
-    // analysis runs later in the context event, which fires right before the
-    // messages are sent to the model.
+    // Intentionally a no-op. Returning undefined immediately lets Pi accept and
+    // submit the user's prompt with zero blocking work. The mode check and the
+    // vp analyze call both happen later in the context event (which fires right
+    // before the messages are sent to the model), so prompt submission is never
+    // delayed by a config lookup or a vision call.
     return undefined;
   });
 

@@ -4,10 +4,11 @@
  * Exercises the generated Pi extension and the Claude Code / Codex hook
  * registrations against an isolated temp HOME so we never touch a real
  * ~/.claude, ~/.codex, or ~/.pi. Validates:
- *   - install pi writes an executable extension: its input handler describes
- *     attached/referenced images without altering the user prompt text,
- *     before_agent_start injects the description into the system prompt once,
- *     and tool_result replaces image reads
+ *   - install pi writes an executable extension: its input handler is a no-op
+ *     so the prompt submit is never blocked, the context event analyzes
+ *     attached/referenced images and injects the description into the
+ *     messages (preserving the user prompt text), and tool_result replaces
+ *     image reads
  *   - install claude-code/codex registers both hooks (UserPromptSubmit +
  *     PreToolUse Read) in the agent config with the absolute `vp hook` path
  *   - uninstall removes only our registrations (idempotent, leaves others intact)
@@ -183,7 +184,7 @@ async function loadPiExtension(source: string, home: string) {
 	});
 	const eventNames = Object.keys(events);
 	assert.ok(!eventNames.includes("registerTool"), "must not register analyze_image tool");
-	for (const required of ["input", "before_agent_start", "tool_result"]) {
+	for (const required of ["input", "context", "tool_result"]) {
 		assert.ok(eventNames.includes(required), `must register ${required} handler`);
 	}
 	return { events, dir, calls, setNextResult };
@@ -201,7 +202,7 @@ test("install pi writes the vision-proxy extension file with valid source", asyn
 	reset();
 });
 
-test("pi extension analyzes images in before_agent_start without blocking the submit", async () => {
+test("pi extension analyzes images in the context event without blocking the submit", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -212,8 +213,8 @@ test("pi extension analyzes images in before_agent_start without blocking the su
 	const b64 = Buffer.from("fakepng").toString("base64");
 	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
 
-	// The input handler must NOT block the submit: it returns undefined for a
-	// normal (non-streaming) prompt so the user's text is accepted immediately.
+	// The input handler must NOT block the submit: it returns undefined so the
+	// user's prompt is accepted and submitted the instant they press Enter.
 	const inputResult = await events.input[0]({
 		type: "input",
 		text: `look at ${imagePath} please`,
@@ -221,22 +222,31 @@ test("pi extension analyzes images in before_agent_start without blocking the su
 	});
 	assert.equal(inputResult, undefined, "input must not block the prompt submit");
 
-	// before_agent_start does the analysis and injects the description.
-	const ev: any = {
-		type: "before_agent_start",
-		prompt: `look at ${imagePath} please`,
-		images: [{ type: "image", data: b64, mimeType: "image/png" }],
-		systemPrompt: "BASE",
-	};
-	const result = (await events.before_agent_start[0](ev)) as any;
-	assert.match(result.systemPrompt, /^BASE\n\n/);
-	assert.match(result.systemPrompt, /@@FENCE red square@@/);
-	assert.match(result.systemPrompt, /Do not use the Read tool on image files/);
-	// The referenced path is preserved in the user prompt (parity with Claude
-	// Code / Codex, which cannot rewrite the submission).
-	assert.equal(ev.prompt.includes(imagePath), true);
-	// Analyzable attachments are dropped so the model never receives raw bytes.
-	assert.equal(Array.isArray(ev.images) && ev.images.length, 0);
+	// The context event (which fires right before the model call) does the
+	// analysis and injects the description into the messages.
+	const result = (await events.context[0]({
+		type: "context",
+		messages: [
+			{
+				role: "user",
+				content: [
+					{ type: "image", data: b64, mimeType: "image/png" },
+					{ type: "text", text: `look at ${imagePath} please` },
+				],
+			},
+		],
+	})) as any;
+	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
+	// The image attachment is replaced by the fenced description; the original
+	// text (with the referenced path) is preserved for Claude Code / Codex parity.
+	assert.ok(!content.some((c) => c.type === "image"), "image block must be replaced");
+	const descBlock = content.find(
+		(c) => c.type === "text" && c.text?.includes("@@FENCE red square@@"),
+	);
+	assert.ok(descBlock, "description must be injected");
+	assert.match(descBlock!.text!, /Do not use the Read tool on image files/);
+	const textBlock = content.find((c) => c.type === "text" && c.text?.includes(imagePath));
+	assert.ok(textBlock, "referenced image path must be preserved in the prompt text");
 	// One analyze invocation covering the temp copy of the attachment plus the
 	// referenced file (the config-get probe is a separate call).
 	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
@@ -249,7 +259,7 @@ test("pi extension analyzes images in before_agent_start without blocking the su
 	reset();
 });
 
-test("pi extension before_agent_start injects the description into the system prompt", async () => {
+test("pi extension context event injects the description into the messages", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -270,29 +280,28 @@ test("pi extension before_agent_start injects the description into the system pr
 	});
 	assert.equal(inputResult, undefined);
 
-	// ...and before_agent_start analyzes and injects the description (wrapped with
+	// ...and the context event analyzes and injects the description (wrapped with
 	// the "do not Read image files" instruction, mirroring Claude Code / Codex
 	// additionalContext).
-	const result = (await events.before_agent_start[0]({
-		type: "before_agent_start",
-		prompt: `see ${imagePath}`,
-		systemPrompt: "BASE",
+	const result = (await events.context[0]({
+		type: "context",
+		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
 	})) as any;
-	assert.match(result.systemPrompt, /^BASE\n\n/);
-	assert.match(result.systemPrompt, /Do not use the Read tool on image files/);
-	assert.match(result.systemPrompt, /@@FENCE desc@@/);
+	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
+	const descBlock = content.find((c) => c.type === "text" && c.text?.includes("@@FENCE desc@@"));
+	assert.ok(descBlock, "description must be injected");
+	assert.match(descBlock!.text!, /Do not use the Read tool on image files/);
 
 	// A subsequent image-less prompt yields no description (nothing to analyze).
-	const none = await events.before_agent_start[0]({
-		type: "before_agent_start",
-		prompt: "plain text, no images",
-		systemPrompt: "BASE",
+	const none = await events.context[0]({
+		type: "context",
+		messages: [{ role: "user", content: [{ type: "text", text: "plain text, no images" }] }],
 	});
 	assert.equal(none, undefined);
 	reset();
 });
 
-test("pi extension embeds the description in the text for queued streaming prompts", async () => {
+test("pi extension keeps the prompt submit instant for queued streaming prompts", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -305,36 +314,36 @@ test("pi extension embeds the description in the text for queued streaming promp
 	const imagePath = fakeImage(testDir, "pic.png");
 	setNextResult({ status: 0, stdout: "@@FENCE queued desc@@" });
 
-	// Queued streaming prompt: input fires with streamingBehavior set, but
-	// before_agent_start is not emitted for queued messages, so the description
-	// must be embedded inline here (the only path that still blocks the submit).
-	const transformed = (await events.input[0]({
+	// A queued streaming prompt: input must still return undefined immediately so
+	// the submit is never blocked. The analysis happens later in the context event.
+	const inputResult = (await events.input[0]({
 		type: "input",
 		text: `see ${imagePath}`,
 		images: [],
 		streamingBehavior: "steer",
-	})) as { action: string; text: string; images: unknown[] };
-	assert.equal(transformed.action, "transform");
-	assert.equal(transformed.text.includes("see "), true, "user text survives");
-	assert.equal(transformed.text.includes(imagePath), true, "image path is preserved");
-	assert.match(transformed.text, /@@FENCE queued desc@@/);
-	assert.match(transformed.text, /Do not use the Read tool on image files/);
+	})) as unknown;
+	assert.equal(inputResult, undefined, "input must not block the prompt submit");
 
-	// A subsequent idle prompt returns undefined from input and yields no
-	// description from before_agent_start (nothing to analyze), confirming the
-	// streaming turn's analysis was self-contained.
-	const idle = await events.input[0]({
-		type: "input",
-		text: "follow-up text only, no images",
-		images: [],
+	// And the context event describes the queued message's referenced image.
+	const result = (await events.context[0]({
+		type: "context",
+		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
+	})) as any;
+	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
+	const descBlock = content.find(
+		(c) => c.type === "text" && c.text?.includes("@@FENCE queued desc@@"),
+	);
+	assert.ok(descBlock, "queued prompt must be described in context");
+	assert.match(descBlock!.text!, /Do not use the Read tool on image files/);
+
+	// A subsequent image-less prompt yields no description from context.
+	const idle = await events.context[0]({
+		type: "context",
+		messages: [
+			{ role: "user", content: [{ type: "text", text: "follow-up text only, no images" }] },
+		],
 	});
 	assert.equal(idle, undefined);
-	const nextStart = await events.before_agent_start[0]({
-		type: "before_agent_start",
-		prompt: "follow-up text only, no images",
-		systemPrompt: "BASE",
-	});
-	assert.equal(nextStart, undefined);
 	reset();
 });
 
@@ -350,17 +359,24 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 	const imagePath = fakeImage(testDir, "pic.png");
 	const b64 = Buffer.from("x").toString("base64");
 
-	// vp exits non-zero -> before_agent_start returns undefined (fail-open).
+	// vp exits non-zero -> context returns undefined (fail-open).
 	process.env.VP_MODE = "always";
 	setNextResult({ status: 1, stdout: "" });
-	const failed = await events.before_agent_start[0]({
-		type: "before_agent_start",
-		prompt: `see ${imagePath}`,
-		systemPrompt: "BASE",
+	const failed = await events.context[0]({
+		type: "context",
+		messages: [
+			{
+				role: "user",
+				content: [
+					{ type: "image", data: b64, mimeType: "image/png" },
+					{ type: "text", text: `see ${imagePath}` },
+				],
+			},
+		],
 	});
 	assert.equal(failed, undefined);
 
-	// mode off -> input is a no-op and before_agent_start returns undefined.
+	// mode off -> input is a no-op and context returns undefined.
 	process.env.VP_MODE = "off";
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
 	const inputDisabled = await events.input[0]({
@@ -369,13 +385,19 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		images: [{ type: "image", data: b64, mimeType: "image/png" }],
 	});
 	assert.equal(inputDisabled, undefined);
-	const startDisabled = await events.before_agent_start[0]({
-		type: "before_agent_start",
-		prompt: `see ${imagePath}`,
-		images: [{ type: "image", data: b64, mimeType: "image/png" }],
-		systemPrompt: "BASE",
+	const contextDisabled = await events.context[0]({
+		type: "context",
+		messages: [
+			{
+				role: "user",
+				content: [
+					{ type: "image", data: b64, mimeType: "image/png" },
+					{ type: "text", text: `see ${imagePath}` },
+				],
+			},
+		],
 	});
-	assert.equal(startDisabled, undefined);
+	assert.equal(contextDisabled, undefined);
 	delete process.env.VP_MODE;
 	reset();
 });
@@ -397,19 +419,28 @@ test("pi extension passes through attachments it cannot analyze", async () => {
 		mimeType: "image/svg+xml",
 	};
 
+	// An unsupported mime attachment plus a referenced image path: the
+	// unsupported image block is forwarded unchanged, the referenced path is
+	// described and the description is injected into the messages.
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
-	const ev: any = {
-		type: "before_agent_start",
-		prompt: `see ${imagePath}`,
-		images: [unsupported],
-		systemPrompt: "BASE",
-	};
-	const result = (await events.before_agent_start[0](ev)) as any;
-	assert.match(result.systemPrompt, /@@FENCE desc@@/);
-	// The referenced path is preserved and described (not stripped)...
-	assert.equal(ev.prompt.includes(imagePath), true);
-	// ...and the un-analyzable attachment survives instead of being dropped.
-	assert.equal(Array.isArray(ev.images) && ev.images.length, 1);
+	const result = (await events.context[0]({
+		type: "context",
+		messages: [
+			{
+				role: "user",
+				content: [unsupported, { type: "text", text: `see ${imagePath}` }],
+			},
+		],
+	})) as any;
+	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
+	// The unsupported image block survives instead of being dropped...
+	assert.ok(
+		content.some((c) => c.type === "image"),
+		"unsupported image block must pass through",
+	);
+	// ...and the referenced image path is described and injected.
+	const descBlock = content.find((c) => c.type === "text" && c.text?.includes("@@FENCE desc@@"));
+	assert.ok(descBlock, "referenced image must be described");
 	reset();
 });
 

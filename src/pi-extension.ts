@@ -7,30 +7,27 @@
  *
  * The extension hooks into Pi's lifecycle events to automatically describe images
  * at parity with the Claude Code / Codex `vp hook` integration:
- *   - `input`: keeps the prompt submit instant. For normal (non-streaming)
- *     prompts it returns immediately so the user's text is accepted without
- *     waiting on `vp analyze`; the analysis runs in `before_agent_start`. Only
- *     queued streaming prompts (event.streamingBehavior set) are analyzed here,
- *     because `before_agent_start` does not fire for them - the fenced
- *     description is embedded in the text for those.
- *   - `before_agent_start`: the analysis entry point for normal prompts. It
- *     extracts images attached to the submission (base64 content) plus image
- *     paths referenced in the text, runs `vp analyze` asynchronously (with a
- *     live "[vision-proxy] Analyzing..." notification so the wait never freezes
- *     the UI), drops analyzable attachments so the model never receives raw
- *     image bytes, and appends the fenced UNTRUSTED description to the system
- *     prompt. The referenced image path (if any) stays in the user prompt for
- *     parity with Claude Code / Codex, which also cannot rewrite the submission.
+ *   - `input`: a no-op that returns immediately so the user's prompt is accepted
+ *     and submitted the instant they press Enter. It never awaits `vp analyze`,
+ *     so prompt submission is never blocked on the vision call.
+ *   - `context`: the single analysis point. It fires right before Pi sends the
+ *     turn's messages to the model. For each user message it finds image
+ *     attachments (base64 content) and image paths referenced in the text, runs
+ *     `vp analyze` (with a live "[vision-proxy] Analyzing..." notification), and
+ *     replaces the image content with the fenced UNTRUSTED description. Because
+ *     this runs after the prompt has already been submitted and rendered, the
+ *     user sees their prompt immediately and the wait never blocks submission.
+ *     The referenced image path (if any) stays in the user prompt for parity with
+ *     Claude Code / Codex, which also cannot rewrite the submission.
  *   - `tool_result`: intercepts `read` tool results on image files and replaces
  *     the tool result content with the fenced description so no image bytes
  *     reach the model.
  *
  * Pi fires the `input` event for every `session.prompt()` submission, including
  * ones that arrive while the agent is streaming and are queued via the
- * `streamingBehavior` option. The event is NOT fired for messages dispatched
- * through the separate `session.steer()` / `session.followUp()` APIs (e.g. the
- * RPC `steer` / `follow_up` commands or queued-message retry paths); those
- * submissions are forwarded to the model with their attachments intact.
+ * `streamingBehavior` option. Queued streaming prompts are forwarded through to
+ * the `context` handler (which analyzes them just like any other message), so
+ * there is a single analysis path and no prompt submit is ever blocked.
  *
  * No tool is registered, keeping system tokens low.
  *
@@ -52,13 +49,11 @@ export const PI_EXTENSION_SOURCE = String.raw`/**
  * Hooks into Pi lifecycle events to automatically describe images at parity
  * with the Claude Code / Codex vp hook integration. No tool is registered.
  *
- * Supported image attachments are analyzed and dropped from the submission so
- * the model never receives raw image bytes; attachments with an unsupported
- * mime type are forwarded to the model unchanged. The 'input' event is fired
- * for every session.prompt() submission,
- * including streaming ones queued via the streamingBehavior option, but NOT
- * for messages dispatched through session.steer() or session.followUp()
- * directly (e.g. RPC steer / follow_up commands).
+ * The analysis runs in the context event, which fires right before the turn's
+ * messages are sent to the model. This keeps the prompt submit instant: the
+ * user's text is accepted the moment they press Enter, and the (slower) vision
+ * call happens at send-time without ever blocking submission. The input event
+ * is therefore a no-op.
  *
  * The description text returned by vp is attacker-controlled (it comes from
  * an external vision model), so it is forwarded verbatim inside its UNTRUSTED
@@ -271,85 +266,81 @@ function withImageInstruction(description: string): string {
 }
 
 export default function setup(pi: ExtensionAPI): void {
-  /**
-   * Detect images on a submission (base64 attachments + image paths referenced
-   * in the text), analyze them via vp, and return the fenced description plus
-   * the attachments we could not analyze (passed through unchanged). Fail-open.
-   * Runs asynchronously so the calling event handler never freezes the UI.
-   */
-  async function describeEvent(event: any, ctx?: any) {
-    const tempFiles: string[] = [];
-    const images: string[] = [];
-    const passthroughImages: unknown[] = [];
-    const text =
-      typeof event.text === "string"
-        ? event.text
-        : typeof event.prompt === "string"
-          ? event.prompt
-          : "";
-    try {
-      // Attached images arrive as base64 content without a path.
-      if (Array.isArray(event.images)) {
-        for (const img of event.images as Array<{ data?: unknown; mimeType?: unknown }>) {
-          if (!img || typeof img.data !== "string" || typeof img.mimeType !== "string") continue;
-          const tempPath = writeTempImage(img.data, img.mimeType);
+  // --- input: keep prompt submit instant; analysis happens in the context event ---
+  pi.on("input", async (_event) => {
+    if (getMode() === "off") return undefined;
+    // Intentionally does no work here: returning undefined immediately lets Pi
+    // accept and submit the user's prompt without waiting on vp analyze. The
+    // analysis runs later in the context event, which fires right before the
+    // messages are sent to the model.
+    return undefined;
+  });
+
+  // --- context: analyze images and replace them with the description ---
+  pi.on("context", async (event, ctx) => {
+    if (getMode() === "off") return undefined;
+    const messages = Array.isArray(event.messages) ? event.messages : null;
+    if (!messages) return undefined;
+
+    let modified = false;
+    const out: unknown[] = [];
+    for (const msg of messages) {
+      if (!msg || (msg as any).role !== "user" || !Array.isArray((msg as any).content)) {
+        out.push(msg);
+        continue;
+      }
+      const tempFiles: string[] = [];
+      const images: string[] = [];
+      const referenced: string[] = [];
+      const passthrough: unknown[] = [];
+      for (const c of (msg as any).content as Array<any>) {
+        if (c && c.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string") {
+          const tempPath = writeTempImage(c.data, c.mimeType);
           if (tempPath) {
             tempFiles.push(tempPath);
             images.push(tempPath);
           } else {
-            passthroughImages.push(img);
+            passthrough.push(c);
           }
+        } else if (c && c.type === "text" && typeof c.text === "string") {
+          const paths = extractImagePaths(c.text)
+            .map((p) => resolveImagePath(p))
+            .filter((p) => !!p && isImagePath(p) && existsSync(p));
+          if (paths.length) referenced.push(...paths);
+          passthrough.push(c);
+        } else if (c) {
+          passthrough.push(c);
         }
       }
-      // Image paths referenced in the text itself.
-      const referenced = extractImagePaths(text)
-        .map((p) => resolveImagePath(p))
-        .filter((p) => !!p && isImagePath(p) && existsSync(p));
-      images.push(...referenced);
-      const uniqueImages = [...new Set(images)];
-      if (uniqueImages.length === 0) return { description: null, passthroughImages };
+      const uniqueImages = [...new Set([...images, ...referenced])];
+      if (uniqueImages.length === 0) {
+        out.push(msg);
+        continue;
+      }
       if (ctx && ctx.ui && ctx.ui.notify) {
         ctx.ui.notify("[vision-proxy] Analyzing " + uniqueImages.length + " image(s)...", "info");
       }
       const description = await runAnalyze(
         uniqueImages,
-        ctx && ctx.signal ? ctx.signal : undefined,
+        ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
       );
-      return { description, passthroughImages };
-    } finally {
       cleanupTempDirs(tempFiles);
+      if (!description) {
+        out.push(msg);
+        continue;
+      }
+      modified = true;
+      // Keep the original text (the image path is preserved for Claude/Codex
+      // parity) and append the fenced description. Image attachments are replaced
+      // by the description so the model never receives raw image bytes.
+      const newContent = [
+        ...passthrough,
+        { type: "text", text: withImageInstruction(description) },
+      ];
+      out.push({ ...(msg as any), content: newContent });
     }
-  }
-
-  // --- input: keep submit instant; analyze only for queued streaming prompts ---
-  pi.on("input", async (event) => {
-    if (getMode() === "off") return undefined;
-    // Normal (non-streaming) prompts are analyzed in before_agent_start, so the
-    // prompt submit is never blocked on the vision call. Only queued streaming
-    // prompts skip before_agent_start and must be handled here - the only path
-    // that still blocks the submit, and a rare one.
-    if (!event.streamingBehavior) return undefined;
-    const { description, passthroughImages } = await describeEvent(event, undefined);
-    if (!description) return undefined; // fail-open
-    const text = typeof event.text === "string" ? event.text : "";
-    return {
-      action: "transform",
-      text: text + "\n\n" + withImageInstruction(description),
-      images: passthroughImages as Array<{ type: "image"; data: string; mimeType: string }>,
-    };
-  });
-
-  // --- before_agent_start: analyze images and inject the description as context ---
-  pi.on("before_agent_start", async (event, ctx) => {
-    if (getMode() === "off") return undefined;
-    const { description, passthroughImages } = await describeEvent(event, ctx);
-    if (!description) return undefined; // fail-open
-    // Drop analyzable attachments so the model never receives raw image bytes;
-    // the injected description above is the only image content it sees. The
-    // referenced image path (if any) stays in the user prompt for parity with
-    // Claude Code / Codex, which also cannot rewrite the submission.
-    if (Array.isArray(event.images)) event.images = passthroughImages;
-    return { systemPrompt: (event.systemPrompt ?? "") + "\n\n" + withImageInstruction(description) };
+    if (modified) return { messages: out };
+    return undefined;
   });
 
   // --- tool_result: replace read results on image files ---
@@ -360,7 +351,10 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath);
     if (!filePath || !existsSync(filePath)) return undefined;
-    const description = await runAnalyze([filePath], ctx && ctx.signal ? ctx.signal : undefined);
+    const description = await runAnalyze(
+      [filePath],
+      ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
+    );
     if (!description) return undefined; // fail-open
     return { content: [{ type: "text", text: withImageInstruction(description) }] };
   });

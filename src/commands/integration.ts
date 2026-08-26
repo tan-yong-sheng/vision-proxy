@@ -3,8 +3,10 @@
  *
  * Subcommands:
  *   install <agent>   installs vision-proxy for the agent.
- *                     - pi          writes the generated `analyze_image` extension
- *                                   into Pi's global extensions directory.
+ *                     - pi          writes the generated lifecycle-event
+ *                                   extension (input / before_agent_start /
+ *                                   tool_result) into Pi's global extensions
+ *                                   directory. No tool is registered.
  *                     - claude-code registers a `UserPromptSubmit` hook and a
  *                                   `PreToolUse Read` hook in settings.json, both
  *                                   invoking the absolute `vp hook` path.

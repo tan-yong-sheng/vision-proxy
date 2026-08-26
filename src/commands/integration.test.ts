@@ -152,7 +152,7 @@ function fakeImage(dir: string, ...segments: string[]): string {
 /**
  * Load the generated Pi extension and capture its lifecycle handlers.
  * Verifies the public interface contract: a default export setup function
- * registering input, before_agent_start, and tool_result handlers (no tools).
+ * registering input, context, and tool_result handlers (no tools).
  */
 /**
  * Shape of the generated Pi extension's default export: a setup function

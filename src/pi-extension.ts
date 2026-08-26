@@ -68,7 +68,18 @@ import { createHash } from "node:crypto";
 
 // __VP_VERSION__PLACEHOLDER__
 
-const TIMEOUT_MS = Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000);
+/**
+ * Parse a positive-integer env var, falling back (never NaN) when missing,
+ * non-numeric, or out of range. Mirrors readPositiveIntEnv from the core so
+ * every harness resolves VP_HOOK_TIMEOUT_MS / VP_MAX_OUTPUT_TOKENS identically.
+ */
+function parsePositiveInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+	const n = Number.parseInt(raw ?? "", 10);
+	if (!Number.isFinite(n) || n < min || n > max) return fallback;
+	return n;
+}
+
+const TIMEOUT_MS = parsePositiveInt(process.env.VP_HOOK_TIMEOUT_MS, 30000, 1000, 600000);
 
 // Known image file extensions (lowercased, no dot).
 const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "ico", "avif"];
@@ -170,7 +181,7 @@ async function runAnalyze(images: string[], signal?: unknown, question?: string)
     if (!images || images.length === 0) return resolve(null);
     const vp = resolveVpBin();
     const { command, args: prefix } = vpEntryToSpawn(vp);
-    const maxTokens = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
+    const maxTokens = parsePositiveInt(process.env.VP_MAX_OUTPUT_TOKENS, 2000, 1, 1_000_000);
     const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(maxTokens)];
     if (question && question.trim()) args.push("--question", question.trim());
     let settled = false;

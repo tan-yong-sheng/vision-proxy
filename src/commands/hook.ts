@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { readPositiveIntEnv } from "../core.ts";
 
 /** Known image file extensions (lowercased, no dot). */
 const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "ico", "avif"];
@@ -220,12 +221,12 @@ export function runAnalyze(images: string[], question?: string): string | null {
 	if (images.length === 0) return null;
 	const vp = resolveVpBin();
 	const { command, args: prefix } = vpEntryToSpawn(vp);
-	const codexCap = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
+	const codexCap = readPositiveIntEnv(process.env, "VP_MAX_OUTPUT_TOKENS", 2000, 1, 1_000_000);
 	const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(codexCap)];
 	if (question?.trim()) args.push("--question", question.trim());
 	const result = spawnSync(command, args, {
 		encoding: "utf8",
-		timeout: Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000),
+		timeout: readPositiveIntEnv(process.env, "VP_HOOK_TIMEOUT_MS", 30000, 1000, 600000),
 		maxBuffer: MAX_BUFFER_BYTES,
 	});
 	if (result.error) {

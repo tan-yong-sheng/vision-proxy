@@ -61,7 +61,7 @@ export const PI_EXTENSION_SOURCE = String.raw`/**
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, writeFileSync, mkdtempSync, rmSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, mkdtempSync, rmSync, readFileSync, mkdirSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -409,7 +409,17 @@ export default function setup(pi: ExtensionAPI): void {
           const paths = extractImagePaths(c.text)
             .map((p) => resolveImagePath(p, process.cwd()))
             .filter((p): p is string => !!p && isImagePath(p) && existsSync(p));
-          for (const p of paths) referenced.push({ id: p, path: p });
+          for (const p of paths) {
+            // Identity folds in file size + mtime so a re-written path (e.g. a
+            // screenshot tool that always writes the same path) yields a fresh
+            // description instead of a stale cached one.
+            let identity = p;
+            try {
+              const st = statSync(p);
+              identity = p + "#" + st.size + ":" + st.mtimeMs;
+            } catch { /* fall back to path only */ }
+            referenced.push({ id: identity, path: p });
+          }
           passthrough.push(c);
         } else if (c) {
           passthrough.push(c);
@@ -418,7 +428,21 @@ export default function setup(pi: ExtensionAPI): void {
       // De-duplicate by stable identity so each image is analyzed once.
       const uniqueInline = dedupe(inlineImages);
       const uniqueRef = dedupe(referenced);
-      if (uniqueInline.length === 0 && uniqueRef.length === 0) {
+      // Split inline images into analyzable vs unsupported-mime. Unsupported
+      // blocks are forwarded through unchanged so they survive every context
+      // event (including a cache hit) and never enter the cache key or the
+      // analysis path. A cache hit previously dropped them because the
+      // pass-through only ran in the analyze loop below.
+      const analyzableInline: typeof uniqueInline = [];
+      for (const im of uniqueInline) {
+        const subtype = (im.mimeType.split("/")[1] ?? "").toLowerCase();
+        if (IMAGE_EXT.includes(subtype)) {
+          analyzableInline.push(im);
+        } else {
+          passthrough.push(im.block);
+        }
+      }
+      if (analyzableInline.length === 0 && uniqueRef.length === 0) {
         out.push(msg);
         continue;
       }
@@ -427,7 +451,7 @@ export default function setup(pi: ExtensionAPI): void {
       // the original user message still carries its image blocks/paths, so
       // without this cache the vision call and its "Analyzing..." notification
       // would repeat on every turn.
-      const cacheKey = [...uniqueInline.map((i) => i.id), ...uniqueRef.map((r) => r.id)].join("|");
+      const cacheKey = [...analyzableInline.map((i) => i.id), ...uniqueRef.map((r) => r.id)].join("|");
       const cached = descriptionCache.get(cacheKey);
       if (cached) {
         modified = true;
@@ -440,15 +464,11 @@ export default function setup(pi: ExtensionAPI): void {
       // Write temp files only for the images that still need analysis.
       const tempFiles: string[] = [];
       const analyzePaths: string[] = [];
-      for (const im of uniqueInline) {
+      for (const im of analyzableInline) {
         const tempPath = writeTempImage(im.data, im.mimeType);
         if (tempPath) {
           tempFiles.push(tempPath);
           analyzePaths.push(tempPath);
-        } else {
-          // Unsupported mime type: forward the original block unchanged so it
-          // survives the pass-through instead of being dropped.
-          passthrough.push(im.block);
         }
       }
       for (const r of uniqueRef) analyzePaths.push(r.path);

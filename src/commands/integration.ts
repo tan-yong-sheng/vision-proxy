@@ -23,15 +23,6 @@ import { OPENCODE_PLUGIN_SOURCE } from "../opencode-plugin.ts";
 import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
 import { extractMarkerVersion, renderVersionMarker, VERSION } from "../version.ts";
 
-const SUPPORTED = ["pi", "claude-code", "codex", "opencode"];
-const PI_EXTENSION_FILENAME = "vision-proxy.ts";
-const HOOK_TIMEOUT_SEC = 30;
-
-/** Returns the home directory, respecting process.env.HOME for test isolation. */
-function getHomeDir(): string {
-	return process.env.HOME ?? homedir();
-}
-
 export interface IntegrationResult {
 	ok: boolean;
 	message: string;
@@ -61,6 +52,15 @@ interface AgentSpec {
 	isInstalled(raw?: string): boolean;
 	/** Version stamped into the marker file, or undefined if absent/unstamped. */
 	installedVersion(opts: { installDir?: string }): string | undefined;
+}
+
+const SUPPORTED = ["pi", "claude-code", "codex", "opencode"];
+const PI_EXTENSION_FILENAME = "vision-proxy.ts";
+const HOOK_TIMEOUT_SEC = 30;
+
+/** Returns the home directory, respecting process.env.HOME for test isolation. */
+function getHomeDir(): string {
+	return process.env.HOME ?? homedir();
 }
 
 function piExtensionsDir(): string {
@@ -348,6 +348,7 @@ function makeHookAgentSpec(opts: {
 	};
 }
 
+/** Absolute path to the opencode plugins directory where vision-proxy.ts is installed. */
 function opencodePluginsDir(): string {
 	return join(getHomeDir(), ".config", "opencode", "plugins");
 }
@@ -494,6 +495,7 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 }
 
 // fallow-ignore-next-line unused-export
+/** List every supported integration with its installed/version state (optional installDir overrides the home-relative target). */
 export async function integrationList(installDir?: string): Promise<IntegrationResult> {
 	const lines: string[] = [];
 	for (const agent of SUPPORTED) {

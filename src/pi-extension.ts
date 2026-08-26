@@ -8,13 +8,16 @@
  * The extension hooks into Pi's lifecycle events to automatically describe images
  * at parity with the Claude Code / Codex `vp hook` integration:
  *   - `input`: extracts images attached to the submission (base64 content) plus
- *     image paths referenced in the text, runs `vp analyze`, strips the image
- *     bytes and path mentions from the submission, and stashes the description.
- *     Attachments whose mime type is outside the supported set are forwarded
- *     unchanged to the model instead of being dropped. When the submission is
- *     queued for streaming delivery (event.streamingBehavior set), the fenced
- *     description is embedded in the transformed text instead of the system
- *     prompt, because before_agent_start does not fire for queued messages.
+ *     image paths referenced in the text, runs `vp analyze`, stashes the
+ *     description, and preserves the user's prompt text verbatim (including any
+ *     referenced image path) to match Claude Code / Codex parity - those hooks
+ *     add the description as separate context and cannot rewrite the submission.
+ *     Attached image bytes are dropped from the submission (they have no text
+ *     form), while attachments whose mime type is outside the supported set are
+ *     forwarded unchanged to the model. When the submission is queued for
+ *     streaming delivery (event.streamingBehavior set), the fenced description
+ *     is embedded in the text instead of the system prompt, because
+ *     before_agent_start does not fire for queued messages.
  *   - `before_agent_start`: appends the stashed fenced UNTRUSTED description to
  *     the system prompt (the only cross-turn injection channel Pi consumes).
  *   - `tool_result`: intercepts `read` tool results on image files and replaces
@@ -132,29 +135,6 @@ function extractImagePaths(text: string): string[] {
   return found;
 }
 
-/** Escape every regex special character in a literal path fragment. */
-function escapeRegExp(s: string): string {
-  const bs = "\\";
-  // Backslash must be escaped first so later insertions are not re-escaped.
-  let out = s.split(bs).join(bs + bs);
-  for (const ch of [".", "*", "+", "?", "^", "$", "{", "}", "(", ")", "[", "]", "|"]) {
-    out = out.split(ch).join(bs + ch);
-  }
-  return out;
-}
-
-/** Strip the given literal path strings out of the prompt text. */
-function stripImagePaths(text: string, paths: string[]): string {
-  if (paths.length === 0) return text;
-  // Longest first so overlapping candidates remove completely.
-  const sorted = [...paths].sort((a, b) => b.length - a.length);
-  let result = text;
-  for (const p of sorted) {
-    result = result.replace(new RegExp(escapeRegExp(p), "g"), "");
-  }
-  return result;
-}
-
 /** Resolve the vp binary into a spawn command, supporting .js entry points. */
 function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
   if (/\.js$/i.test(cmd)) return { command: process.execPath, args: [cmd] };
@@ -270,7 +250,7 @@ function withImageInstruction(description: string): string {
 let pendingDescription: string | null = null;
 
 export default function setup(pi: ExtensionAPI): void {
-  // --- input: strip image bytes/paths from the submission ---
+  // --- input: describe images and stash the description; preserve user text ---
   pi.on("input", async (event) => {
     if (getMode() === "off") return undefined;
     const tempFiles: string[] = [];
@@ -304,25 +284,24 @@ export default function setup(pi: ExtensionAPI): void {
       const description = runAnalyze(uniqueImages);
       if (!description) return undefined; // fail-open
 
-      let stripped = stripImagePaths(text, referenced);
-      if (!stripped.trim() && passthroughImages.length === 0) {
-        stripped = "(images were attached; see the vision-proxy description below)";
-      }
-      // Queued streaming prompts never fire before_agent_start, so embedding
-      // the description in the text is the only channel that reaches the model
-      // for that turn. Stash instead for the idle path so before_agent_start
-      // can append it to the system prompt.
+      // Preserve the user's prompt text verbatim (including any referenced image
+      // path) to match Claude Code / Codex parity: those hooks cannot rewrite the
+      // user prompt, so they add the description as separate context rather than
+      // editing the submission. We deliver the description the same way - stashed
+      // for before_agent_start to inject into the system prompt (idle path), or
+      // embedded in the text only for queued streaming prompts where
+      // before_agent_start never fires.
       if (event.streamingBehavior) {
         return {
           action: "transform",
-          text: stripped + "\n\n" + withImageInstruction(description),
+          text: text + "\n\n" + withImageInstruction(description),
           images: passthroughImages as Array<{ type: "image"; data: string; mimeType: string }>,
         };
       }
       pendingDescription = description;
       return {
         action: "transform",
-        text: stripped,
+        text,
         images: passthroughImages as Array<{ type: "image"; data: string; mimeType: string }>,
       };
     } finally {
@@ -335,7 +314,10 @@ export default function setup(pi: ExtensionAPI): void {
     if (!pendingDescription) return undefined;
     const description = pendingDescription;
     pendingDescription = null;
-    return { systemPrompt: (event.systemPrompt ?? "") + "\n\n" + description };
+    // Mirror the Claude Code / Codex hook's additionalContext: deliver the
+    // description with the "do not Read image files" instruction instead of
+    // editing the user's prompt.
+    return { systemPrompt: (event.systemPrompt ?? "") + "\n\n" + withImageInstruction(description) };
   });
 
   // --- tool_result: replace read results on image files ---

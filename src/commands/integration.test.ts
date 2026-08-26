@@ -4,9 +4,10 @@
  * Exercises the generated Pi extension and the Claude Code / Codex hook
  * registrations against an isolated temp HOME so we never touch a real
  * ~/.claude, ~/.codex, or ~/.pi. Validates:
- *   - install pi writes an executable extension: its input handler strips
- *     attached/referenced images, before_agent_start injects the description
- *     into the system prompt once, and tool_result replaces image reads
+ *   - install pi writes an executable extension: its input handler describes
+ *     attached/referenced images without altering the user prompt text,
+ *     before_agent_start injects the description into the system prompt once,
+ *     and tool_result replaces image reads
  *   - install claude-code/codex registers both hooks (UserPromptSubmit +
  *     PreToolUse Read) in the agent config with the absolute `vp hook` path
  *   - uninstall removes only our registrations (idempotent, leaves others intact)
@@ -179,7 +180,7 @@ test("install pi writes the vision-proxy extension file with valid source", asyn
 	reset();
 });
 
-test("pi extension input handler strips attached and referenced images", async () => {
+test("pi extension input handler describes attached and referenced images without altering the prompt", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -197,9 +198,11 @@ test("pi extension input handler strips attached and referenced images", async (
 	})) as { action: string; text: string; images: string[] };
 
 	assert.equal(result.action, "transform");
-	// The existing referenced path is stripped from the text...
-	assert.equal(result.text.includes(imagePath), false);
-	assert.match(result.text, /look at\s+please/);
+	// The referenced path is preserved in the user prompt (parity with Claude
+	// Code / Codex, which cannot rewrite the submission).
+	assert.equal(result.text.includes(imagePath), true);
+	assert.equal(result.text.includes("look at"), true);
+	assert.equal(result.text.includes("please"), true);
 	// ...and attached image bytes are dropped entirely.
 	assert.equal(result.images.length, 0);
 	// One analyze invocation covering the temp copy of the attachment plus the
@@ -238,7 +241,13 @@ test("pi extension injects the description into the system prompt exactly once",
 		prompt: transformed.text,
 		systemPrompt: "BASE",
 	});
-	assert.match((first as any).systemPrompt, /^BASE\n\n@@FENCE desc@@$/);
+	// The description is injected once into the system prompt (wrapped with the
+	// "do not Read image files" instruction, mirroring Claude Code / Codex
+	// additionalContext), and the user prompt text is untouched.
+	assert.match((first as any).systemPrompt, /^BASE\n\n/);
+	assert.match((first as any).systemPrompt, /Do not use the Read tool on image files/);
+	assert.match((first as any).systemPrompt, /@@FENCE desc@@/);
+	assert.equal(transformed.text, `see ${imagePath}`);
 	// The stash is consumed: a second agent start in the same session is clean.
 	const second = await events.before_agent_start[0]({
 		type: "before_agent_start",
@@ -272,7 +281,7 @@ test("pi extension embeds the description in the text for queued streaming promp
 	})) as { action: string; text: string; images: unknown[] };
 	assert.equal(transformed.action, "transform");
 	assert.equal(transformed.text.includes("see "), true, "user text survives");
-	assert.equal(transformed.text.includes(imagePath), false, "image path is stripped");
+	assert.equal(transformed.text.includes(imagePath), true, "image path is preserved");
 	assert.match(transformed.text, /@@FENCE queued desc@@/);
 	assert.match(transformed.text, /Do not use the Read tool on image files/);
 
@@ -349,8 +358,8 @@ test("pi extension passes through attachments it cannot analyze", async () => {
 		images: [unsupported],
 	})) as { action: string; text: string; images: unknown[] };
 	assert.equal(result.action, "transform");
-	// The referenced path is still stripped and described...
-	assert.equal(result.text.includes(imagePath), false);
+	// The referenced path is preserved and described (not stripped)...
+	assert.equal(result.text.includes(imagePath), true);
 	// ...and the un-analyzable attachment survives instead of being dropped.
 	assert.equal(result.images.length, 1);
 	reset();

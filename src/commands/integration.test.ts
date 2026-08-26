@@ -202,7 +202,11 @@ test("install pi writes the vision-proxy extension file with valid source", asyn
 	reset();
 });
 
-test("pi extension analyzes images in the context event without blocking the submit", async () => {
+test("pi extension analyzes images in the context event without blocking the submit", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -266,7 +270,11 @@ test("pi extension analyzes images in the context event without blocking the sub
 	reset();
 });
 
-test("pi extension resolves a tilde (~) image path in the context event", async () => {
+test("pi extension resolves a tilde (~) image path in the context event", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
 	// Image lives directly under HOME so ~/sub/photo.jpeg resolves to it.
 	const home = isolate();
 	const dir = installDir(home);
@@ -306,7 +314,11 @@ test("pi extension resolves a tilde (~) image path in the context event", async 
 	reset();
 });
 
-test("pi extension context event injects the description into the messages", async () => {
+test("pi extension context event injects the description into the messages", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -348,7 +360,70 @@ test("pi extension context event injects the description into the messages", asy
 	reset();
 });
 
-test("pi extension keeps the prompt submit instant for queued streaming prompts", async () => {
+test("pi extension context event analyzes an image once across repeated context events", async () => {
+	// Regression for the notification spam: Pi re-fires the context event for
+	// every model call (including after each tool execution), and the original
+	// user message still carries its image blocks/paths. Without a description
+	// cache the same image was re-analyzed and re-notified on every turn, so
+	// "[vision-proxy] Analyzing 1 image(s)..." repeated for each tool result.
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
+	const b64 = Buffer.from("fakepng").toString("base64");
+	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
+
+	const notifyCalls: string[] = [];
+	const ctxWithNotify = {
+		ui: {
+			notify: (msg: string) => {
+				notifyCalls.push(msg);
+			},
+		},
+	};
+	const messageEvent = (msgs: unknown[]) => ({ type: "context", messages: msgs });
+	const userMessage = (): any => ({
+		role: "user",
+		content: [
+			{ type: "image", data: b64, mimeType: "image/png" },
+			{ type: "text", text: `look at ${imagePath} please` },
+		],
+	});
+
+	// First context event: analyzes the image and notifies once.
+	const first = (await events.context[0](messageEvent([userMessage()]), ctxWithNotify)) as any;
+	assert.ok(first?.messages, "first context must return transformed messages");
+	const analyzeAfterFirst = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeAfterFirst.length, 1, "must analyze once on first context event");
+	assert.equal(notifyCalls.length, 1, "must notify once on first context event");
+
+	// A later context event (e.g. a follow-up turn) re-fires with the same image
+	// still present. The description cache must prevent a second analysis and a
+	// second notification.
+	const second = (await events.context[0](messageEvent([userMessage()]), ctxWithNotify)) as any;
+	assert.ok(second?.messages, "second context must return transformed messages");
+	const analyzeAfterSecond = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(
+		analyzeAfterSecond.length,
+		1,
+		"must NOT re-analyze the same image on the second context event",
+	);
+	assert.equal(notifyCalls.length, 1, "must NOT re-notify on the second context event");
+	reset();
+});
+
+test("pi extension keeps the prompt submit instant for queued streaming prompts", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -394,7 +469,11 @@ test("pi extension keeps the prompt submit instant for queued streaming prompts"
 	reset();
 });
 
-test("pi extension input handler never spawns vp (no blocking config lookup)", async () => {
+test("pi extension input handler never spawns vp (no blocking config lookup)", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -409,14 +488,17 @@ test("pi extension input handler never spawns vp (no blocking config lookup)", a
 	// (or any other vp subprocess) synchronously - that blocking lookup used to
 	// delay the prompt submit. The mode check belongs in the context event.
 	const before = calls.length;
-	const inputResult = await events.input[0]({
+	const inputPromise = events.input[0]({
 		type: "input",
 		text: "look at something please",
 		images: [],
 	});
+	// Assert immediately, before awaiting: if the handler ever synchronously
+	// spawned vp analyze, this catches it on the spot.
+	assert.equal(calls.length, before, "input must not spawn vp synchronously");
+	const inputResult = await inputPromise;
 	assert.equal(inputResult, undefined, "input must not block the prompt submit");
 	assert.equal(calls.length, before, "input must not spawn vp");
-	reset();
 });
 
 test("pi extension fails open on analyze failure and respects mode off", async () => {
@@ -474,7 +556,11 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 	reset();
 });
 
-test("pi extension passes through attachments it cannot analyze", async () => {
+test("pi extension passes through attachments it cannot analyze", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -516,7 +602,11 @@ test("pi extension passes through attachments it cannot analyze", async () => {
 	reset();
 });
 
-test("pi extension replaces read results on image files only", async () => {
+test("pi extension replaces read results on image files only", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);

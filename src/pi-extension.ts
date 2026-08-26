@@ -138,12 +138,25 @@ function extractImagePaths(text: string): string[] {
   return found;
 }
 
+/** De-duplicate by stable id, preserving first-seen order. */
+function dedupe<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const it of items) {
+    if (seen.has(it.id)) continue;
+    seen.add(it.id);
+    out.push(it);
+  }
+  return out;
+}
+
 /** Resolve the vp binary into a spawn command, supporting .js entry points. */
 function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
   if (/\.js$/i.test(cmd)) return { command: process.execPath, args: [cmd] };
   return { command: cmd, args: [] };
 }
 
+/** Resolve the vp binary path, honoring the VP_BIN override and defaulting to "vp". */
 function resolveVpBin(): string {
   const env = process.env.VP_BIN;
   if (env?.trim()) return env;
@@ -199,7 +212,17 @@ async function runAnalyze(images: string[], signal?: unknown, question?: string)
       finish(null);
     }, TIMEOUT_MS);
     if (signal && (signal as AbortSignal).addEventListener) {
-      const onAbort = () => { try { if (child) child.kill("SIGTERM"); } catch { /* ignore */ } };
+      const onAbort = () => {
+        // Settle immediately so the context handler does not hang until the hard
+        // timeout waiting on a child that swallows SIGTERM and never emits "close".
+        finish(null);
+        try { if (child) child.kill("SIGTERM"); } catch { /* ignore */ }
+        // Force-stop a child that handles SIGTERM and never exits.
+        try {
+          const dying = child;
+          setTimeout(() => { try { if (dying) dying.kill("SIGKILL"); } catch { /* ignore */ } }, 1000);
+        } catch { /* ignore */ }
+      };
       if ((signal as AbortSignal).aborted) onAbort();
       else (signal as AbortSignal).addEventListener("abort", onAbort, { once: true });
     }
@@ -271,6 +294,7 @@ function cleanupTempDirs(paths: string[]): void {
   }
 }
 
+/** Wrap a raw vision description with the untrusted-input instruction for the model. */
 function withImageInstruction(description: string): string {
   return (
     "Do not use the Read tool on image files. " +
@@ -280,6 +304,23 @@ function withImageInstruction(description: string): string {
     "If you need a more specific or detailed analysis, ask in the prompt instead of reading the file.\n\n" +
     description
   );
+}
+
+// Session-scoped cache of image descriptions, keyed by a stable identity per
+// message (base64 of inline images, resolved absolute path of referenced paths).
+// Pi re-fires the context event for every model call and the original user
+// message still carries its image blocks/paths, so this prevents re-analyzing
+// (and re-notifying) the same image on every turn (cost, latency, and stale
+// duplicate text in the model context).
+const descriptionCache = new Map<string, string>();
+
+/** Cache a description, evicting the oldest entry past the cap to bound memory. */
+function cacheDescription(key: string, description: string): void {
+  if (descriptionCache.size >= 200) {
+    const oldest = descriptionCache.keys().next().value;
+    if (oldest !== undefined) descriptionCache.delete(oldest);
+  }
+  descriptionCache.set(key, description);
 }
 
 export default function setup(pi: ExtensionAPI): void {
@@ -298,6 +339,7 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const messages = Array.isArray(event.messages) ? event.messages : null;
     if (!messages) return undefined;
+    const signal = ctx && (ctx as any).signal ? (ctx as any).signal : undefined;
 
     let modified = false;
     const out: unknown[] = [];
@@ -306,36 +348,68 @@ export default function setup(pi: ExtensionAPI): void {
         out.push(msg);
         continue;
       }
-      const tempFiles: string[] = [];
-      const images: string[] = [];
-      const referenced: string[] = [];
+      const inlineImages: Array<{ id: string; data: string; mimeType: string; block: any }> = [];
+      const referenced: Array<{ id: string; path: string }> = [];
       const passthrough: unknown[] = [];
       for (const c of (msg as any).content as Array<any>) {
         if (c && c.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string") {
-          const tempPath = writeTempImage(c.data, c.mimeType);
-          if (tempPath) {
-            tempFiles.push(tempPath);
-            images.push(tempPath);
-          } else {
-            passthrough.push(c);
-          }
+          // Identity for an inline image is its raw base64: stable across the
+          // repeated context events Pi fires for one turn, even though the temp
+          // file we write for it is regenerated each time.
+          inlineImages.push({ id: c.data, data: c.data, mimeType: c.mimeType, block: c });
         } else if (c && c.type === "text" && typeof c.text === "string") {
           const paths = extractImagePaths(c.text)
-            .map((p) => resolveImagePath(p))
-            .filter((p) => !!p && isImagePath(p) && existsSync(p));
-          if (paths.length) referenced.push(...paths);
+            .map((p) => resolveImagePath(p, process.cwd()))
+            .filter((p): p is string => !!p && isImagePath(p) && existsSync(p));
+          for (const p of paths) referenced.push({ id: p, path: p });
           passthrough.push(c);
         } else if (c) {
           passthrough.push(c);
         }
       }
-      const uniqueImages = [...new Set([...images, ...referenced])];
-      if (uniqueImages.length === 0) {
+      // De-duplicate by stable identity so each image is analyzed once.
+      const uniqueInline = dedupe(inlineImages);
+      const uniqueRef = dedupe(referenced);
+      if (uniqueInline.length === 0 && uniqueRef.length === 0) {
+        out.push(msg);
+        continue;
+      }
+      // Reuse a cached description when every image in this message has already
+      // been analyzed. Pi re-fires the context event for every model call, and
+      // the original user message still carries its image blocks/paths, so
+      // without this cache the vision call and its "Analyzing..." notification
+      // would repeat on every turn.
+      const cacheKey = [...uniqueInline.map((i) => i.id), ...uniqueRef.map((r) => r.id)].join("|");
+      const cached = descriptionCache.get(cacheKey);
+      if (cached) {
+        modified = true;
+        out.push({
+          ...(msg as any),
+          content: [...passthrough, { type: "text", text: withImageInstruction(cached) }],
+        });
+        continue;
+      }
+      // Write temp files only for the images that still need analysis.
+      const tempFiles: string[] = [];
+      const analyzePaths: string[] = [];
+      for (const im of uniqueInline) {
+        const tempPath = writeTempImage(im.data, im.mimeType);
+        if (tempPath) {
+          tempFiles.push(tempPath);
+          analyzePaths.push(tempPath);
+        } else {
+          // Unsupported mime type: forward the original block unchanged so it
+          // survives the pass-through instead of being dropped.
+          passthrough.push(im.block);
+        }
+      }
+      for (const r of uniqueRef) analyzePaths.push(r.path);
+      if (analyzePaths.length === 0) {
         out.push(msg);
         continue;
       }
       if (ctx && ctx.ui && ctx.ui.notify) {
-        ctx.ui.notify("[vision-proxy] Analyzing " + uniqueImages.length + " image(s)...", "info");
+        ctx.ui.notify("[vision-proxy] Analyzing " + analyzePaths.length + " image(s)...", "info");
       }
       // Pass this message's own text as the analysis question so the vision model
       // can tailor the description to what the user is asking (parity with the
@@ -344,16 +418,13 @@ export default function setup(pi: ExtensionAPI): void {
         .filter((c) => c && c.type === "text" && typeof c.text === "string")
         .map((c) => c.text as string)
         .join("\n");
-      const description = await runAnalyze(
-        uniqueImages,
-        ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
-        question,
-      );
+      const description = await runAnalyze(analyzePaths, signal, question);
       cleanupTempDirs(tempFiles);
       if (!description) {
         out.push(msg);
         continue;
       }
+      cacheDescription(cacheKey, description);
       modified = true;
       // Keep the original text (the image path is preserved for Claude/Codex
       // parity) and append the fenced description. Image attachments are replaced
@@ -374,7 +445,7 @@ export default function setup(pi: ExtensionAPI): void {
     const argPath = event.input && typeof event.input.path === "string" ? event.input.path : undefined;
     if (!isImagePath(argPath)) return undefined;
     if (getMode() === "off") return undefined;
-    const filePath = resolveImagePath(argPath);
+    const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
     const description = await runAnalyze(
       [filePath],

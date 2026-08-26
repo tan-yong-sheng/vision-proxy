@@ -62,7 +62,10 @@ const HOOK_TIMEOUT_SEC = 30;
 
 /** Returns the home directory, respecting process.env.HOME for test isolation. */
 function getHomeDir(): string {
-	return process.env.HOME ?? homedir();
+	// Use an empty-string fallback so HOME="" (common in some CI/sandbox
+	// environments) falls through to the real home directory instead of
+	// building relative paths such as ".claude/...".
+	return process.env.HOME || homedir();
 }
 
 function piExtensionsDir(): string {

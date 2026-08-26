@@ -63,7 +63,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 
 // __VP_VERSION__PLACEHOLDER__
 
@@ -82,6 +82,13 @@ function isImagePath(p: unknown): boolean {
 /** Resolve a path that may be relative against cwd. */
 function resolveImagePath(p: string | undefined | null, cwd?: string): string | null {
   if (!p) return null;
+  // Expand a leading "~" to the user's home directory. Node's fs APIs do not
+  // expand tildes, so an unexpanded "~/..." path would fail the existsSync
+  // guard below and be silently dropped instead of analyzed.
+  if (p === "~" || p.startsWith("~/")) {
+    const home = homedir();
+    if (home) return p === "~" ? home : join(home, p.slice(2));
+  }
   if (p.startsWith("/") || p.startsWith("~") || /^[a-zA-Z]:[/\\]/.test(p)) {
     return p;
   }

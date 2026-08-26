@@ -259,6 +259,46 @@ test("pi extension analyzes images in the context event without blocking the sub
 	reset();
 });
 
+test("pi extension resolves a tilde (~) image path in the context event", async () => {
+	// Image lives directly under HOME so ~/sub/photo.jpeg resolves to it.
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const { events, calls, setNextResult } = await loadPiExtension(
+		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
+		home,
+	);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(home, "sub", "photo.jpeg");
+	setNextResult({ status: 0, stdout: "@@FENCE tilde desc@@" });
+
+	const result = (await events.context[0]({
+		type: "context",
+		messages: [
+			{
+				role: "user",
+				content: [{ type: "text", text: `look at ~/sub/photo.jpeg please` }],
+			},
+		],
+	})) as any;
+	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
+	const descBlock = content.find(
+		(c) => c.type === "text" && c.text?.includes("@@FENCE tilde desc@@"),
+	);
+	assert.ok(descBlock, "tilde path must be resolved and described");
+
+	// The analyze call must receive the home-expanded absolute path, not the tilde.
+	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeCalls.length, 1);
+	const analyzed = analyzeCalls[0]![1];
+	assert.ok(
+		!analyzed.some((a: string) => a.startsWith("~/")),
+		"analyze must receive an expanded absolute path",
+	);
+	assert.ok(analyzed.includes(imagePath), "analyze must receive the home-expanded absolute path");
+	reset();
+});
+
 test("pi extension context event injects the description into the messages", async () => {
 	const home = isolate();
 	const dir = installDir(home);

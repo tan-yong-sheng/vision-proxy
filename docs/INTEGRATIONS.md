@@ -71,7 +71,7 @@ If `vp analyze` fails, the plugin fails open: the original message parts and too
 
 ```bash
 vp integration install opencode
-vp integration status opencode
+vp integration status
 ```
 
 Uninstall:
@@ -94,7 +94,7 @@ Configuration options (via environment variables):
 | Symptom | Fix |
 |---------|-----|
 | Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
-| Hook not firing | Confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. |
+| Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. opencode: verify the plugin's `chat.message` and `tool.execute.before` hooks via `opencode plugin list`. |
 | `vp hook` not found | Re-run `vp integration install <agent>` so the absolute binary path is written into the config, or ensure `vp` is on PATH. |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |

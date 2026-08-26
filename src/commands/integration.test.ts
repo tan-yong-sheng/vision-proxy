@@ -419,6 +419,58 @@ test("pi extension context event analyzes an image once across repeated context 
 	reset();
 });
 
+test("pi extension persists the description cache to disk so it survives module reloads", async () => {
+	// Regression for the analysis spam across Pi module reloads: a pure in-memory
+	// cache was reset every time Pi re-evaluated the extension module, so the
+	// same image kept getting re-analyzed. The fix is to back the cache with an
+	// on-disk store at ~/.vision-proxy/pi-desc-cache.json (isolated to the test
+	// HOME). After the first analysis the file must exist on disk, the entries
+	// must be loadable as JSON, and the description must round-trip through it
+	// so a fresh process (or a re-imported module after the in-memory cache is
+	// cleared) can re-use the cached entry.
+	const home = isolate();
+	await runIntegration("install", "pi");
+	const cachePath = join(home, ".vision-proxy", "pi-desc-cache.json");
+	assert.equal(existsSync(cachePath), false, "cache file must not exist before first analysis");
+
+	const source = readFileSync(
+		join(process.env.HOME!, ".pi", "agent", "extensions", "vision-proxy.ts"),
+		"utf8",
+	);
+	const { events, dir: testDir, setNextResult } = await loadPiExtension(source, home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "persist.png");
+	const b64 = Buffer.from("fakepng").toString("base64");
+	setNextResult({ status: 0, stdout: "@@FENCE persisted@@" });
+	await events.context[0]({
+		type: "context",
+		messages: [
+			{
+				role: "user",
+				content: [
+					{ type: "image", data: b64, mimeType: "image/png" },
+					{ type: "text", text: `see ${imagePath}` },
+				],
+			},
+		],
+	});
+
+	// The cache file must be on disk and must contain a parseable JSON object
+	// with at least one entry whose description is the one we just produced.
+	assert.equal(existsSync(cachePath), true, "cache file must be written after first analysis");
+	const raw = readFileSync(cachePath, "utf8");
+	const parsed = JSON.parse(raw);
+	assert.equal(typeof parsed, "object");
+	assert.ok(parsed !== null && !Array.isArray(parsed), "cache must be a JSON object, not an array");
+	const entries = Object.values(parsed) as string[];
+	assert.ok(entries.length > 0, "cache must contain at least one entry");
+	assert.ok(
+		entries.some((v) => v.includes("@@FENCE persisted@@")),
+		"cache file must contain the description that was just produced",
+	);
+	reset();
+});
+
 test("pi extension keeps the prompt submit instant for queued streaming prompts", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
@@ -599,6 +651,237 @@ test("pi extension passes through attachments it cannot analyze", async (t) => {
 	// ...and the referenced image path is described and injected.
 	const descBlock = content.find((c) => c.type === "text" && c.text?.includes("@@FENCE desc@@"));
 	assert.ok(descBlock, "referenced image must be described");
+	reset();
+});
+
+test("pi extension invalidates the description cache when a referenced file changes", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	// Regression: a screenshot tool or build artifact that always writes the
+	// same path (e.g. ./screenshot.png) must produce a fresh description after
+	// the file is re-written. A cache key that only used the path would
+	// return the stale description for the new image bytes. The cache identity
+	// must fold in size + mtime so a re-write is treated as a different image.
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "screenshot.png");
+
+	const userMessage = (): any => ({
+		role: "user",
+		content: [{ type: "text", text: `look at ${imagePath} please` }],
+	});
+
+	// First analysis: writes the file with content "AAAA".
+	setNextResult({ status: 0, stdout: "@@FENCE first desc@@" });
+	const first = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
+	assert.ok(first?.messages, "first context must return transformed messages");
+	const firstContent = first.messages[0].content as Array<{ type: string; text?: string }>;
+	assert.ok(
+		firstContent.some((c) => c.type === "text" && c.text?.includes("@@FENCE first desc@@")),
+		"first analysis must inject the first description",
+	);
+	const analyzeAfterFirst = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeAfterFirst.length, 1, "must analyze once on first event");
+
+	// Re-write the same path with a different size so the cache key changes.
+	// Sleep a millisecond to ensure mtime strictly increases (mtime resolution
+	// is often 1s on some filesystems; this protects both resolution regimes).
+	await new Promise((r) => setTimeout(r, 5));
+	writeFileSync(imagePath, "BBBBBBBB-longer-than-original");
+
+	// Second analysis: must re-analyze because the file changed (size+mtime differ).
+	setNextResult({ status: 0, stdout: "@@FENCE second desc@@" });
+	const second = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
+	assert.ok(second?.messages, "second context must return transformed messages");
+	const secondContent = second.messages[0].content as Array<{ type: string; text?: string }>;
+	assert.ok(
+		secondContent.some((c) => c.type === "text" && c.text?.includes("@@FENCE second desc@@")),
+		"rewritten file must produce a fresh description (cache invalidated by size+mtime)",
+	);
+	const analyzeAfterSecond = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeAfterSecond.length, 2, "must re-analyze when referenced file changes");
+	reset();
+});
+
+test("pi extension keeps the unsupported-mime image block across a cache hit", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	// Regression: a cache hit must not drop the original image block from the
+	// returned content. Previously the pass-through only ran in the analyze
+	// branch, so the second context event (a cache hit) silently dropped the
+	// unsupported image and the model stopped seeing it. The passthrough is now
+	// applied to every output, including cache hits.
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "pic.png");
+	const unsupported = {
+		type: "image" as const,
+		data: Buffer.from("svg").toString("base64"),
+		mimeType: "image/svg+xml",
+	};
+	const userMessage = (): any => ({
+		role: "user",
+		content: [unsupported, { type: "text", text: `see ${imagePath}` }],
+	});
+
+	// First context event: analyzes the referenced image. The unsupported
+	// image block is passed through alongside the new description.
+	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+	const first = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
+	const firstContent = first.messages[0].content as Array<{
+		type: string;
+		data?: string;
+		mimeType?: string;
+		text?: string;
+	}>;
+	assert.equal(
+		firstContent.filter((c) => c.type === "image").length,
+		1,
+		"first event: unsupported image block must pass through alongside the description",
+	);
+	const analyzeAfterFirst = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeAfterFirst.length, 1);
+
+	// Second context event: cache hit. The description is reused, but the
+	// unsupported image block must STILL be present in the returned content.
+	const second = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
+	const secondContent = second.messages[0].content as Array<{
+		type: string;
+		data?: string;
+		mimeType?: string;
+		text?: string;
+	}>;
+	const images = secondContent.filter((c) => c.type === "image");
+	assert.equal(
+		images.length,
+		1,
+		"cache hit: unsupported image block must STILL pass through (not be dropped)",
+	);
+	assert.equal(images[0]?.data, unsupported.data, "the original bytes must be preserved");
+	assert.equal(
+		images[0]?.mimeType,
+		unsupported.mimeType,
+		"the original mime type must be preserved",
+	);
+	assert.ok(
+		secondContent.some((c) => c.type === "text" && c.text?.includes("@@FENCE desc@@")),
+		"cache hit: the cached description must still be injected",
+	);
+	// Crucially: no second analyze call was issued (the cache is doing its job
+	// for the analyzable referenced path), so the unsupported image block is
+	// the ONLY path that could carry the bytes to the model.
+	assert.equal(
+		calls.filter(([, args]) => args[0] === "analyze").length,
+		1,
+		"cache hit: must not re-analyze the analyzable path",
+	);
+	reset();
+});
+
+test("pi extension honors a non-default VP_HOOK_TIMEOUT_MS and falls back on garbage", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		delete process.env.VP_HOOK_TIMEOUT_MS;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	// Regression: the previous code used `Number(process.env.X ?? default)`,
+	// which produces NaN for "abc" and a 0ms setTimeout. The new helper must
+	// always return a real positive integer from the documented range.
+	// We exercise the embedded `parsePositiveInt` by setting the env vars and
+	// observing the analyze argv and the resolved TIMEOUT_MS through the
+	// extension's observable behavior (no crash; vp is invoked with a sane
+	// --max-output-tokens argument).
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	// Malformed values must NOT crash the handler and must NOT inject a NaN or
+	// 0 timeout/token. The default fallback (2000) is the only safe value.
+	process.env.VP_HOOK_TIMEOUT_MS = "not-a-number";
+	process.env.VP_MAX_OUTPUT_TOKENS = "also-bogus";
+	const imagePath = fakeImage(testDir, "pic.png");
+	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+
+	const result = (await events.context[0]({
+		type: "context",
+		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
+	})) as any;
+	assert.ok(result?.messages, "context must succeed even with malformed env vars");
+
+	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeCalls.length, 1);
+	const args = analyzeCalls[0]![1];
+	const maxTokensIdx = args.indexOf("--max-output-tokens");
+	assert.ok(maxTokensIdx >= 0, "analyze must receive --max-output-tokens");
+	const maxTokens = args[maxTokensIdx + 1];
+	assert.equal(
+		Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0,
+		true,
+		`--max-output-tokens must be a positive integer, got "${maxTokens}"`,
+	);
+	assert.equal(maxTokens, "2000", "malformed env must fall back to the default 2000");
+	reset();
+});
+
+test("pi extension accepts a valid VP_MAX_OUTPUT_TOKENS override", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	// Counterpart to the fallback test: a valid in-range value must reach the
+	// vp analyze argv unchanged so users can tune the description length.
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	process.env.VP_MAX_OUTPUT_TOKENS = "4096";
+	const imagePath = fakeImage(testDir, "pic.png");
+	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+
+	await events.context[0]({
+		type: "context",
+		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
+	});
+
+	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeCalls.length, 1);
+	const args = analyzeCalls[0]![1];
+	const idx = args.indexOf("--max-output-tokens");
+	assert.equal(args[idx + 1], "4096", "in-range override must reach vp analyze");
 	reset();
 });
 

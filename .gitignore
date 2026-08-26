@@ -12,3 +12,4 @@ package-lock.json
 .claude/skills
 *.log
 .no-mistakes-evidence/
+.tmp/

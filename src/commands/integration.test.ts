@@ -107,6 +107,27 @@ async function loadGeneratedSource(
 			"let nextResult;",
 			"export function setNextResult(r) { nextResult = r; }",
 			"export function spawnSync(command, args) { calls.push([command, args]); return nextResult; }",
+			"export function spawn(command, args) {",
+			"  calls.push([command, args]);",
+			"  const result = nextResult;",
+			"  let stdoutHandler = null;",
+			"  const proc = {",
+			"    stdout: { on: (_ev, cb) => { stdoutHandler = cb; } },",
+			"    stderr: { on: () => {} },",
+			"    on: (ev, cb) => {",
+			"      if (ev === 'error') {",
+			"        if (result && result.error) setImmediate(() => cb(result.error));",
+			"      } else if (ev === 'close') {",
+			"        setImmediate(() => {",
+			"          if (stdoutHandler && result && result.stdout) stdoutHandler(result.stdout);",
+			"          cb(result ? (result.status == null ? 0 : result.status) : 0);",
+			"        });",
+			"      }",
+			"    },",
+			"    kill: () => {},",
+			"  };",
+			"  return proc;",
+			"}",
 			"",
 		].join("\n"),
 	);
@@ -180,7 +201,7 @@ test("install pi writes the vision-proxy extension file with valid source", asyn
 	reset();
 });
 
-test("pi extension input handler describes attached and referenced images without altering the prompt", async () => {
+test("pi extension analyzes images in before_agent_start without blocking the submit", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -191,20 +212,31 @@ test("pi extension input handler describes attached and referenced images withou
 	const b64 = Buffer.from("fakepng").toString("base64");
 	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
 
-	const result = (await events.input[0]({
+	// The input handler must NOT block the submit: it returns undefined for a
+	// normal (non-streaming) prompt so the user's text is accepted immediately.
+	const inputResult = await events.input[0]({
 		type: "input",
 		text: `look at ${imagePath} please`,
 		images: [{ type: "image", data: b64, mimeType: "image/png" }],
-	})) as { action: string; text: string; images: string[] };
+	});
+	assert.equal(inputResult, undefined, "input must not block the prompt submit");
 
-	assert.equal(result.action, "transform");
+	// before_agent_start does the analysis and injects the description.
+	const ev: any = {
+		type: "before_agent_start",
+		prompt: `look at ${imagePath} please`,
+		images: [{ type: "image", data: b64, mimeType: "image/png" }],
+		systemPrompt: "BASE",
+	};
+	const result = (await events.before_agent_start[0](ev)) as any;
+	assert.match(result.systemPrompt, /^BASE\n\n/);
+	assert.match(result.systemPrompt, /@@FENCE red square@@/);
+	assert.match(result.systemPrompt, /Do not use the Read tool on image files/);
 	// The referenced path is preserved in the user prompt (parity with Claude
 	// Code / Codex, which cannot rewrite the submission).
-	assert.equal(result.text.includes(imagePath), true);
-	assert.equal(result.text.includes("look at"), true);
-	assert.equal(result.text.includes("please"), true);
-	// ...and attached image bytes are dropped entirely.
-	assert.equal(result.images.length, 0);
+	assert.equal(ev.prompt.includes(imagePath), true);
+	// Analyzable attachments are dropped so the model never receives raw bytes.
+	assert.equal(Array.isArray(ev.images) && ev.images.length, 0);
 	// One analyze invocation covering the temp copy of the attachment plus the
 	// referenced file (the config-get probe is a separate call).
 	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
@@ -217,7 +249,7 @@ test("pi extension input handler describes attached and referenced images withou
 	reset();
 });
 
-test("pi extension injects the description into the system prompt exactly once", async () => {
+test("pi extension before_agent_start injects the description into the system prompt", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -229,36 +261,38 @@ test("pi extension injects the description into the system prompt exactly once",
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
-	const transformed = (await events.input[0]({
+
+	// input is a no-op for a normal prompt...
+	const inputResult = await events.input[0]({
 		type: "input",
 		text: `see ${imagePath}`,
 		images: [],
-	})) as any;
-	assert.equal(transformed.action, "transform");
+	});
+	assert.equal(inputResult, undefined);
 
-	const first = await events.before_agent_start[0]({
+	// ...and before_agent_start analyzes and injects the description (wrapped with
+	// the "do not Read image files" instruction, mirroring Claude Code / Codex
+	// additionalContext).
+	const result = (await events.before_agent_start[0]({
 		type: "before_agent_start",
-		prompt: transformed.text,
+		prompt: `see ${imagePath}`,
+		systemPrompt: "BASE",
+	})) as any;
+	assert.match(result.systemPrompt, /^BASE\n\n/);
+	assert.match(result.systemPrompt, /Do not use the Read tool on image files/);
+	assert.match(result.systemPrompt, /@@FENCE desc@@/);
+
+	// A subsequent image-less prompt yields no description (nothing to analyze).
+	const none = await events.before_agent_start[0]({
+		type: "before_agent_start",
+		prompt: "plain text, no images",
 		systemPrompt: "BASE",
 	});
-	// The description is injected once into the system prompt (wrapped with the
-	// "do not Read image files" instruction, mirroring Claude Code / Codex
-	// additionalContext), and the user prompt text is untouched.
-	assert.match((first as any).systemPrompt, /^BASE\n\n/);
-	assert.match((first as any).systemPrompt, /Do not use the Read tool on image files/);
-	assert.match((first as any).systemPrompt, /@@FENCE desc@@/);
-	assert.equal(transformed.text, `see ${imagePath}`);
-	// The stash is consumed: a second agent start in the same session is clean.
-	const second = await events.before_agent_start[0]({
-		type: "before_agent_start",
-		prompt: "x",
-		systemPrompt: "BASE",
-	});
-	assert.equal(second, undefined);
+	assert.equal(none, undefined);
 	reset();
 });
 
-test("pi extension embeds the description in the text for queued streaming prompts and does not leak the stash", async () => {
+test("pi extension embeds the description in the text for queued streaming prompts", async () => {
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -272,7 +306,8 @@ test("pi extension embeds the description in the text for queued streaming promp
 	setNextResult({ status: 0, stdout: "@@FENCE queued desc@@" });
 
 	// Queued streaming prompt: input fires with streamingBehavior set, but
-	// before_agent_start is not emitted for queued messages.
+	// before_agent_start is not emitted for queued messages, so the description
+	// must be embedded inline here (the only path that still blocks the submit).
 	const transformed = (await events.input[0]({
 		type: "input",
 		text: `see ${imagePath}`,
@@ -285,9 +320,9 @@ test("pi extension embeds the description in the text for queued streaming promp
 	assert.match(transformed.text, /@@FENCE queued desc@@/);
 	assert.match(transformed.text, /Do not use the Read tool on image files/);
 
-	// The stash must remain empty: a subsequent idle prompt that returns
-	// undefined from its own input handler must not see the queued turn's
-	// description injected into its system prompt.
+	// A subsequent idle prompt returns undefined from input and yields no
+	// description from before_agent_start (nothing to analyze), confirming the
+	// streaming turn's analysis was self-contained.
 	const idle = await events.input[0]({
 		type: "input",
 		text: "follow-up text only, no images",
@@ -299,7 +334,7 @@ test("pi extension embeds the description in the text for queued streaming promp
 		prompt: "follow-up text only, no images",
 		systemPrompt: "BASE",
 	});
-	assert.equal(nextStart, undefined, "stale queued description must not leak into the next prompt");
+	assert.equal(nextStart, undefined);
 	reset();
 });
 
@@ -315,21 +350,32 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 	const imagePath = fakeImage(testDir, "pic.png");
 	const b64 = Buffer.from("x").toString("base64");
 
-	// vp exits non-zero -> no transform, no stash.
+	// vp exits non-zero -> before_agent_start returns undefined (fail-open).
 	process.env.VP_MODE = "always";
 	setNextResult({ status: 1, stdout: "" });
-	const failed = await events.input[0]({ type: "input", text: `see ${imagePath}`, images: [] });
+	const failed = await events.before_agent_start[0]({
+		type: "before_agent_start",
+		prompt: `see ${imagePath}`,
+		systemPrompt: "BASE",
+	});
 	assert.equal(failed, undefined);
 
-	// mode off -> no-op even when analysis would succeed.
+	// mode off -> input is a no-op and before_agent_start returns undefined.
 	process.env.VP_MODE = "off";
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
-	const disabled = await events.input[0]({
+	const inputDisabled = await events.input[0]({
 		type: "input",
 		text: `see ${imagePath}`,
 		images: [{ type: "image", data: b64, mimeType: "image/png" }],
 	});
-	assert.equal(disabled, undefined);
+	assert.equal(inputDisabled, undefined);
+	const startDisabled = await events.before_agent_start[0]({
+		type: "before_agent_start",
+		prompt: `see ${imagePath}`,
+		images: [{ type: "image", data: b64, mimeType: "image/png" }],
+		systemPrompt: "BASE",
+	});
+	assert.equal(startDisabled, undefined);
 	delete process.env.VP_MODE;
 	reset();
 });
@@ -352,16 +398,18 @@ test("pi extension passes through attachments it cannot analyze", async () => {
 	};
 
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
-	const result = (await events.input[0]({
-		type: "input",
-		text: `see ${imagePath}`,
+	const ev: any = {
+		type: "before_agent_start",
+		prompt: `see ${imagePath}`,
 		images: [unsupported],
-	})) as { action: string; text: string; images: unknown[] };
-	assert.equal(result.action, "transform");
+		systemPrompt: "BASE",
+	};
+	const result = (await events.before_agent_start[0](ev)) as any;
+	assert.match(result.systemPrompt, /@@FENCE desc@@/);
 	// The referenced path is preserved and described (not stripped)...
-	assert.equal(result.text.includes(imagePath), true);
+	assert.equal(ev.prompt.includes(imagePath), true);
 	// ...and the un-analyzable attachment survives instead of being dropped.
-	assert.equal(result.images.length, 1);
+	assert.equal(Array.isArray(ev.images) && ev.images.length, 1);
 	reset();
 });
 

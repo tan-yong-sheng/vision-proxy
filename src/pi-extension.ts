@@ -7,19 +7,20 @@
  *
  * The extension hooks into Pi's lifecycle events to automatically describe images
  * at parity with the Claude Code / Codex `vp hook` integration:
- *   - `input`: extracts images attached to the submission (base64 content) plus
- *     image paths referenced in the text, runs `vp analyze`, stashes the
- *     description, and preserves the user's prompt text verbatim (including any
- *     referenced image path) to match Claude Code / Codex parity - those hooks
- *     add the description as separate context and cannot rewrite the submission.
- *     Attached image bytes are dropped from the submission (they have no text
- *     form), while attachments whose mime type is outside the supported set are
- *     forwarded unchanged to the model. When the submission is queued for
- *     streaming delivery (event.streamingBehavior set), the fenced description
- *     is embedded in the text instead of the system prompt, because
- *     before_agent_start does not fire for queued messages.
- *   - `before_agent_start`: appends the stashed fenced UNTRUSTED description to
- *     the system prompt (the only cross-turn injection channel Pi consumes).
+ *   - `input`: keeps the prompt submit instant. For normal (non-streaming)
+ *     prompts it returns immediately so the user's text is accepted without
+ *     waiting on `vp analyze`; the analysis runs in `before_agent_start`. Only
+ *     queued streaming prompts (event.streamingBehavior set) are analyzed here,
+ *     because `before_agent_start` does not fire for them - the fenced
+ *     description is embedded in the text for those.
+ *   - `before_agent_start`: the analysis entry point for normal prompts. It
+ *     extracts images attached to the submission (base64 content) plus image
+ *     paths referenced in the text, runs `vp analyze` asynchronously (with a
+ *     live "[vision-proxy] Analyzing..." notification so the wait never freezes
+ *     the UI), drops analyzable attachments so the model never receives raw
+ *     image bytes, and appends the fenced UNTRUSTED description to the system
+ *     prompt. The referenced image path (if any) stays in the user prompt for
+ *     parity with Claude Code / Codex, which also cannot rewrite the submission.
  *   - `tool_result`: intercepts `read` tool results on image files and replaces
  *     the tool result content with the fenced description so no image bytes
  *     reach the model.
@@ -51,9 +52,10 @@ export const PI_EXTENSION_SOURCE = String.raw`/**
  * Hooks into Pi lifecycle events to automatically describe images at parity
  * with the Claude Code / Codex vp hook integration. No tool is registered.
  *
- * Supported image attachments are analyzed and stripped from the submission;
- * attachments with an unsupported mime type are forwarded to the model
- * unchanged. The 'input' event is fired for every session.prompt() submission,
+ * Supported image attachments are analyzed and dropped from the submission so
+ * the model never receives raw image bytes; attachments with an unsupported
+ * mime type are forwarded to the model unchanged. The 'input' event is fired
+ * for every session.prompt() submission,
  * including streaming ones queued via the streamingBehavior option, but NOT
  * for messages dispatched through session.steer() or session.followUp()
  * directly (e.g. RPC steer / follow_up commands).
@@ -63,14 +65,13 @@ export const PI_EXTENSION_SOURCE = String.raw`/**
  * fence and the consumer must treat it as untrusted input.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 // __VP_VERSION__PLACEHOLDER__
 
-const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TIMEOUT_MS = Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000);
 
 // Known image file extensions (lowercased, no dot).
@@ -147,31 +148,59 @@ function resolveVpBin(): string {
   return "vp";
 }
 
-/** Run vp analyze and return the fenced description, or null on failure. */
-function runAnalyze(images: string[]): string | null {
-  if (images.length === 0) return null;
-  const vp = resolveVpBin();
-  const { command, args: prefix } = vpEntryToSpawn(vp);
-  const maxTokens = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
-  const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(maxTokens)];
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    timeout: TIMEOUT_MS,
-    maxBuffer: MAX_BUFFER_BYTES,
-  });
-  if (result.error) {
-    if ((result.error as NodeJS.ErrnoException).code === "ENOENT") {
-      process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
-    } else {
-      process.stderr.write("[vision-proxy] vp analyze failed or timed out\n");
+/** Run vp analyze (async) and return the fenced description, or null on failure. */
+async function runAnalyze(images: string[], signal?: unknown): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!images || images.length === 0) return resolve(null);
+    const vp = resolveVpBin();
+    const { command, args: prefix } = vpEntryToSpawn(vp);
+    const maxTokens = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
+    const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(maxTokens)];
+    let settled = false;
+    let timer: unknown = null;
+    const finish = (val: string | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer as NodeJS.Timeout);
+      resolve(val);
+    };
+    let child;
+    try {
+      child = spawn(command, args);
+    } catch (err) {
+      const msg = err && (err as Error).message ? (err as Error).message : String(err);
+      process.stderr.write("[vision-proxy] failed to spawn vp: " + msg + "\n");
+      return resolve(null);
     }
-    return null;
-  }
-  if (result.status !== 0 || !result.stdout.trim()) {
-    process.stderr.write("[vision-proxy] vp analyze exited with status " + (result.status ?? "?") + "\n");
-    return null;
-  }
-  return result.stdout.trimEnd();
+    let stdout = "";
+    child.stdout.on("data", (d) => { stdout += String(d); });
+    child.stderr.on("data", (d) => { process.stderr.write(String(d)); });
+    child.on("error", (err) => {
+      const e = err as NodeJS.ErrnoException;
+      if (e && e.code === "ENOENT") process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
+      else process.stderr.write("[vision-proxy] vp analyze failed: " + (e && e.message ? e.message : String(err)) + "\n");
+      finish(null);
+    });
+    child.on("close", (code) => {
+      const out = stdout.trim();
+      if (code !== 0 || !out) {
+        process.stderr.write("[vision-proxy] vp analyze exited with status " + (code == null ? "?" : String(code)) + "\n");
+        finish(null);
+      } else {
+        finish(out.trimEnd());
+      }
+    });
+    timer = setTimeout(() => {
+      try { if (child) child.kill("SIGKILL"); } catch { /* ignore */ }
+      process.stderr.write("[vision-proxy] vp analyze timed out\n");
+      finish(null);
+    }, TIMEOUT_MS);
+    if (signal && (signal as AbortSignal).addEventListener) {
+      const onAbort = () => { try { if (child) child.kill("SIGTERM"); } catch { /* ignore */ } };
+      if ((signal as AbortSignal).aborted) onAbort();
+      else (signal as AbortSignal).addEventListener("abort", onAbort, { once: true });
+    }
+  });
 }
 
 /** Read mode from vp config get --json or VP_MODE. Returns "always" | "off". */
@@ -241,24 +270,23 @@ function withImageInstruction(description: string): string {
   );
 }
 
-// Description produced by the most recent analyzed submission. For idle
-// prompts, Pi fires the input event before before_agent_start so this handoff
-// is sequential per prompt. For prompts queued while the agent is streaming
-// (event.streamingBehavior set), before_agent_start is never emitted, so the
-// description is embedded in the transformed text and pendingDescription is
-// left untouched to avoid leaking the description into a later idle prompt.
-let pendingDescription: string | null = null;
-
 export default function setup(pi: ExtensionAPI): void {
-  // --- input: describe images and stash the description; preserve user text ---
-  pi.on("input", async (event) => {
-    if (getMode() === "off") return undefined;
+  /**
+   * Detect images on a submission (base64 attachments + image paths referenced
+   * in the text), analyze them via vp, and return the fenced description plus
+   * the attachments we could not analyze (passed through unchanged). Fail-open.
+   * Runs asynchronously so the calling event handler never freezes the UI.
+   */
+  async function describeEvent(event: any, ctx?: any) {
     const tempFiles: string[] = [];
     const images: string[] = [];
-    // Attachments we cannot analyze (unsupported mime type) are passed through
-    // unchanged instead of being silently dropped.
     const passthroughImages: unknown[] = [];
-    let text = typeof event.text === "string" ? event.text : "";
+    const text =
+      typeof event.text === "string"
+        ? event.text
+        : typeof event.prompt === "string"
+          ? event.prompt
+          : "";
     try {
       // Attached images arrive as base64 content without a path.
       if (Array.isArray(event.images)) {
@@ -276,59 +304,63 @@ export default function setup(pi: ExtensionAPI): void {
       // Image paths referenced in the text itself.
       const referenced = extractImagePaths(text)
         .map((p) => resolveImagePath(p))
-        .filter((p): p is string => !!p && isImagePath(p) && existsSync(p));
+        .filter((p) => !!p && isImagePath(p) && existsSync(p));
       images.push(...referenced);
       const uniqueImages = [...new Set(images)];
-      if (uniqueImages.length === 0) return undefined;
-
-      const description = runAnalyze(uniqueImages);
-      if (!description) return undefined; // fail-open
-
-      // Preserve the user's prompt text verbatim (including any referenced image
-      // path) to match Claude Code / Codex parity: those hooks cannot rewrite the
-      // user prompt, so they add the description as separate context rather than
-      // editing the submission. We deliver the description the same way - stashed
-      // for before_agent_start to inject into the system prompt (idle path), or
-      // embedded in the text only for queued streaming prompts where
-      // before_agent_start never fires.
-      if (event.streamingBehavior) {
-        return {
-          action: "transform",
-          text: text + "\n\n" + withImageInstruction(description),
-          images: passthroughImages as Array<{ type: "image"; data: string; mimeType: string }>,
-        };
+      if (uniqueImages.length === 0) return { description: null, passthroughImages };
+      if (ctx && ctx.ui && ctx.ui.notify) {
+        ctx.ui.notify("[vision-proxy] Analyzing " + uniqueImages.length + " image(s)...", "info");
       }
-      pendingDescription = description;
-      return {
-        action: "transform",
-        text,
-        images: passthroughImages as Array<{ type: "image"; data: string; mimeType: string }>,
-      };
+      const description = await runAnalyze(
+        uniqueImages,
+        ctx && ctx.signal ? ctx.signal : undefined,
+      );
+      return { description, passthroughImages };
     } finally {
       cleanupTempDirs(tempFiles);
     }
+  }
+
+  // --- input: keep submit instant; analyze only for queued streaming prompts ---
+  pi.on("input", async (event) => {
+    if (getMode() === "off") return undefined;
+    // Normal (non-streaming) prompts are analyzed in before_agent_start, so the
+    // prompt submit is never blocked on the vision call. Only queued streaming
+    // prompts skip before_agent_start and must be handled here - the only path
+    // that still blocks the submit, and a rare one.
+    if (!event.streamingBehavior) return undefined;
+    const { description, passthroughImages } = await describeEvent(event, undefined);
+    if (!description) return undefined; // fail-open
+    const text = typeof event.text === "string" ? event.text : "";
+    return {
+      action: "transform",
+      text: text + "\n\n" + withImageInstruction(description),
+      images: passthroughImages as Array<{ type: "image"; data: string; mimeType: string }>,
+    };
   });
 
-  // --- before_agent_start: inject the stashed description into the system prompt ---
-  pi.on("before_agent_start", async (event) => {
-    if (!pendingDescription) return undefined;
-    const description = pendingDescription;
-    pendingDescription = null;
-    // Mirror the Claude Code / Codex hook's additionalContext: deliver the
-    // description with the "do not Read image files" instruction instead of
-    // editing the user's prompt.
+  // --- before_agent_start: analyze images and inject the description as context ---
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (getMode() === "off") return undefined;
+    const { description, passthroughImages } = await describeEvent(event, ctx);
+    if (!description) return undefined; // fail-open
+    // Drop analyzable attachments so the model never receives raw image bytes;
+    // the injected description above is the only image content it sees. The
+    // referenced image path (if any) stays in the user prompt for parity with
+    // Claude Code / Codex, which also cannot rewrite the submission.
+    if (Array.isArray(event.images)) event.images = passthroughImages;
     return { systemPrompt: (event.systemPrompt ?? "") + "\n\n" + withImageInstruction(description) };
   });
 
   // --- tool_result: replace read results on image files ---
-  pi.on("tool_result", async (event) => {
+  pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "read") return undefined;
     const argPath = event.input && typeof event.input.path === "string" ? event.input.path : undefined;
     if (!isImagePath(argPath)) return undefined;
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath);
     if (!filePath || !existsSync(filePath)) return undefined;
-    const description = runAnalyze([filePath]);
+    const description = await runAnalyze([filePath], ctx && ctx.signal ? ctx.signal : undefined);
     if (!description) return undefined; // fail-open
     return { content: [{ type: "text", text: withImageInstruction(description) }] };
   });

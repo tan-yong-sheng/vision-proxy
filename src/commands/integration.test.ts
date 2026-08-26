@@ -180,6 +180,7 @@ async function loadGeneratedSource(
 			"let nextResult;",
 			"export function setNextResult(r) { nextResult = r; }",
 			"export function spawnSync(command, args) { calls.push([command, args]); return nextResult; }",
+			'export function execFile(command, args, _opts, cb) { calls.push([command, args]); const r = nextResult ?? {}; if (cb) cb(r.error ?? null, r.stdout ?? "", r.stderr ?? ""); else return Promise.resolve([r.stdout ?? "", r.stderr ?? ""]); }',
 			"",
 		].join("\n"),
 	);
@@ -557,11 +558,6 @@ test("status reads claude-code version from the hooks config, not a marker file"
 });
 
 /**
- * Load the generated opencode plugin with stubbed spawnSync and return its
- * hooks. Verifies the plugin factory contract: an async default export
- * returning chat.message and tool.execute.before hooks.
- */
-/**
  * Shape of the generated opencode plugin's default export: an async factory
  * receiving plugin options and returning the hooks record.
  */
@@ -569,6 +565,11 @@ type OpencodePluginFactory = (input: {
 	directory: string;
 }) => Promise<Record<string, (input: any, output: any) => Promise<void>>>;
 
+/**
+ * Load the generated opencode plugin with stubbed spawnSync and return its
+ * hooks. Verifies the plugin factory contract: an async default export
+ * returning chat.message and tool.execute.before hooks.
+ */
 async function loadOpencodePlugin(source: string, home: string) {
 	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
 		source,

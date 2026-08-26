@@ -60,7 +60,7 @@ export const OPENCODE_PLUGIN_SOURCE = String.raw`/**
  * fence and the consumer must treat it as untrusted input.
  */
 import type { Hooks } from "@opencode-ai/plugin";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -148,15 +148,16 @@ function extractImagePaths(text: string): string[] {
 /** Run vp analyze and return the fenced description, or null on failure.
  * When question is provided it is passed as --question so the vision model
  * can tailor the description to what the user is asking (mirrors the
- * claude-code/codex UserPromptSubmit hook). */
-function runAnalyze(images: string[], question?: string): string | null {
+ * claude-code/codex UserPromptSubmit hook). Uses an async child process so
+ * image analysis never blocks the host event loop. */
+async function runAnalyze(images: string[], question?: string): Promise<string | null> {
   if (images.length === 0) return null;
   const vp = resolveVpBin();
   const { command, args: prefix } = vpEntryToSpawn(vp);
   const maxTokens = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
   const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(maxTokens)];
   if (question) args.push("--question", question);
-  const result = spawnSync(command, args, { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES });
+  const result = await runVp(command, args);
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === "ENOENT") {
       console.error("[vision-proxy] vp binary not found: " + vp);
@@ -168,6 +169,29 @@ function runAnalyze(images: string[], question?: string): string | null {
     return null;
   }
   return result.stdout.trimEnd();
+}
+
+/** Promise wrapper around execFile that returns a spawnSync-shaped result
+ * ({ status, stdout, stderr, error }) so the rest of the plugin can treat
+ * timeouts, ENOENT, and fail-open uniformly. */
+function runVp(
+  command: string,
+  args: string[],
+): Promise<{ status: number; stdout: string; stderr: string; error?: NodeJS.ErrnoException }> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
+      (error, stdout, stderr) => {
+        if (error) {
+          resolve({ status: 1, stdout: stdout ?? "", stderr: stderr ?? "", error: error as NodeJS.ErrnoException });
+        } else {
+          resolve({ status: 0, stdout: stdout ?? "", stderr: stderr ?? "", error: undefined });
+        }
+      },
+    );
+  });
 }
 
 function withImageInstruction(description: string): string {
@@ -272,7 +296,7 @@ async function handleChatMessage(
     // Pass the user message's own text as --question so the vision model
     // tailors the description to what the user is asking (parity with the
     // claude-code/codex UserPromptSubmit hook, which does the same).
-    const description = runAnalyze(uniqueImages, promptText);
+    const description = await runAnalyze(uniqueImages, promptText);
     if (!description) return;
     // Remove only the described image parts (undecodable attachments stay for
     // native handling) so no analyzed image bytes reach the model, then append
@@ -309,7 +333,7 @@ async function handleToolExecuteBefore(
   if (!isImagePath(argPath)) return;
   const filePath = resolveImagePath(argPath, cwd);
   if (!filePath || !existsSync(filePath)) return;
-  const description = runAnalyze([filePath]);
+  const description = await runAnalyze([filePath]);
   // Fail-open: when analysis is unavailable, allow the original read.
   if (!description) return;
   // Denying by throw surfaces this message to the model as the tool result,

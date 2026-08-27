@@ -3,8 +3,10 @@
  *
  * Subcommands:
  *   install <agent>   installs vision-proxy for the agent.
- *                     - pi          writes the generated `analyze_image` extension
- *                                   into Pi's global extensions directory.
+ *                     - pi          writes the generated lifecycle-event
+ *                                   extension (input / context / tool_result)
+ *                                   into Pi's global extensions directory. No
+ *                                   tool is registered.
  *                     - claude-code registers a `UserPromptSubmit` hook and a
  *                                   `PreToolUse Read` hook in settings.json, both
  *                                   invoking the absolute `vp hook` path.
@@ -60,7 +62,10 @@ const HOOK_TIMEOUT_SEC = 30;
 
 /** Returns the home directory, respecting process.env.HOME for test isolation. */
 function getHomeDir(): string {
-	return process.env.HOME ?? homedir();
+	// Use an empty-string fallback so HOME="" (common in some CI/sandbox
+	// environments) falls through to the real home directory instead of
+	// building relative paths such as ".claude/...".
+	return process.env.HOME || homedir();
 }
 
 function piExtensionsDir(): string {

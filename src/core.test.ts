@@ -24,6 +24,7 @@ import {
 	normalizedToPixels,
 	parseCropArg,
 	parseModelString,
+	readPositiveIntEnv,
 	resolveConfig,
 	resolveCropEntry,
 	resolveRegion,
@@ -382,5 +383,88 @@ describe("isRestrictedAddress", () => {
 		// is the prefix's legitimate purpose.
 		assert.equal(isRestrictedAddress("64:ff9b::8.8.8.8"), false);
 		assert.equal(isRestrictedAddress("64:ff9b::1.2.3.4"), false);
+	});
+});
+
+describe("readPositiveIntEnv", () => {
+	const FALLBACK = 30000;
+	const MIN = 1000;
+	const MAX = 600000;
+
+	it("returns the fallback when the env var is undefined", () => {
+		assert.equal(readPositiveIntEnv({}, "VP_TEST_ENV", FALLBACK, MIN, MAX), FALLBACK);
+	});
+
+	it("parses a valid in-range integer", () => {
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "12345" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			12345,
+		);
+	});
+
+	it("falls back when the value is non-numeric (no NaN fail-open)", () => {
+		// The number "NaN" parses to NaN. The old `Number(process.env.X ?? default)`
+		// would coerce NaN into 0, killing the analysis timeout. This helper must
+		// return the fallback so setTimeout receives a real number.
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "abc" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			FALLBACK,
+		);
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			FALLBACK,
+		);
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "1.5" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			FALLBACK,
+		);
+	});
+
+	it("falls back when the value is below the minimum", () => {
+		// 999 < 1000 (MIN) is unsafe for a setTimeout that needs at least 1s of
+		// analysis time. The helper must clamp to the fallback rather than the
+		// raw value.
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "999" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			FALLBACK,
+		);
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "0" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			FALLBACK,
+		);
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "-100" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			FALLBACK,
+		);
+	});
+
+	it("falls back when the value is above the maximum", () => {
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "9999999" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			FALLBACK,
+		);
+	});
+
+	it("accepts the boundary values", () => {
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "1000" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			1000,
+		);
+		assert.equal(
+			readPositiveIntEnv({ VP_TEST_ENV: "600000" }, "VP_TEST_ENV", FALLBACK, MIN, MAX),
+			600000,
+		);
+	});
+
+	it("never returns NaN or a non-finite number", () => {
+		const malicious = ["abc", "", "  ", "NaN", "Infinity", "-Infinity", "1e1000", "0x10"];
+		for (const raw of malicious) {
+			const result = readPositiveIntEnv({ VP_TEST_ENV: raw }, "VP_TEST_ENV", FALLBACK, MIN, MAX);
+			assert.ok(
+				Number.isFinite(result),
+				`readPositiveIntEnv("${raw}") returned non-finite ${result}`,
+			);
+			assert.ok(!Number.isNaN(result), `readPositiveIntEnv("${raw}") returned NaN`);
+		}
 	});
 });

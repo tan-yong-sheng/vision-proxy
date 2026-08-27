@@ -42,7 +42,15 @@ vp integration uninstall codex
 
 ## Pi
 
-Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`.
+Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
+
+- `input` — no-op. Returns immediately so the user's prompt is accepted the instant they press Enter. All analysis is deferred to the `context` event, so prompt submission is never blocked on a `vp analyze` call.
+- `context` — the single analysis point. Fires right before Pi sends the turn's messages to the model. For each user message it finds image attachments (base64 content) and image paths referenced in the text, runs `vp analyze`, and replaces the image attachments with the fenced UNTRUSTED description. The original user text (including any referenced image path) is preserved. Attachments whose mime type is outside the supported set (jpg, jpeg, png, gif, webp, bmp, tiff, ico, avif) are forwarded to the model unchanged.
+- `tool_result` — intercepts `read` tool results on image files and replaces the tool result content with the fenced description so no image bytes reach the model.
+
+The analysis happens in the `context` event for every submission Pi assembles for the model, including ones queued via the `streamingBehavior` option while a previous turn is streaming and ones dispatched through `session.steer()` / `session.followUp()` (which route through the same `session.prompt()` path).
+
+If `vp analyze` fails or `VP_MODE=off`, the extension fails open and Pi proceeds unchanged.
 
 ```bash
 vp integration install pi
@@ -54,6 +62,14 @@ Uninstall:
 ```bash
 vp integration uninstall pi
 ```
+
+Restart Pi after installing.
+
+Configuration options (via environment variables):
+- `VP_MODE` - Controls whether the Pi extension is active (`always` | `off`, default: `always`)
+- `VP_MAX_OUTPUT_TOKENS` - Max output tokens for `vp analyze` (default: 2000)
+- `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
+- `VP_BIN` - Path to vp binary (default: "vp"; a `.js` entry point is run with the current Node executable)
 
 ## opencode (v1)
 
@@ -99,4 +115,5 @@ Configuration options (via environment variables):
 | `vp hook` not found | Re-run `vp integration install <agent>` so the absolute binary path is written into the config, or ensure `vp` is on PATH. |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |
+| Pi images not described | Check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |
 | opencode plugin not loading | Run `opencode plugin list` to verify installation; restart opencode after installing. |

@@ -69,7 +69,19 @@ import { join, resolve } from "node:path";
 
 const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "ico", "avif"];
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
-const TIMEOUT_MS = Number(process.env.VP_HOOK_TIMEOUT_MS ?? 30000);
+
+/**
+ * Parse a positive-integer env var, falling back (never NaN) when missing,
+ * non-numeric, or out of range. Mirrors readPositiveIntEnv from the core so
+ * every harness resolves VP_HOOK_TIMEOUT_MS / VP_MAX_OUTPUT_TOKENS identically.
+ */
+function parsePositiveInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+	const n = Number.parseInt(raw ?? "", 10);
+	if (!Number.isFinite(n) || n < min || n > max) return fallback;
+	return n;
+}
+
+const TIMEOUT_MS = parsePositiveInt(process.env.VP_HOOK_TIMEOUT_MS, 30000, 1000, 600000);
 // Stable prefix on every injected description part. Lets the hook recognize
 // and strip its own prior injections if the same message is ever processed
 // again, so context is never duplicated.
@@ -154,7 +166,7 @@ async function runAnalyze(images: string[], question?: string): Promise<string |
   if (images.length === 0) return null;
   const vp = resolveVpBin();
   const { command, args: prefix } = vpEntryToSpawn(vp);
-  const maxTokens = Number(process.env.VP_MAX_OUTPUT_TOKENS ?? 2000);
+  const maxTokens = parsePositiveInt(process.env.VP_MAX_OUTPUT_TOKENS, 2000, 1, 1_000_000);
   const args = [...prefix, "analyze", ...images, "--max-output-tokens", String(maxTokens)];
   if (question) args.push("--question", question);
   const result = await runVp(command, args);

@@ -507,6 +507,35 @@ function parseFloatOverride(
 }
 
 /**
+ * Read a positive-integer environment override with a default fallback.
+ *
+ * Unlike a raw `Number(process.env.X ?? default)`, this never yields NaN: a
+ * missing variable, a non-numeric value, or a value outside [min, max] all fall
+ * back to `fallback`. This matters because the resolved value feeds `setTimeout`
+ * (NaN coerces to ~0, killing analysis) and the `--max-output-tokens` argument
+ * passed to `vp analyze`.
+ *
+ * Shared by the Claude/Codex hook and the opencode plugin so every harness
+ * resolves `VP_HOOK_TIMEOUT_MS` and `VP_MAX_OUTPUT_TOKENS` identically. (The Pi
+ * extension and opencode plugin embed their own copy of this helper because they
+ * are written verbatim to external extension directories and cannot import this
+ * module at runtime.)
+ */
+export function readPositiveIntEnv(
+	env: NodeJS.ProcessEnv,
+	name: string,
+	fallback: number,
+	min: number,
+	max: number,
+): number {
+	const raw = env[name];
+	if (raw === undefined) return fallback;
+	const n = Number.parseInt(raw, 10);
+	if (!Number.isFinite(n) || n < min || n > max) return fallback;
+	return n;
+}
+
+/**
  * Parse `VP_BASE_URL` — a single base URL string for the active provider.
  */
 function parseBaseUrlOverride(value: string | undefined): string | undefined {

@@ -124,8 +124,8 @@ export function makeTsHookCommand(scriptPath: string, platform: string = process
  *
  * @tags integration, catalog
  */
-export function generateHookScript(): string {
-	return HOOK_SCRIPT_SOURCE.replace("__VP_VERSION__PLACEHOLDER__", renderVersionMarker());
+export function generateHookScript(defaultVpBin?: string): string {
+	return renderGeneratedSource(HOOK_SCRIPT_SOURCE, defaultVpBin);
 }
 
 /**
@@ -133,8 +133,8 @@ export function generateHookScript(): string {
  *
  * @tags integration, catalog
  */
-export function generatePiExtension(): string {
-	return PI_EXTENSION_SOURCE.replace("__VP_VERSION__PLACEHOLDER__", renderVersionMarker());
+export function generatePiExtension(defaultVpBin?: string): string {
+	return renderGeneratedSource(PI_EXTENSION_SOURCE, defaultVpBin);
 }
 
 /**
@@ -142,8 +142,8 @@ export function generatePiExtension(): string {
  *
  * @tags integration, catalog
  */
-export function generateOpencodePlugin(): string {
-	return OPENCODE_PLUGIN_SOURCE.replace("__VP_VERSION__PLACEHOLDER__", renderVersionMarker());
+export function generateOpencodePlugin(defaultVpBin?: string): string {
+	return renderGeneratedSource(OPENCODE_PLUGIN_SOURCE, defaultVpBin);
 }
 
 /**
@@ -155,6 +155,15 @@ export function generateOpencodePlugin(): string {
  *
  * @tags integration, catalog
  */
+function renderGeneratedSource(source: string, defaultVpBin?: string): string {
+	const withVersion = source.replace("__VP_VERSION__PLACEHOLDER__", renderVersionMarker());
+	if (!defaultVpBin) return withVersion;
+	return withVersion.replace(
+		'var DEFAULT_VP_BIN = "vp";',
+		`var DEFAULT_VP_BIN = ${JSON.stringify(defaultVpBin)};`,
+	);
+}
+
 export function removeLegacyCodexConfigToml(): void {
 	const p = join(getHomeDir(), ".codex", "config.toml");
 	if (!existsSync(p)) return;

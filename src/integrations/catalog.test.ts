@@ -64,6 +64,15 @@ test("generated sources embed the rendered version marker", () => {
 	}
 });
 
+test("development-generated sources default to the local CLI entry point", () => {
+	const localCli = "/work/vision-proxy/dist/cli.js";
+	for (const generate of [generateHookScript, generatePiExtension, generateOpencodePlugin]) {
+		const source = generate(localCli);
+		assert.match(source, new RegExp(`var DEFAULT_VP_BIN = ${JSON.stringify(localCli)}`));
+	}
+	assert.match(generatePiExtension(), /var DEFAULT_VP_BIN = "vp"/);
+});
+
 test("hook command quotes paths with whitespace", () => {
 	assert.equal(
 		quotePath("/home/u/.claude/hooks/vision-proxy.ts"),

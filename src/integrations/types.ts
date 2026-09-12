@@ -19,6 +19,8 @@ export interface IntegrationResult {
 export interface IntegrationInstallOptions {
 	/** Override the directory where generated files are written (defaults per-agent). */
 	installDir?: string;
+	/** Generate a local-development artifact that defaults to the current CLI entry point. */
+	dev?: boolean;
 }
 
 /** Options passed to per-agent path resolution. */
@@ -39,7 +41,7 @@ export interface AgentSpec {
 	/** Human-readable install location used in messages. */
 	locationLabel(opts: AgentTargetOpts): string;
 	/** Produce the generated file content (version marker + script source). */
-	generate(): string;
+	generate(defaultVpBin?: string): string;
 	/** Read + return the host config file text (empty string if absent). */
 	readConfig(): { raw: string };
 	/** Config file edited by install/uninstall (the host's settings/hooks json). */

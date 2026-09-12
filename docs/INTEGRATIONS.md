@@ -110,6 +110,20 @@ Configuration options (via environment variables):
 - `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
 - `VP_BIN` - Path to vp binary (default: "vp"; a `.js` entry point is run with the current Node executable)
 
+## Local integration development
+
+When running the built CLI from this checkout, use `--dev` so generated artifacts call this same CLI instead of requiring a globally installed `vp` binary:
+
+```bash
+npm run build
+node dist/cli.js integration install pi --dev
+node dist/cli.js integration install claude-code --dev
+node dist/cli.js integration install codex --dev
+node dist/cli.js integration install opencode --dev
+```
+
+`--dev` embeds the current CLI entry-point path in the generated artifact. `VP_BIN` still takes precedence at runtime. Re-run the command if the checkout moves. Normal installations should continue using `vp integration install <agent>`; they default to `vp` on `PATH` and are unaffected by development installs.
+
 ## Troubleshooting
 
 | Symptom | Fix |

@@ -446,7 +446,7 @@ Usage:
   vp integration uninstall <agent>  remove the integration
 
 Subcommands:
-  install <agent>    write the integration into the agent's config dir
+  install <agent>    write the integration into the agent's config dir (--dev uses this CLI)
   show <agent>       print the hook command, script source, and merged config
   list               show installed agents
   status             show installed version markers per agent
@@ -461,15 +461,18 @@ Agents:
 Options:
   -h, --help         show this help`,
 
-	"integration install": `vp integration install <agent>
+	"integration install": `vp integration install <agent> [--dev]
 
 Install the vision-proxy integration for an agent.
 
 Usage:
-  vp integration install <agent>
+  vp integration install <agent> [--dev]
 
 Arguments:
-  <agent>            supported agent id: pi | claude-code | codex | opencode`,
+  <agent>            supported agent id: pi | claude-code | codex | opencode
+
+Options:
+  --dev              default generated artifacts to this CLI entry point`,
 
 	"integration show": `vp integration show <agent>
 
@@ -752,7 +755,9 @@ export async function runCommand(
 				return ok(renderHelp(["integration", sub ?? ""].filter(Boolean) as string[]));
 			}
 			const agent = subRest[0];
-			return fromStatus(await runIntegration(sub ?? "", agent ?? ""));
+			return fromStatus(
+				await runIntegration(sub ?? "", agent ?? "", undefined, bool(flags, "dev", false)),
+			);
 		}
 
 		case "update": {

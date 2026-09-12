@@ -9,7 +9,7 @@
  * plugin summary; the Codex TOML cleanup is catalog-owned.
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { VERSION } from "../version.ts";
 import {
 	legacyMarkerPath,
@@ -36,6 +36,12 @@ function isAgentInstalled(spec: AgentSpec, installDir?: string): boolean {
 	return existsSync(spec.target({ installDir }));
 }
 
+function currentCliEntryPoint(): string | undefined {
+	const entry = process.argv[1];
+	if (!entry || !/\.(?:c?m?js)$/i.test(entry)) return undefined;
+	return resolve(entry);
+}
+
 function rejectUnknownAgent(agent: string): IntegrationResult {
 	return {
 		ok: false,
@@ -58,12 +64,21 @@ export async function integrationInstall(
 	if (!spec) return rejectUnknownAgent(agent);
 	const target = spec.target({ installDir: opts.installDir });
 	const cfgPath = spec.configPath();
+	const defaultVpBin = opts.dev ? currentCliEntryPoint() : undefined;
+	if (opts.dev && !defaultVpBin) {
+		return {
+			ok: false,
+			message:
+				"--dev requires invoking the built JavaScript CLI (for example: node dist/cli.js ...)",
+			code: 1,
+		};
+	}
 	if (cfgPath) {
 		// Hook agents: write the generated hook script, then register it as a
 		// plain `npx tsx` command in the host config. The config carries only
 		// standard hook keys; the version marker lives in the script file.
 		mkdirSync(dirname(target), { recursive: true });
-		writeFileSync(target, spec.generate(), { mode: 0o644 });
+		writeFileSync(target, spec.generate(defaultVpBin), { mode: 0o644 });
 		mkdirSync(dirname(cfgPath), { recursive: true });
 		const { raw } = spec.readConfig();
 		writeFileSync(cfgPath, spec.apply(raw));
@@ -79,7 +94,7 @@ export async function integrationInstall(
 	} else {
 		// Pi: the install target is the generated extension file.
 		mkdirSync(dirname(target), { recursive: true });
-		writeFileSync(target, spec.generate(), { mode: 0o644 });
+		writeFileSync(target, spec.generate(defaultVpBin), { mode: 0o644 });
 	}
 	// Codex migrated from config.toml (legacy .mjs shim) to hooks.json; drop the
 	// stale TOML block so it can't shadow the new JSON registration.
@@ -289,11 +304,12 @@ export async function runIntegration(
 	sub: string,
 	agent: string,
 	installDir?: string,
+	dev = false,
 ): Promise<IntegrationResult> {
 	switch (sub) {
 		case "install":
 			if (!agent) return { ok: false, message: "usage: vp integration install <agent>", code: 1 };
-			return integrationInstall(agent, { installDir });
+			return integrationInstall(agent, { installDir, dev });
 		case "show":
 			if (!agent) return { ok: false, message: "usage: vp integration show <agent>", code: 1 };
 			return integrationShow(agent);

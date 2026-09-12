@@ -59,6 +59,9 @@ const MAX_MAX_OUTPUT_TOKENS = 1000000;
 /** Shared cap on captured vp analyze output. */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
+/** Default analyzer command for generated artifacts. */
+const DEFAULT_VP_BIN = "vp";
+
 function parsePositiveInt(raw: unknown, fallback: number, min: number, max: number): number {
 	var n = parseInt(raw == null ? "" : String(raw), 10);
 	if (!Number.isFinite(n) || n < min || n > max) return fallback;
@@ -85,7 +88,7 @@ function maxOutputTokens(raw: unknown): number {
 function resolveVpBin(): string {
 	var env = process.env.VP_BIN;
 	if (env?.trim()) return env.trim();
-	return "vp";
+	return DEFAULT_VP_BIN;
 }
 
 function buildAnalyzeArgs(
@@ -284,6 +287,7 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	constLine("MIN_MAX_OUTPUT_TOKENS", MIN_MAX_OUTPUT_TOKENS),
 	constLine("MAX_MAX_OUTPUT_TOKENS", MAX_MAX_OUTPUT_TOKENS),
 	constLine("MAX_BUFFER_BYTES", MAX_BUFFER_BYTES),
+	constLine("DEFAULT_VP_BIN", "vp"),
 	parsePositiveInt.toString(),
 	hookTimeoutMs.toString(),
 	maxOutputTokens.toString(),

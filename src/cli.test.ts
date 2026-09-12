@@ -5,8 +5,13 @@
  * block is printed (and that exit code stays 0).
  */
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { main, parseFlags } from "./cli.ts";
+import { loadUpdateCache, saveUpdateCache } from "./commands/update.ts";
+import { VERSION } from "./version.ts";
 
 let savedWrite: typeof process.stdout.write;
 let savedExitCode: number | undefined;
@@ -167,5 +172,110 @@ describe("cli help", () => {
 		const text = await run(["config", "help"]);
 		assert.match(text, /vp config <subcommand> \[options\]/);
 		assert.ok(!/unknown config subcommand/.test(text));
+	});
+});
+
+describe("cli update-notifier suppression", () => {
+	let dir: string;
+	let prevCacheDir: string | undefined;
+	let prevNoNotifier: string | undefined;
+	let prevCI: string | undefined;
+	let prevArgv1: string | undefined;
+	let isTTYDescriptor: PropertyDescriptor | undefined;
+	let savedStdoutWrite: typeof process.stdout.write;
+	let savedStderrWrite: typeof process.stderr.write;
+	let savedCode: number | undefined;
+	let nOut: string;
+	let nErr: string;
+
+	beforeEach(async () => {
+		dir = await mkdtemp(path.join(os.tmpdir(), "vp-cli-notifier-"));
+		prevCacheDir = process.env.VP_CACHE_DIR;
+		process.env.VP_CACHE_DIR = dir;
+		prevNoNotifier = process.env.VP_NO_UPDATE_NOTIFIER;
+		delete process.env.VP_NO_UPDATE_NOTIFIER;
+		prevCI = process.env.CI;
+		delete process.env.CI;
+		// Point the notifier's detached spawn at a missing entry so no real
+		// child can be launched even if suppression regresses.
+		prevArgv1 = process.argv[1];
+		process.argv[1] = "";
+		// Force the TTY branch: stderr is not a TTY under test runners, so
+		// without this the banner would never print and the assertions
+		// below would be vacuous.
+		isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stderr, "isTTY");
+		Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+		// Seed a fresh cache advertising a newer release, so an unsuppressed
+		// notifier prints the banner. Freshness also avoids the spawn path.
+		saveUpdateCache(
+			{ checked_at: new Date().toISOString(), latest_version: `v${VERSION}.99` },
+			{ cacheDir: dir },
+		);
+		nOut = "";
+		nErr = "";
+		savedStdoutWrite = process.stdout.write.bind(process.stdout);
+		savedStderrWrite = process.stderr.write.bind(process.stderr);
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			nOut += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+			return true;
+		}) as typeof process.stdout.write;
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			nErr += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+			return true;
+		}) as typeof process.stderr.write;
+		savedCode = process.exitCode;
+		process.exitCode = 0;
+	});
+
+	afterEach(async () => {
+		process.stdout.write = savedStdoutWrite;
+		process.stderr.write = savedStderrWrite;
+		process.exitCode = savedCode;
+		if (isTTYDescriptor) Object.defineProperty(process.stderr, "isTTY", isTTYDescriptor);
+		else delete (process.stderr as { isTTY?: boolean }).isTTY;
+		if (prevArgv1 === undefined) delete process.argv[1];
+		else process.argv[1] = prevArgv1;
+		if (prevCacheDir === undefined) delete process.env.VP_CACHE_DIR;
+		else process.env.VP_CACHE_DIR = prevCacheDir;
+		if (prevNoNotifier === undefined) delete process.env.VP_NO_UPDATE_NOTIFIER;
+		else process.env.VP_NO_UPDATE_NOTIFIER = prevNoNotifier;
+		if (prevCI === undefined) delete process.env.CI;
+		else process.env.CI = prevCI;
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("prints the banner when nothing suppresses it (control)", async () => {
+		await main(["version"]);
+		assert.match(nOut, new RegExp(VERSION.replace(/[.]/g, "[.]")));
+		assert.match(nErr, /new version of vision-proxy/);
+		assert.equal(process.exitCode ?? 0, 0);
+	});
+
+	it("suppresses the notifier for a first-token --json invocation", async () => {
+		// Regression: main scanned argv.slice(1), dropping argv[0] before
+		// the suppression check, so `main(["--json", ...])` printed the
+		// banner on stderr. argv already excludes the binary name, so the
+		// whole argv must be scanned.
+		await main(["--json", "version"]);
+		assert.ok(!/new version of vision-proxy/.test(nErr), `stderr leaked banner: ${nErr}`);
+		// Dispatch is unchanged: "--json" is still not a command.
+		assert.match(nErr, /unknown command "--json"/);
+		assert.equal(process.exitCode ?? 0, 1);
+		// The seeded cache is untouched: no refresh, no rewrite.
+		assert.equal(loadUpdateCache({ cacheDir: dir })?.latest_version, `v${VERSION}.99`);
+	});
+
+	it("suppresses the notifier for --background-check", async () => {
+		await main(["update", "--background-check"]);
+		assert.ok(!/new version of vision-proxy/.test(nErr), `stderr leaked banner: ${nErr}`);
+		assert.equal(nOut, "");
+		assert.equal(process.exitCode ?? 0, 0);
+	});
+
+	it("suppresses the notifier for a first-token --background-check", async () => {
+		await main(["--background-check"]);
+		assert.ok(!/new version of vision-proxy/.test(nErr), `stderr leaked banner: ${nErr}`);
+		assert.match(nErr, /unknown command "--background-check"/);
+		assert.equal(process.exitCode ?? 0, 1);
 	});
 });

@@ -13,13 +13,12 @@ import { basename } from "node:path";
  *   update [--check] [--version <tag>] [--force] [--beta]
  *   version | help
  *
- * Every command except `hook` (and any `--json` invocation) runs the cached
+ * Every command except any `--json` invocation runs the cached
  * update-notifier check first; see commands/update.ts for the suppression rules.
  */
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
 import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
-import { readEvent, runHook } from "./commands/hook.ts";
 import { runIntegration } from "./commands/integration.ts";
 import {
 	providerCheck,
@@ -423,22 +422,22 @@ Install, inspect, list, or remove the vision-proxy integration for an agent.
 
 Usage:
   vp integration install <agent>    install the integration
-  vp integration show <agent>       print the generated extension source
+  vp integration show <agent>       print the hook command, script, and merged config
   vp integration list               show which agents have vision-proxy installed
   vp integration status             show installed version markers per agent
   vp integration uninstall <agent>  remove the integration
 
 Subcommands:
-  install <agent>    write the integration into the agent's extensions dir
-  show <agent>       print the generated extension source for review
+  install <agent>    write the integration into the agent's config dir
+  show <agent>       print the hook command, script source, and merged config
   list               show installed agents
   status             show installed version markers per agent
-  uninstall <agent>  remove the generated extension file
+  uninstall <agent>  remove the hook script and registrations
 
 Agents:
   pi                 Pi coding agent (global extensions directory)
-  claude-code        Claude Code agent (UserPromptSubmit hook)
-  codex              Codex agent (UserPromptSubmit hook)
+  claude-code        Claude Code agent (npx tsx hook script + hooks)
+  codex              Codex agent (npx tsx hook script + hooks)
   opencode           opencode v1 agent (local TypeScript plugin)
 
 Options:
@@ -456,7 +455,7 @@ Arguments:
 
 	"integration show": `vp integration show <agent>
 
-Print the generated extension source for manual review.
+Print the hook command, generated script source, and merged config for manual review.
 
 Usage:
   vp integration show <agent>
@@ -496,32 +495,6 @@ Output:
   one line per supported agent with its install state and the version
   marker embedded in the installed artifact. Outdated integrations are
   flagged with a refresh hint.`,
-
-	hook: `vp hook
-
-Agent hook dispatcher. Read a hook event JSON from stdin and emit
-hookSpecificOutput.additionalContext with an image description.
-
-Events:
-  UserPromptSubmit   image paths and [Image #N] refs in the prompt are analyzed
-  PreToolUse Read    an image file_path read by the Read tool is analyzed
-
-In a UserPromptSubmit event, Claude Code represents pasted or attached images
-as '[Image #N]' references while storing the actual file under
-'<CLAUDE_CONFIG_DIR | ~/.claude>/image-cache/<session>/<N>.<ext>'. vp hook
-resolves those refs to file paths (using the session_id from the event) so the
-images are analyzed too. Override the config home with VP_CLAUDE_CONFIG_DIR.
-
-Usage:
-  vp hook < event.json
-
-The agent invokes this command directly as its hook. It reads the event from
-stdin, and on a recognized image event runs 'vp analyze' and prints the
-fenced description as additional context. On any error it exits 0 with no
-output (fail-open), so the agent proceeds unchanged.
-
-Options:
-  -h, --help          show this help`,
 
 	update: `vp update [--check] [--version <tag>] [--force] [--beta]
 
@@ -578,12 +551,12 @@ export async function main(argv: string[]): Promise<void> {
 	const env = process.env;
 
 	// Cached, non-blocking check, before any command runs. Suppressed for
-	// `hook`, `--json`, and the notifier's own worker so machine consumers and
-	// agent hook streams stay byte-for-byte clean.
+	// `--json` and the notifier's own worker so machine consumers stay
+	// byte-for-byte clean.
 	const machineReadable = rest.some(
 		(a) => a === "--json" || a.startsWith("--json=") || a === "--background-check",
 	);
-	checkAutoUpdateNotification({ env, command, json: machineReadable });
+	checkAutoUpdateNotification({ env, json: machineReadable });
 
 	if (!command || command === "help" || command === "-h" || command === "--help") {
 		print(HELP);
@@ -763,16 +736,6 @@ export async function main(argv: string[]): Promise<void> {
 			}
 			const agent = positionals[0];
 			handle(await runIntegration(sub ?? "", agent ?? ""));
-			return;
-		}
-
-		case "hook": {
-			const { flags } = parseFlags(rest);
-			if (wantsHelp(flags, rest)) {
-				print(renderHelp(["hook"]));
-				return;
-			}
-			runHook(readEvent());
 			return;
 		}
 

@@ -22,7 +22,6 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VERSION } from "../version.ts";
-import { vpEntryToSpawn } from "./hook.ts";
 
 export type InstallMethod = "curl" | "homebrew" | "npm" | "source";
 
@@ -304,6 +303,21 @@ export async function runUpdate(opts: UpdateOptions = {}): Promise<UpdateResult>
 
 // ── Background update notifier ─────────────────────────────────────────────
 
+/**
+ * Resolve how to re-spawn the running CLI entry for a detached child.
+ *
+ * When the entry is the compiled `dist/cli.js` (e.g. Homebrew ships it
+ * without the exec bit and with a non-PATH shebang), spawning it directly
+ * fails with EACCES — re-run it under `process.execPath` instead. For any
+ * other path (the `vp` launcher wrapper or symlink) return it as-is.
+ */
+export function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
+	if (/\.js$/i.test(cmd)) {
+		return { command: process.execPath, args: [cmd] };
+	}
+	return { command: cmd, args: [] };
+}
+
 /** How long a cached release tag stays fresh before a refresh is spawned. */
 export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -320,8 +334,6 @@ export interface NotifierEnvironment {
 	cacheDir?: string;
 	/** Current running version; defaults to the built-in VERSION. */
 	currentVersion?: string;
-	/** Command being run, used to keep `vp hook` output pristine. */
-	command?: string;
 	/** Whether the active command emits machine-readable JSON. */
 	json?: boolean;
 	/** stderr TTY state; defaults to the real stream. */
@@ -396,12 +408,11 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 /**
  * Whether the notifier may write to stderr and spawn probes at all.
  *
- * `vp hook` feeds an agent's context window, so any stray byte there is a
- * correctness bug rather than a cosmetic one.
+ * Machine-readable output must stay byte-for-byte clean, so any stray
+ * banner byte there is a correctness bug rather than a cosmetic one.
  */
 export function isNotifierSuppressed(opts: NotifierEnvironment = {}): boolean {
 	const env = opts.env ?? process.env;
-	if (opts.command === "hook") return true;
 	if (opts.json) return true;
 	if (env.VP_NO_UPDATE_NOTIFIER) return true;
 	if (env.CI) return true;

@@ -4,10 +4,10 @@ Install `vp` into an agent so it can see images in your prompts.
 
 ## Claude Code
 
-Registers two hooks in `~/.claude/settings.json`, both invoking the absolute `vp hook` path:
+Writes a `vision-proxy.ts` hook script to `~/.claude/hooks/` and registers two hooks in `~/.claude/settings.json`, both running it as a plain `npx tsx ~/.claude/hooks/vision-proxy.ts` command with only standard hook keys (no vision-proxy metadata in the config):
 
-- `UserPromptSubmit` - describes images mentioned in the prompt, plus pasted/attached images (rendered as `[Image #N]` refs) resolved via Claude Code's `image-cache/<session>/<N>.<ext>`.
-- `PreToolUse Read` - describes an image read via the `Read` tool (`file_path`).
+- `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Pasted/attached images (rendered as `[Image #N]` refs) are resolved via Claude Code's `image-cache/<session>/<N>.<ext>` so each gets a reminder line too. Never shells out, so prompt submission is never blocked on a vision call.
+- `PreToolUse Read` - the single analysis point: describes an image read via the `Read` tool (`file_path`).
 
 ```bash
 vp integration install claude-code
@@ -22,10 +22,10 @@ vp integration uninstall claude-code
 
 ## Codex
 
-Registers the same two hooks in `~/.codex/hooks.json`, both invoking the absolute `vp hook` path:
+Writes the same `vision-proxy.ts` hook script to `~/.codex/hooks/` and registers the same two hooks in `~/.codex/hooks.json` as plain `npx tsx ~/.codex/hooks/vision-proxy.ts` commands with only standard hook keys:
 
-- `UserPromptSubmit` - describes images mentioned in the prompt.
-- `PreToolUse Read` - describes an image read via the `Read` tool (`file_path`).
+- `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Never shells out, so prompt submission is never blocked on a vision call.
+- `PreToolUse Read` - the single analysis point: describes an image read via the `Read` tool (`file_path`).
 
 Legacy installs that appended a `[[UserPromptSubmit]]` block to `~/.codex/config.toml` are migrated automatically: `vp integration install codex` and `vp integration uninstall codex` both remove that stale block.
 
@@ -44,11 +44,11 @@ vp integration uninstall codex
 
 Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
 
-- `input` — no-op. Returns immediately so the user's prompt is accepted the instant they press Enter. All analysis is deferred to the `context` event, so prompt submission is never blocked on a `vp analyze` call.
-- `context` — the single analysis point. Fires right before Pi sends the turn's messages to the model. For each user message it finds image attachments (base64 content) and image paths referenced in the text, runs `vp analyze`, and replaces the image attachments with the fenced UNTRUSTED description. The original user text (including any referenced image path) is preserved. Attachments whose mime type is outside the supported set (jpg, jpeg, png, gif, webp, bmp, tiff, ico, avif) are forwarded to the model unchanged.
-- `tool_result` — intercepts `read` tool results on image files and replaces the tool result content with the fenced description so no image bytes reach the model.
+- `input` — no-op. Returns immediately so the user's prompt is accepted the instant they press Enter.
+- `context` — appends a static reminder to read each image path referenced in the user text with the `read` tool. It never shells out to `vp analyze`, so sends stay fast. Image attachments are left untouched so the model sees them natively.
+- `tool_result` — the single analysis point. Intercepts `read` tool results on image files and replaces the tool result content with the fenced UNTRUSTED description so no image bytes reach the model.
 
-The analysis happens in the `context` event for every submission Pi assembles for the model, including ones queued via the `streamingBehavior` option while a previous turn is streaming and ones dispatched through `session.steer()` / `session.followUp()` (which route through the same `session.prompt()` path).
+The reminder is appended in the `context` event for every submission Pi assembles for the model, including ones queued via the `streamingBehavior` option while a previous turn is streaming and ones dispatched through `session.steer()` / `session.followUp()` (which route through the same `session.prompt()` path). Repeated events strip the prior reminder before re-appending, so reminder text never duplicates.
 
 If `vp analyze` fails or `VP_MODE=off`, the extension fails open and Pi proceeds unchanged.
 
@@ -76,12 +76,12 @@ Configuration options (via environment variables):
 Installs the `vision-proxy.ts` plugin into `~/.config/opencode/plugins/`.
 
 The plugin registers hooks for **parity with claude-code/codex**:
-- `chat.message` hook - like `UserPromptSubmit`: extracts image paths from the user text, decodes attached image parts (data URLs), runs `vp analyze`, removes the analyzed image parts from the message so no bytes reach the model, and appends the fenced description as a synthetic text part.
-- `tool.execute.before` hook (`read`) - like `PreToolUse Read`: intercepts `read` tool calls on image files, runs `vp analyze`, and denies the read by throwing an error whose message carries the instruction and description.
+- `chat.message` hook - like `UserPromptSubmit`: extracts image paths from the user text and appends a static reminder to inspect each one with the `read` tool. It never shells out, so message handling stays fast. Attached image parts are left untouched so the model sees them natively.
+- `tool.execute.before` hook (`read`) - like `PreToolUse Read`, the single analysis point: intercepts `read` tool calls on image files, runs `vp analyze`, and denies the read by throwing an error whose message carries the instruction and description.
 
 No new `analyze_image` tool is registered - the agent uses its native Read tool which the hook intercepts.
 
-Analysis is **unconditional by design**, matching the claude-code/codex hooks: the plugin never inspects the chat model's modality. Installing the plugin is the explicit opt-in to route every image through vision-proxy; multimodal models receive the fenced description instead of raw image bytes. To restore native image input, uninstall the plugin. Injected descriptions carry a stable `[vision-proxy:image]` marker so prior injections are stripped if the hook ever re-fires for the same message.
+Image-read routing is **unconditional by design**, matching the claude-code/codex hooks: the plugin never inspects the chat model's modality. Installing the plugin is the explicit opt-in to route every image read through vision-proxy; multimodal models receive the fenced description instead of raw image bytes. To restore native image input, uninstall the plugin. Injected reminders carry a stable `[vision-proxy:read-reminder]` marker so prior injections are stripped if the hook ever re-fires for the same message.
 
 If `vp analyze` fails, the plugin fails open: the original message parts and tool calls proceed unchanged.
 
@@ -112,7 +112,7 @@ Configuration options (via environment variables):
 |---------|-----|
 | Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
 | Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. opencode: verify the plugin's `chat.message` and `tool.execute.before` hooks via `opencode plugin list`. |
-| `vp hook` not found | Re-run `vp integration install <agent>` so the absolute binary path is written into the config, or ensure `vp` is on PATH. |
+| Hook script not found (`npx tsx ...vision-proxy.ts` fails) | Re-run `vp integration install <agent>` to regenerate the script, ensure `npx`/`tsx` is available, and ensure `vp` is on PATH (or set `VP_BIN`). |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |
 | Pi images not described | Check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |

@@ -150,7 +150,7 @@ describe("cli help", () => {
 		assert.match(install, /Install the vision-proxy integration/);
 
 		const show = await run(["integration", "show", "--help"]);
-		assert.match(show, /generated extension source/);
+		assert.match(show, /hook command/);
 
 		const list = await run(["integration", "list", "--help"]);
 		assert.match(list, /installed agents/);

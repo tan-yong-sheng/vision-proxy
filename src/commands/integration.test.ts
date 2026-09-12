@@ -5,13 +5,14 @@
  * registrations against an isolated temp HOME so we never touch a real
  * ~/.claude, ~/.codex, or ~/.pi. Validates:
  *   - install pi writes an executable extension: its input handler is a no-op
- *     so the prompt submit is never blocked, the context event analyzes
- *     attached/referenced images and injects the description into the
- *     messages (preserving the user prompt text), and tool_result replaces
- *     image reads
- *   - install claude-code/codex registers both hooks (UserPromptSubmit +
- *     PreToolUse Read) in the agent config with the absolute `vp hook` path
- *   - uninstall removes only our registrations (idempotent, leaves others intact)
+ *     so the prompt submit is never blocked, the context event appends a
+ *     static reminder to read referenced image paths (never spawning vp),
+ *     and tool_result replaces image reads with the analyzed description
+ *   - install claude-code/codex writes a plain `vision-proxy.ts` hook script
+ *     (run via `npx tsx`) and registers both hooks (UserPromptSubmit +
+ *     PreToolUse Read) in the agent config with no vision-proxy metadata keys
+ *   - uninstall removes only our registrations and the script (idempotent,
+ *     leaves others intact)
  *   - codex install removes a legacy config.toml [[UserPromptSubmit]] block
  *   - show prints the generated hook command without touching disk
  *   - list/status reflect installed state across agents
@@ -21,7 +22,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { runIntegration } from "../commands/integration.ts";
 import { VERSION } from "../version.ts";
@@ -43,29 +44,14 @@ function installDir(home: string): string {
 	return join(home, "ext");
 }
 
-/**
- * Create a fake `vp` binary under `<home>/bin` that prints the current
- * VERSION, prepend it to `PATH`, run `fn`, then restore `PATH`. This lets
- * install tests exercise the PATH-resolution path deterministically.
- */
-function withVpOnPath<T>(home: string, fn: () => T): T {
-	const binDir = join(home, "bin");
-	mkdirSync(binDir, { recursive: true });
-	const vp = join(binDir, "vp");
-	writeFileSync(vp, `#!/bin/sh\necho "${VERSION}"\n`, { mode: 0o755 });
-	const origPath = process.env.PATH;
-	process.env.PATH = `${binDir}${delimiter}${origPath ?? ""}`;
-	try {
-		return fn();
-	} finally {
-		if (origPath === undefined) delete process.env.PATH;
-		else process.env.PATH = origPath;
-	}
+/** Absolute path to the generated Claude Code hook script under the isolated HOME. */
+function claudeHookPath(home: string): string {
+	return join(home, ".claude", "hooks", "vision-proxy.ts");
 }
 
-/** Return the absolute path to the fake `vp` created by `withVpOnPath`. */
-function vpPath(home: string): string {
-	return join(home, "bin", "vp");
+/** Absolute path to the generated Codex hook script under the isolated HOME. */
+function codexHookPath(home: string): string {
+	return join(home, ".codex", "hooks", "vision-proxy.ts");
 }
 
 /** Pi's default extensions dir under the isolated HOME (`~/.pi/agent/extensions`). */
@@ -128,6 +114,21 @@ async function loadGeneratedSource(
 			"    kill: () => {},",
 			"  };",
 			"  return proc;",
+			"}",
+			"export function execFile(command, args, options, callback) {",
+			"  calls.push([command, args]);",
+			"  const result = nextResult;",
+			"  setImmediate(() => {",
+			'    if (!result) { callback(null, "", ""); return; }',
+			'    if (result.error) { callback(result.error, result.stdout ?? "", result.stderr ?? ""); return; }',
+			"    if (result.status !== 0) {",
+			'      const err = new Error("mock vp analyze failed");',
+			"      err.code = result.status;",
+			'      callback(err, result.stdout ?? "", result.stderr ?? "");',
+			"      return;",
+			"    }",
+			'    callback(null, result.stdout ?? "", result.stderr ?? "");',
+			"  });",
 			"}",
 			"",
 		].join("\n"),
@@ -202,7 +203,7 @@ test("install pi writes the vision-proxy extension file with valid source", asyn
 	reset();
 });
 
-test("pi extension analyzes images in the context event without blocking the submit", async (t) => {
+test("pi extension appends a Read reminder in the context event without spawning vp", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
 		reset();
@@ -226,8 +227,10 @@ test("pi extension analyzes images in the context event without blocking the sub
 	});
 	assert.equal(inputResult, undefined, "input must not block the prompt submit");
 
-	// The context event (which fires right before the model call) does the
-	// analysis and injects the description into the messages.
+	// The context event (which fires right before the model call) appends a
+	// static Read reminder without spawning vp. The actual analysis happens
+	// lazily in tool_result when the model reads the image.
+	const before = calls.length;
 	const result = (await events.context[0]({
 		type: "context",
 		messages: [
@@ -240,37 +243,24 @@ test("pi extension analyzes images in the context event without blocking the sub
 			},
 		],
 	})) as any;
+	assert.equal(calls.length, before, "context must not spawn vp");
 	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
-	// The image attachment is replaced by the fenced description; the original
-	// text (with the referenced path) is preserved for Claude Code / Codex parity.
-	assert.ok(!content.some((c) => c.type === "image"), "image block must be replaced");
-	const descBlock = content.find(
-		(c) => c.type === "text" && c.text?.includes("@@FENCE red square@@"),
-	);
-	assert.ok(descBlock, "description must be injected");
-	assert.match(descBlock!.text!, /Do not use the Read tool on image files/);
-	const textBlock = content.find((c) => c.type === "text" && c.text?.includes(imagePath));
-	assert.ok(textBlock, "referenced image path must be preserved in the prompt text");
-	// One analyze invocation covering the temp copy of the attachment plus the
-	// referenced file (the config-get probe is a separate call).
-	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
-	assert.equal(analyzeCalls.length, 1);
-	const analyzed = analyzeCalls[0]![1];
-	assert.equal(analyzed[0], "analyze");
-	assert.ok(analyzed.includes(imagePath));
-	// The attachment is analyzed via a temp copy (a path outside the test dir).
-	assert.ok(analyzed.some((a) => a.startsWith(tmpdir()) && a !== imagePath));
-	// The user's prompt is forwarded as --question so the vision model can tailor
-	// the description (parity with the Claude Code / Codex vp hook UserPromptSubmit).
-	assert.ok(analyzed.includes("--question"), "--question flag must be forwarded");
+	// The image attachment is left untouched for native multimodal vision.
 	assert.ok(
-		analyzed.includes(`look at ${imagePath} please`),
-		"prompt text must be forwarded as the question",
+		content.some((c) => c.type === "image"),
+		"image attachment must be left untouched",
 	);
+	// The reminder names the referenced path and instructs a read.
+	const reminder = content.find(
+		(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
+	);
+	assert.ok(reminder, "read reminder must be appended");
+	assert.match(reminder!.text!, /Use the read tool on each image path/);
+	assert.ok(reminder!.text!.includes(imagePath), "reminder must name the referenced path");
 	reset();
 });
 
-test("pi extension resolves a tilde (~) image path in the context event", async (t) => {
+test("pi extension resolves a tilde (~) image path in the context reminder", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
 		reset();
@@ -279,14 +269,14 @@ test("pi extension resolves a tilde (~) image path in the context event", async 
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
-	const { events, calls, setNextResult } = await loadPiExtension(
+	const { events, calls } = await loadPiExtension(
 		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
 		home,
 	);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(home, "sub", "photo.jpeg");
-	setNextResult({ status: 0, stdout: "@@FENCE tilde desc@@" });
 
+	const before = calls.length;
 	const result = (await events.context[0]({
 		type: "context",
 		messages: [
@@ -296,25 +286,22 @@ test("pi extension resolves a tilde (~) image path in the context event", async 
 			},
 		],
 	})) as any;
+	assert.equal(calls.length, before, "context must not spawn vp");
 	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
-	const descBlock = content.find(
-		(c) => c.type === "text" && c.text?.includes("@@FENCE tilde desc@@"),
+	const reminder = content.find(
+		(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
 	);
-	assert.ok(descBlock, "tilde path must be resolved and described");
-
-	// The analyze call must receive the home-expanded absolute path, not the tilde.
-	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
-	assert.equal(analyzeCalls.length, 1);
-	const analyzed = analyzeCalls[0]![1];
+	assert.ok(reminder, "read reminder must be appended");
+	// The reminder names the home-expanded absolute path, not the tilde.
+	assert.ok(!reminder!.text!.includes("~/"), "reminder must not contain the unexpanded tilde");
 	assert.ok(
-		!analyzed.some((a: string) => a.startsWith("~/")),
-		"analyze must receive an expanded absolute path",
+		reminder!.text!.includes(imagePath),
+		"reminder must name the home-expanded absolute path",
 	);
-	assert.ok(analyzed.includes(imagePath), "analyze must receive the home-expanded absolute path");
 	reset();
 });
 
-test("pi extension context event injects the description into the messages", async (t) => {
+test("pi extension context event appends a Read reminder to the messages", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
 		reset();
@@ -325,11 +312,10 @@ test("pi extension context event injects the description into the messages", asy
 	const {
 		events,
 		dir: testDir,
-		setNextResult,
+		calls,
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
-	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
 
 	// input is a no-op for a normal prompt...
 	const inputResult = await events.input[0]({
@@ -339,19 +325,23 @@ test("pi extension context event injects the description into the messages", asy
 	});
 	assert.equal(inputResult, undefined);
 
-	// ...and the context event analyzes and injects the description (wrapped with
-	// the "do not Read image files" instruction, mirroring Claude Code / Codex
-	// additionalContext).
+	// ...and the context event appends a static Read reminder without spawning
+	// vp (the analysis happens lazily in tool_result when the model reads it).
+	const before = calls.length;
 	const result = (await events.context[0]({
 		type: "context",
 		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
 	})) as any;
+	assert.equal(calls.length, before, "context must not spawn vp");
 	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
-	const descBlock = content.find((c) => c.type === "text" && c.text?.includes("@@FENCE desc@@"));
-	assert.ok(descBlock, "description must be injected");
-	assert.match(descBlock!.text!, /Do not use the Read tool on image files/);
+	const reminder = content.find(
+		(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
+	);
+	assert.ok(reminder, "read reminder must be appended");
+	assert.match(reminder!.text!, /Use the read tool on each image path/);
+	assert.ok(reminder!.text!.includes(imagePath), "reminder must name the image path");
 
-	// A subsequent image-less prompt yields no description (nothing to analyze).
+	// A subsequent image-less prompt yields no reminder (nothing to reference).
 	const none = await events.context[0]({
 		type: "context",
 		messages: [{ role: "user", content: [{ type: "text", text: "plain text, no images" }] }],
@@ -360,12 +350,11 @@ test("pi extension context event injects the description into the messages", asy
 	reset();
 });
 
-test("pi extension context event analyzes an image once across repeated context events", async () => {
-	// Regression for the notification spam: Pi re-fires the context event for
-	// every model call (including after each tool execution), and the original
-	// user message still carries its image blocks/paths. Without a description
-	// cache the same image was re-analyzed and re-notified on every turn, so
-	// "[vision-proxy] Analyzing 1 image(s)..." repeated for each tool result.
+test("pi extension context event never duplicates the reminder across repeated context events", async () => {
+	// Pi re-fires the context event for every model call (including after each
+	// tool execution), and the already-reminded message is re-delivered. The
+	// handler must strip its own prior reminder before re-appending, so the
+	// prompt never stacks duplicate reminder text — and it must never spawn vp.
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -373,22 +362,10 @@ test("pi extension context event analyzes an image once across repeated context 
 		events,
 		dir: testDir,
 		calls,
-		setNextResult,
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
 	const b64 = Buffer.from("fakepng").toString("base64");
-	setNextResult({ status: 0, stdout: "@@FENCE red square@@" });
-
-	const notifyCalls: string[] = [];
-	const ctxWithNotify = {
-		ui: {
-			notify: (msg: string) => {
-				notifyCalls.push(msg);
-			},
-		},
-	};
-	const messageEvent = (msgs: unknown[]) => ({ type: "context", messages: msgs });
 	const userMessage = (): any => ({
 		role: "user",
 		content: [
@@ -396,53 +373,58 @@ test("pi extension context event analyzes an image once across repeated context 
 			{ type: "text", text: `look at ${imagePath} please` },
 		],
 	});
+	const reminders = (msgs: any) =>
+		(msgs[0].content as Array<{ type: string; text?: string }>).filter(
+			(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
+		);
 
-	// First context event: analyzes the image and notifies once.
-	const first = (await events.context[0](messageEvent([userMessage()]), ctxWithNotify)) as any;
+	// First context event: one reminder appended, no vp spawned.
+	const before = calls.length;
+	const first = (await events.context[0]({
+		type: "context",
+		messages: [userMessage()],
+	})) as any;
 	assert.ok(first?.messages, "first context must return transformed messages");
-	const analyzeAfterFirst = calls.filter(([, args]) => args[0] === "analyze");
-	assert.equal(analyzeAfterFirst.length, 1, "must analyze once on first context event");
-	assert.equal(notifyCalls.length, 1, "must notify once on first context event");
+	assert.equal(calls.length, before, "context must not spawn vp");
+	assert.equal(reminders(first.messages).length, 1, "exactly one reminder after first event");
 
-	// A later context event (e.g. a follow-up turn) re-fires with the same image
-	// still present. The description cache must prevent a second analysis and a
-	// second notification.
-	const second = (await events.context[0](messageEvent([userMessage()]), ctxWithNotify)) as any;
+	// Second context event re-fires with the reminded message: still exactly
+	// one reminder (stripped and re-appended, not stacked), still no vp spawn.
+	const second = (await events.context[0]({
+		type: "context",
+		messages: first.messages,
+	})) as any;
 	assert.ok(second?.messages, "second context must return transformed messages");
-	const analyzeAfterSecond = calls.filter(([, args]) => args[0] === "analyze");
-	assert.equal(
-		analyzeAfterSecond.length,
-		1,
-		"must NOT re-analyze the same image on the second context event",
+	assert.equal(calls.length, before, "context must not spawn vp on re-fire");
+	assert.equal(reminders(second.messages).length, 1, "must NOT stack a second reminder");
+	// The image attachment survives both passes for native multimodal vision.
+	assert.ok(
+		(second.messages[0].content as Array<{ type: string }>).some((c) => c.type === "image"),
+		"image attachment must survive repeated context events",
 	);
-	assert.equal(notifyCalls.length, 1, "must NOT re-notify on the second context event");
+	delete process.env.VP_MODE;
 	reset();
 });
 
-test("pi extension persists the description cache to disk so it survives module reloads", async () => {
-	// Regression for the analysis spam across Pi module reloads: a pure in-memory
-	// cache was reset every time Pi re-evaluated the extension module, so the
-	// same image kept getting re-analyzed. The fix is to back the cache with an
-	// on-disk store at ~/.vision-proxy/pi-desc-cache.json (isolated to the test
-	// HOME). After the first analysis the file must exist on disk, the entries
-	// must be loadable as JSON, and the description must round-trip through it
-	// so a fresh process (or a re-imported module after the in-memory cache is
-	// cleared) can re-use the cached entry.
+test("pi extension context event writes no cache file (reminder-only, no analysis)", async () => {
+	// The context event never analyzes, so it must never create
+	// ~/.vision-proxy/pi-desc-cache.json: the single analysis point is
+	// tool_result, which analyzes the image the model actually reads.
 	const home = isolate();
 	await runIntegration("install", "pi");
 	const cachePath = join(home, ".vision-proxy", "pi-desc-cache.json");
-	assert.equal(existsSync(cachePath), false, "cache file must not exist before first analysis");
+	assert.equal(existsSync(cachePath), false, "cache file must not exist before context");
 
 	const source = readFileSync(
 		join(process.env.HOME!, ".pi", "agent", "extensions", "vision-proxy.ts"),
 		"utf8",
 	);
-	const { events, dir: testDir, setNextResult } = await loadPiExtension(source, home);
+	const { events, dir: testDir, calls } = await loadPiExtension(source, home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "persist.png");
 	const b64 = Buffer.from("fakepng").toString("base64");
-	setNextResult({ status: 0, stdout: "@@FENCE persisted@@" });
-	await events.context[0]({
+	const before = calls.length;
+	const result = (await events.context[0]({
 		type: "context",
 		messages: [
 			{
@@ -453,21 +435,11 @@ test("pi extension persists the description cache to disk so it survives module 
 				],
 			},
 		],
-	});
-
-	// The cache file must be on disk and must contain a parseable JSON object
-	// with at least one entry whose description is the one we just produced.
-	assert.equal(existsSync(cachePath), true, "cache file must be written after first analysis");
-	const raw = readFileSync(cachePath, "utf8");
-	const parsed = JSON.parse(raw);
-	assert.equal(typeof parsed, "object");
-	assert.ok(parsed !== null && !Array.isArray(parsed), "cache must be a JSON object, not an array");
-	const entries = Object.values(parsed) as string[];
-	assert.ok(entries.length > 0, "cache must contain at least one entry");
-	assert.ok(
-		entries.some((v) => v.includes("@@FENCE persisted@@")),
-		"cache file must contain the description that was just produced",
-	);
+	})) as any;
+	assert.ok(result?.messages, "context must still append the reminder");
+	assert.equal(calls.length, before, "context must not spawn vp");
+	assert.equal(existsSync(cachePath), false, "context must not write a cache file");
+	delete process.env.VP_MODE;
 	reset();
 });
 
@@ -482,14 +454,13 @@ test("pi extension keeps the prompt submit instant for queued streaming prompts"
 	const {
 		events,
 		dir: testDir,
-		setNextResult,
+		calls,
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
-	setNextResult({ status: 0, stdout: "@@FENCE queued desc@@" });
 
 	// A queued streaming prompt: input must still return undefined immediately so
-	// the submit is never blocked. The analysis happens later in the context event.
+	// the submit is never blocked. The reminder is appended later in context.
 	const inputResult = (await events.input[0]({
 		type: "input",
 		text: `see ${imagePath}`,
@@ -498,19 +469,22 @@ test("pi extension keeps the prompt submit instant for queued streaming prompts"
 	})) as unknown;
 	assert.equal(inputResult, undefined, "input must not block the prompt submit");
 
-	// And the context event describes the queued message's referenced image.
+	// And the context event appends a Read reminder for the queued message's
+	// referenced image without spawning vp.
+	const before = calls.length;
 	const result = (await events.context[0]({
 		type: "context",
 		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
 	})) as any;
+	assert.equal(calls.length, before, "context must not spawn vp");
 	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
-	const descBlock = content.find(
-		(c) => c.type === "text" && c.text?.includes("@@FENCE queued desc@@"),
+	const reminder = content.find(
+		(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
 	);
-	assert.ok(descBlock, "queued prompt must be described in context");
-	assert.match(descBlock!.text!, /Do not use the Read tool on image files/);
+	assert.ok(reminder, "queued prompt must get a Read reminder in context");
+	assert.ok(reminder!.text!.includes(imagePath), "reminder must name the image path");
 
-	// A subsequent image-less prompt yields no description from context.
+	// A subsequent image-less prompt yields no reminder from context.
 	const idle = await events.context[0]({
 		type: "context",
 		messages: [
@@ -564,25 +538,37 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "pic.png");
 	const b64 = Buffer.from("x").toString("base64");
+	const userMessage = (): any => ({
+		role: "user",
+		content: [
+			{ type: "image", data: b64, mimeType: "image/png" },
+			{ type: "text", text: `see ${imagePath}` },
+		],
+	});
 
-	// vp exits non-zero -> context returns undefined (fail-open).
+	// vp exits non-zero -> tool_result returns undefined (fail-open), so the
+	// original read result reaches the model unchanged.
 	process.env.VP_MODE = "always";
 	setNextResult({ status: 1, stdout: "" });
-	const failed = await events.context[0]({
-		type: "context",
-		messages: [
-			{
-				role: "user",
-				content: [
-					{ type: "image", data: b64, mimeType: "image/png" },
-					{ type: "text", text: `see ${imagePath}` },
-				],
-			},
-		],
+	const failed = await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
 	});
 	assert.equal(failed, undefined);
 
-	// mode off -> input is a no-op and context returns undefined.
+	// The context reminder needs no vp call, so it still fires even when vp
+	// is broken — the model is told to read, and the read fails open above.
+	const reminded = (await events.context[0]({
+		type: "context",
+		messages: [userMessage()],
+	})) as any;
+	assert.ok(reminded?.messages, "context reminder must fire even when vp fails");
+
+	// mode off -> input is a no-op, context returns undefined, tool_result
+	// returns undefined.
 	process.env.VP_MODE = "off";
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
 	const inputDisabled = await events.input[0]({
@@ -593,22 +579,22 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 	assert.equal(inputDisabled, undefined);
 	const contextDisabled = await events.context[0]({
 		type: "context",
-		messages: [
-			{
-				role: "user",
-				content: [
-					{ type: "image", data: b64, mimeType: "image/png" },
-					{ type: "text", text: `see ${imagePath}` },
-				],
-			},
-		],
+		messages: [userMessage()],
 	});
 	assert.equal(contextDisabled, undefined);
+	const toolDisabled = await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
+	});
+	assert.equal(toolDisabled, undefined);
 	delete process.env.VP_MODE;
 	reset();
 });
 
-test("pi extension passes through attachments it cannot analyze", async (t) => {
+test("pi extension leaves attachments untouched and reminds the referenced path", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
 		reset();
@@ -619,7 +605,7 @@ test("pi extension passes through attachments it cannot analyze", async (t) => {
 	const {
 		events,
 		dir: testDir,
-		setNextResult,
+		calls,
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
@@ -629,10 +615,10 @@ test("pi extension passes through attachments it cannot analyze", async (t) => {
 		mimeType: "image/svg+xml",
 	};
 
-	// An unsupported mime attachment plus a referenced image path: the
-	// unsupported image block is forwarded unchanged, the referenced path is
-	// described and the description is injected into the messages.
-	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+	// An unsupported mime attachment plus a referenced image path: every image
+	// block is forwarded unchanged (native multimodal vision), and the
+	// referenced path gets a Read reminder — with no vp subprocess.
+	const before = calls.length;
 	const result = (await events.context[0]({
 		type: "context",
 		messages: [
@@ -642,28 +628,36 @@ test("pi extension passes through attachments it cannot analyze", async (t) => {
 			},
 		],
 	})) as any;
-	const content = result.messages[0].content as Array<{ type: string; text?: string }>;
-	// The unsupported image block survives instead of being dropped...
-	assert.ok(
-		content.some((c) => c.type === "image"),
-		"unsupported image block must pass through",
+	assert.equal(calls.length, before, "context must not spawn vp");
+	const content = result.messages[0].content as Array<{
+		type: string;
+		data?: string;
+		mimeType?: string;
+		text?: string;
+	}>;
+	// The unsupported image block survives byte-for-byte instead of being dropped...
+	const images = content.filter((c) => c.type === "image");
+	assert.equal(images.length, 1, "unsupported image block must pass through");
+	assert.equal(images[0]?.data, unsupported.data, "the original bytes must be preserved");
+	assert.equal(images[0]?.mimeType, unsupported.mimeType, "the original mime must be preserved");
+	// ...and the referenced image path gets a Read reminder.
+	const reminder = content.find(
+		(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
 	);
-	// ...and the referenced image path is described and injected.
-	const descBlock = content.find((c) => c.type === "text" && c.text?.includes("@@FENCE desc@@"));
-	assert.ok(descBlock, "referenced image must be described");
+	assert.ok(reminder, "referenced image must get a Read reminder");
+	assert.ok(reminder!.text!.includes(imagePath), "reminder must name the image path");
 	reset();
 });
 
-test("pi extension invalidates the description cache when a referenced file changes", async (t) => {
+test("pi extension analyzes a rewritten file fresh on every tool_result read", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
 		reset();
 	});
-	// Regression: a screenshot tool or build artifact that always writes the
-	// same path (e.g. ./screenshot.png) must produce a fresh description after
-	// the file is re-written. A cache key that only used the path would
-	// return the stale description for the new image bytes. The cache identity
-	// must fold in size + mtime so a re-write is treated as a different image.
+	// There is no description cache anymore: each model read of an image goes
+	// through vp analyze, so a screenshot tool or build artifact that always
+	// writes the same path (e.g. ./screenshot.png) always produces a fresh
+	// description for the current bytes. Stale descriptions are impossible.
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -675,54 +669,44 @@ test("pi extension invalidates the description cache when a referenced file chan
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "screenshot.png");
-
-	const userMessage = (): any => ({
-		role: "user",
-		content: [{ type: "text", text: `look at ${imagePath} please` }],
+	const readEvent = (): any => ({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: "rawbytes", mimeType: "image/png" }],
+		isError: false,
 	});
 
-	// First analysis: writes the file with content "AAAA".
 	setNextResult({ status: 0, stdout: "@@FENCE first desc@@" });
-	const first = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
-	assert.ok(first?.messages, "first context must return transformed messages");
-	const firstContent = first.messages[0].content as Array<{ type: string; text?: string }>;
-	assert.ok(
-		firstContent.some((c) => c.type === "text" && c.text?.includes("@@FENCE first desc@@")),
-		"first analysis must inject the first description",
-	);
+	const first = (await events.tool_result[0](readEvent())) as any;
+	assert.match(first.content[0].text, /@@FENCE first desc@@/);
 	const analyzeAfterFirst = calls.filter(([, args]) => args[0] === "analyze");
-	assert.equal(analyzeAfterFirst.length, 1, "must analyze once on first event");
+	assert.equal(analyzeAfterFirst.length, 1, "must analyze once on first read");
 
-	// Re-write the same path with a different size so the cache key changes.
-	// Sleep a millisecond to ensure mtime strictly increases (mtime resolution
-	// is often 1s on some filesystems; this protects both resolution regimes).
-	await new Promise((r) => setTimeout(r, 5));
 	writeFileSync(imagePath, "BBBBBBBB-longer-than-original");
 
-	// Second analysis: must re-analyze because the file changed (size+mtime differ).
 	setNextResult({ status: 0, stdout: "@@FENCE second desc@@" });
-	const second = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
-	assert.ok(second?.messages, "second context must return transformed messages");
-	const secondContent = second.messages[0].content as Array<{ type: string; text?: string }>;
-	assert.ok(
-		secondContent.some((c) => c.type === "text" && c.text?.includes("@@FENCE second desc@@")),
-		"rewritten file must produce a fresh description (cache invalidated by size+mtime)",
+	const second = (await events.tool_result[0](readEvent())) as any;
+	assert.match(
+		second.content[0].text,
+		/@@FENCE second desc@@/,
+		"rewritten file must produce a fresh description (no stale cache)",
 	);
 	const analyzeAfterSecond = calls.filter(([, args]) => args[0] === "analyze");
-	assert.equal(analyzeAfterSecond.length, 2, "must re-analyze when referenced file changes");
+	assert.equal(analyzeAfterSecond.length, 2, "must re-analyze on every read");
 	reset();
 });
 
-test("pi extension keeps the unsupported-mime image block across a cache hit", async (t) => {
+test("pi extension preserves the image block across repeated reminder events", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
 		reset();
 	});
-	// Regression: a cache hit must not drop the original image block from the
-	// returned content. Previously the pass-through only ran in the analyze
-	// branch, so the second context event (a cache hit) silently dropped the
-	// unsupported image and the model stopped seeing it. The passthrough is now
-	// applied to every output, including cache hits.
+	// Pi re-fires context on every model call, so the handler runs repeatedly
+	// over messages it already reminded. Each pass must preserve the original
+	// image bytes, carry exactly one reminder, and never spawn vp — the image
+	// reaches the model natively on every turn until it is read and described
+	// by tool_result.
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -730,7 +714,6 @@ test("pi extension keeps the unsupported-mime image block across a cache hit", a
 		events,
 		dir: testDir,
 		calls,
-		setNextResult,
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
@@ -744,10 +727,10 @@ test("pi extension keeps the unsupported-mime image block across a cache hit", a
 		content: [unsupported, { type: "text", text: `see ${imagePath}` }],
 	});
 
-	// First context event: analyzes the referenced image. The unsupported
-	// image block is passed through alongside the new description.
-	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
+	// First context event: image passes through, one reminder appended, no vp.
+	const before = calls.length;
 	const first = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
+	assert.equal(calls.length, before, "first event: context must not spawn vp");
 	const firstContent = first.messages[0].content as Array<{
 		type: string;
 		data?: string;
@@ -757,14 +740,20 @@ test("pi extension keeps the unsupported-mime image block across a cache hit", a
 	assert.equal(
 		firstContent.filter((c) => c.type === "image").length,
 		1,
-		"first event: unsupported image block must pass through alongside the description",
+		"first event: image block must pass through alongside the reminder",
 	);
-	const analyzeAfterFirst = calls.filter(([, args]) => args[0] === "analyze");
-	assert.equal(analyzeAfterFirst.length, 1);
+	assert.equal(
+		firstContent.filter(
+			(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
+		).length,
+		1,
+		"first event: exactly one reminder",
+	);
 
-	// Second context event: cache hit. The description is reused, but the
-	// unsupported image block must STILL be present in the returned content.
-	const second = (await events.context[0]({ type: "context", messages: [userMessage()] })) as any;
+	// Second context event over the reminded message: image STILL present,
+	// still exactly one reminder, still no vp.
+	const second = (await events.context[0]({ type: "context", messages: first.messages })) as any;
+	assert.equal(calls.length, before, "second event: context must not spawn vp");
 	const secondContent = second.messages[0].content as Array<{
 		type: string;
 		data?: string;
@@ -775,7 +764,7 @@ test("pi extension keeps the unsupported-mime image block across a cache hit", a
 	assert.equal(
 		images.length,
 		1,
-		"cache hit: unsupported image block must STILL pass through (not be dropped)",
+		"second event: image block must STILL pass through (not be dropped)",
 	);
 	assert.equal(images[0]?.data, unsupported.data, "the original bytes must be preserved");
 	assert.equal(
@@ -783,17 +772,12 @@ test("pi extension keeps the unsupported-mime image block across a cache hit", a
 		unsupported.mimeType,
 		"the original mime type must be preserved",
 	);
-	assert.ok(
-		secondContent.some((c) => c.type === "text" && c.text?.includes("@@FENCE desc@@")),
-		"cache hit: the cached description must still be injected",
-	);
-	// Crucially: no second analyze call was issued (the cache is doing its job
-	// for the analyzable referenced path), so the unsupported image block is
-	// the ONLY path that could carry the bytes to the model.
 	assert.equal(
-		calls.filter(([, args]) => args[0] === "analyze").length,
+		secondContent.filter(
+			(c) => c.type === "text" && c.text?.includes("[vision-proxy:read-reminder]"),
+		).length,
 		1,
-		"cache hit: must not re-analyze the analyzable path",
+		"second event: still exactly one reminder (not stacked)",
 	);
 	reset();
 });
@@ -809,9 +793,8 @@ test("pi extension honors a non-default VP_HOOK_TIMEOUT_MS and falls back on gar
 	// which produces NaN for "abc" and a 0ms setTimeout. The new helper must
 	// always return a real positive integer from the documented range.
 	// We exercise the embedded `parsePositiveInt` by setting the env vars and
-	// observing the analyze argv and the resolved TIMEOUT_MS through the
-	// extension's observable behavior (no crash; vp is invoked with a sane
-	// --max-output-tokens argument).
+	// observing the analyze argv through the tool_result handler's observable
+	// behavior (no crash; vp is invoked with a sane --max-output-tokens).
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
@@ -829,11 +812,14 @@ test("pi extension honors a non-default VP_HOOK_TIMEOUT_MS and falls back on gar
 	const imagePath = fakeImage(testDir, "pic.png");
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
 
-	const result = (await events.context[0]({
-		type: "context",
-		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
+	const result = (await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: "rawbytes", mimeType: "image/png" }],
+		isError: false,
 	})) as any;
-	assert.ok(result?.messages, "context must succeed even with malformed env vars");
+	assert.ok(result?.content, "tool_result must succeed even with malformed env vars");
 
 	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
 	assert.equal(analyzeCalls.length, 1);
@@ -872,9 +858,12 @@ test("pi extension accepts a valid VP_MAX_OUTPUT_TOKENS override", async (t) => 
 	const imagePath = fakeImage(testDir, "pic.png");
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
 
-	await events.context[0]({
-		type: "context",
-		messages: [{ role: "user", content: [{ type: "text", text: `see ${imagePath}` }] }],
+	await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: "rawbytes", mimeType: "image/png" }],
+		isError: false,
 	});
 
 	const analyzeCalls = calls.filter(([, args]) => args[0] === "analyze");
@@ -932,6 +921,212 @@ test("pi extension replaces read results on image files only", async (t) => {
 	reset();
 });
 
+/**
+ * Load the generated opencode plugin and return its registered hooks.
+ * The default export is a factory taking `{ directory }` (used as the cwd
+ * for relative path resolution) and resolving to the hooks map.
+ */
+async function loadOpencodePlugin(source: string, home: string) {
+	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
+		source,
+		home,
+		"opencode-plugin",
+	);
+	assert.equal(
+		typeof mod.default,
+		"function",
+		"generated plugin must export a default factory function",
+	);
+	const hooks = (await (mod.default as (input: unknown) => Promise<Record<string, unknown>>)({
+		directory: dir,
+	})) as Record<string, (innerInput: any, innerOutput: any) => Promise<unknown>>;
+	assert.ok(typeof hooks["chat.message"] === "function", "must register chat.message hook");
+	assert.ok(
+		typeof hooks["tool.execute.before"] === "function",
+		"must register tool.execute.before hook",
+	);
+	return { hooks, dir, calls, setNextResult };
+}
+
+test("install opencode writes the plugin file with valid source", async () => {
+	const home = isolate();
+	const dir = installDir(home);
+	const r = await runIntegration("install", "opencode", dir);
+	assert.equal(r.ok, true);
+	const target = join(dir, "vision-proxy.ts");
+	assert.equal(existsSync(target), true);
+	const written = readFileSync(target, "utf8");
+	assert.ok(
+		written.includes("__VP_VERSION__") || written.includes("vision-proxy"),
+		"plugin source must carry the vision-proxy marker",
+	);
+	await loadOpencodePlugin(written, home);
+	reset();
+});
+
+test("opencode chat.message appends a Read reminder without spawning vp", async (t) => {
+	t.after(() => {
+		delete process.env.VP_BIN;
+		delete process.env.VP_HOOK_TIMEOUT_MS;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const {
+		hooks,
+		dir: testDir,
+		calls,
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	const imagePath = fakeImage(testDir, "photo.png");
+	const output = {
+		message: { sessionID: "sess-1", id: "msg-1" },
+		parts: [
+			{
+				id: "prt-1",
+				sessionID: "sess-1",
+				messageID: "msg-1",
+				type: "text",
+				text: `look at ${imagePath} please`,
+			},
+			{
+				id: "prt-2",
+				sessionID: "sess-1",
+				messageID: "msg-1",
+				type: "image",
+				data: "data:image/png;base64,ZmFrZXBuZw==",
+			},
+		],
+	};
+	const before = calls.length;
+	await hooks["chat.message"]({ sessionID: "sess-1", messageID: "msg-1" }, output);
+	assert.equal(calls.length, before, "chat.message must not spawn vp");
+	// The attached image part is left untouched for native multimodal vision.
+	assert.ok(
+		output.parts.some((p: any) => p.type === "image"),
+		"attached image part must be left untouched",
+	);
+	// A synthetic reminder part names the referenced path.
+	const reminder = output.parts.find(
+		(p: any) =>
+			p.type === "text" &&
+			typeof p.text === "string" &&
+			p.text.includes("[vision-proxy:read-reminder]"),
+	) as any;
+	assert.ok(reminder, "read reminder part must be appended");
+	assert.equal(reminder.synthetic, true, "reminder part must be marked synthetic");
+	assert.match(reminder.text, /Use the read tool on each image path/);
+	assert.ok(reminder.text.includes(imagePath), "reminder must name the image path");
+	reset();
+});
+
+test("opencode chat.message strips its prior reminder on re-fire", async (t) => {
+	t.after(() => {
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const {
+		hooks,
+		dir: testDir,
+		calls,
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	const imagePath = fakeImage(testDir, "photo.png");
+	const output = {
+		message: { sessionID: "sess-1", id: "msg-1" },
+		parts: [
+			{
+				id: "prt-1",
+				sessionID: "sess-1",
+				messageID: "msg-1",
+				type: "text",
+				text: `see ${imagePath}`,
+			},
+		],
+	};
+	const input = { sessionID: "sess-1", messageID: "msg-1" };
+	const before = calls.length;
+	await hooks["chat.message"](input, output);
+	await hooks["chat.message"](input, output);
+	assert.equal(calls.length, before, "chat.message must not spawn vp on re-fire");
+	const reminders = output.parts.filter(
+		(p: any) =>
+			p.type === "text" &&
+			typeof p.text === "string" &&
+			p.text.includes("[vision-proxy:read-reminder]"),
+	);
+	assert.equal(reminders.length, 1, "must NOT stack a second reminder on re-fire");
+	// An image-less message gets no reminder.
+	const idle = {
+		message: { sessionID: "sess-1", id: "msg-2" },
+		parts: [
+			{
+				id: "prt-9",
+				sessionID: "sess-1",
+				messageID: "msg-2",
+				type: "text",
+				text: "plain text, no images",
+			},
+		],
+	};
+	await hooks["chat.message"]({ sessionID: "sess-1", messageID: "msg-2" }, idle);
+	assert.equal(idle.parts.length, 1, "image-less message must not gain a reminder part");
+	reset();
+});
+
+test("opencode tool.execute.before denies image reads and fails open", async (t) => {
+	t.after(() => {
+		delete process.env.VP_BIN;
+		delete process.env.VP_HOOK_TIMEOUT_MS;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const {
+		hooks,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	const imagePath = fakeImage(testDir, "photo.png");
+
+	// Successful analysis: the read is denied by throwing, with the fenced
+	// description carried in the error message.
+	setNextResult({ status: 0, stdout: "@@FENCE oc desc@@", stderr: "" });
+	const before = calls.length;
+	const thrown = await hooks["tool.execute.before"](
+		{ tool: "read" },
+		{ args: { filePath: imagePath } },
+	).then(
+		() => null,
+		(err: unknown) => err,
+	);
+	assert.ok(thrown instanceof Error, "image read must be denied by throwing");
+	assert.match((thrown as Error).message, /@@FENCE oc desc@@/);
+	assert.match((thrown as Error).message, /Do not use the Read tool on image files/);
+	const analyzeCalls = calls.slice(before).filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyzeCalls.length, 1, "must analyze the read image once");
+	assert.ok(analyzeCalls[0]![1].includes(imagePath), "analyze must receive the image path");
+
+	// vp failure -> fail-open: no throw, the original read proceeds.
+	setNextResult({ status: 1, stdout: "", stderr: "boom" });
+	await hooks["tool.execute.before"]({ tool: "read" }, { args: { filePath: imagePath } });
+
+	// Non-image reads and other tools pass through untouched (no vp spawn).
+	const callsBeforePassthrough = calls.length;
+	await hooks["tool.execute.before"](
+		{ tool: "read" },
+		{ args: { filePath: join(testDir, "notes.txt") } },
+	);
+	await hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "ls" } });
+	assert.equal(calls.length, callsBeforePassthrough, "non-image reads must not spawn vp");
+	reset();
+});
+
 test("install pi is idempotent (no error on re-install)", async () => {
 	const home = isolate();
 	const dir = installDir(home);
@@ -944,79 +1139,71 @@ test("install pi is idempotent (no error on re-install)", async () => {
 	reset();
 });
 
-test("install claude-code registers both hooks in settings.json with absolute vp path", async () => {
+test("install claude-code writes a tsx hook script and metadata-free settings.json entries", async () => {
 	const home = isolate();
-	const dir = installDir(home);
-	const r = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	const r = await runIntegration("install", "claude-code");
 	assert.equal(r.ok, true);
-	// No shim/shared.mjs files anymore: the hook is the `vp` binary itself.
-	assert.equal(existsSync(join(dir, "shared.mjs")), false);
+	// The generated hook script lands in ~/.claude/hooks with a version marker.
+	const script = claudeHookPath(home);
+	assert.equal(existsSync(script), true);
+	const source = readFileSync(script, "utf8");
+	assert.match(source, /npx tsx/);
+	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
 	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
-	const upsCmd = cfg.hooks.UserPromptSubmit[0].hooks[0].command;
-	const ptsCmd = cfg.hooks.PreToolUse[0].hooks[0].command;
-	const expected = `${vpPath(home)} hook`;
-	assert.equal(upsCmd, expected, "UserPromptSubmit hook command must use the PATH-resolved vp");
-	assert.equal(ptsCmd, expected, "PreToolUse hook command must use the PATH-resolved vp");
-	assert.equal(cfg.hooks.UserPromptSubmit[0].vpManaged, true);
-	assert.equal(cfg.hooks.PreToolUse[0].vpManaged, true);
-	// Version is embedded in the hook group; no separate marker file is created.
-	assert.equal(typeof cfg.hooks.UserPromptSubmit[0].version, "string");
-	assert.equal(typeof cfg.hooks.PreToolUse[0].version, "string");
+	const expected = `npx tsx ${script}`;
+	assert.equal(
+		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
+		expected,
+		"UserPromptSubmit hook command must invoke the generated script via npx tsx",
+	);
+	assert.equal(
+		cfg.hooks.PreToolUse[0].hooks[0].command,
+		expected,
+		"PreToolUse hook command must invoke the generated script via npx tsx",
+	);
+	// No vision-proxy metadata keys in the host config.
+	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
+	assert.equal("vpManaged" in cfg.hooks.PreToolUse[0], false);
+	assert.equal("version" in cfg.hooks.UserPromptSubmit[0], false);
+	assert.equal("version" in cfg.hooks.PreToolUse[0], false);
 	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
 	reset();
 });
 
-test("install falls back to the invoked script when no vp binary is on PATH", async () => {
+test("install codex writes its hook script under ~/.codex and registers it in hooks.json", async () => {
 	const home = isolate();
-	const dir = installDir(home);
-	const emptyBin = join(home, "empty-bin");
-	mkdirSync(emptyBin, { recursive: true });
-	const origPath = process.env.PATH;
-	process.env.PATH = emptyBin;
-	try {
-		const r = await runIntegration("install", "claude-code", dir);
-		assert.equal(r.ok, true);
-		const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
-		const cmd = cfg.hooks.UserPromptSubmit[0].hooks[0].command;
-		assert.ok(cmd.startsWith("/"), "fallback command must be absolute");
-		assert.ok(cmd.endsWith(" hook"), "fallback command must invoke vp hook");
-		assert.match(cmd, /integration\.test\.ts hook$/);
-	} finally {
-		if (origPath === undefined) delete process.env.PATH;
-		else process.env.PATH = origPath;
-		reset();
-	}
-});
-
-test("install codex registers both hooks in hooks.json with absolute vp path", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	const r = await withVpOnPath(home, () => runIntegration("install", "codex", dir));
+	const r = await runIntegration("install", "codex");
 	assert.equal(r.ok, true);
+	const script = codexHookPath(home);
+	assert.equal(existsSync(script), true);
+	const source = readFileSync(script, "utf8");
+	assert.match(source, /npx tsx/);
+	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
 	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
-		`${vpPath(home)} hook`,
-		"codex command must use the PATH-resolved vp",
+		`npx tsx ${script}`,
+		"codex command must invoke the generated script via npx tsx",
 	);
+	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
+	assert.equal("version" in cfg.hooks.UserPromptSubmit[0], false);
 	reset();
 });
 
 test("codex install removes a legacy config.toml UserPromptSubmit block", async () => {
 	const home = isolate();
-	const dir = installDir(home);
 	mkdirSync(join(home, ".codex"), { recursive: true });
 	writeFileSync(
 		join(home, ".codex", "config.toml"),
 		'# comment\n[[UserPromptSubmit]]\n\n[[UserPromptSubmit.hooks]]\ntype = "command"\ncommand = "node /old/claude-code-user-prompt-submit.mjs"\n',
 	);
-	await withVpOnPath(home, () => runIntegration("install", "codex", dir));
+	await runIntegration("install", "codex");
 	const toml = readFileSync(join(home, ".codex", "config.toml"), "utf8");
 	assert.equal(toml.includes("vision-proxy"), false, "legacy block must be removed");
 	// The JSON hook registration must still be present.
@@ -1025,34 +1212,31 @@ test("codex install removes a legacy config.toml UserPromptSubmit block", async 
 	reset();
 });
 
-test("re-install refreshes the absolute vp path and does not duplicate hooks", async () => {
+test("re-install does not duplicate hooks or scripts", async () => {
 	const home = isolate();
-	const dir = installDir(home);
-	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
-	const first = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	await runIntegration("install", "claude-code");
+	const first = await runIntegration("install", "claude-code");
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
-	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `${vpPath(home)} hook`);
+	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
 	reset();
 });
 
 test("install is idempotent (no duplicate blocks) for claude-code", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
-	const first = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	isolate();
+	await runIntegration("install", "claude-code");
+	const first = await runIntegration("install", "claude-code");
 	assert.equal(first.ok, true);
-	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	const cfg = parseHooks(readFileSync(join(process.env.HOME!, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
 	reset();
 });
 
-test("install claude-code replaces legacy pre-vpManaged shim entries", async () => {
+test("install claude-code replaces legacy vp hook entries", async () => {
 	const home = isolate();
-	const dir = installDir(home);
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	writeFileSync(
 		join(home, ".claude", "settings.json"),
@@ -1072,18 +1256,19 @@ test("install claude-code replaces legacy pre-vpManaged shim entries", async () 
 			},
 		}),
 	);
-	const r = await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	const r = await runIntegration("install", "claude-code");
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
-	assert.equal(cfg.hooks.UserPromptSubmit[0].vpManaged, true);
+	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
+	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
+	assert.equal(existsSync(claudeHookPath(home)), true);
 	reset();
 });
 
-test("uninstall claude-code removes legacy pre-vpManaged shim entries", async () => {
+test("uninstall claude-code removes legacy shim entries and the script", async () => {
 	const home = isolate();
-	const dir = installDir(home);
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	writeFileSync(
 		join(home, ".claude", "settings.json"),
@@ -1103,30 +1288,29 @@ test("uninstall claude-code removes legacy pre-vpManaged shim entries", async ()
 			},
 		}),
 	);
-	const r = await runIntegration("uninstall", "claude-code", dir);
+	const r = await runIntegration("uninstall", "claude-code");
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks, undefined);
+	assert.equal(existsSync(claudeHookPath(home)), false);
 	reset();
 });
 
 test("show claude-code prints the hook command without writing to disk", async () => {
 	const home = isolate();
-	const r = await withVpOnPath(home, () => runIntegration("show", "claude-code"));
+	const r = await runIntegration("show", "claude-code");
 	assert.equal(r.ok, true);
-	assert.match(
-		r.message,
-		new RegExp(`${vpPath(home).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} hook`),
-	);
+	assert.match(r.message, /npx tsx .*vision-proxy\.ts/);
+	assert.match(r.message, /vision-proxy\.ts/);
 	assert.equal(existsSync(join(process.env.HOME!, ".claude", "settings.json")), false);
+	assert.equal(existsSync(claudeHookPath(home)), false);
 	reset();
 });
 
 test("list shows installed state across agents", async () => {
-	const home = isolate();
-	const dir = installDir(home);
-	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
-	await withVpOnPath(home, () => runIntegration("install", "codex", dir));
+	isolate();
+	await runIntegration("install", "claude-code");
+	await runIntegration("install", "codex");
 	// pi uses its default ~/.pi location, not the test installDir.
 	await runIntegration("install", "pi");
 	const r = await runIntegration("list", "");
@@ -1138,7 +1322,6 @@ test("list shows installed state across agents", async () => {
 
 test("uninstall claude-code removes only the vision-proxy registrations and leaves others", async () => {
 	const home = isolate();
-	const dir = installDir(home);
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	writeFileSync(
 		join(home, ".claude", "settings.json"),
@@ -1150,16 +1333,18 @@ test("uninstall claude-code removes only the vision-proxy registrations and leav
 			},
 		}),
 	);
-	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	await runIntegration("install", "claude-code");
+	assert.equal(existsSync(claudeHookPath(home)), true);
 	let cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
 	assert.equal(cfg.hooks.PreToolUse.length, 1);
-	const r = await runIntegration("uninstall", "claude-code", dir);
+	const r = await runIntegration("uninstall", "claude-code");
 	assert.equal(r.ok, true);
 	cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.match(cfg.hooks.UserPromptSubmit[0].hooks[0].command, /other-hook\.mjs$/);
 	assert.equal(cfg.hooks.PreToolUse, undefined);
+	assert.equal(existsSync(claudeHookPath(home)), false);
 	reset();
 });
 
@@ -1191,8 +1376,7 @@ test("uninstall pi reports the correct success message after install (regression
 
 test("uninstall of a never-installed agent reports nothing-to-do", async () => {
 	isolate();
-	const dir = installDir(join(tmpdir(), "vp-unused-"));
-	const r = await runIntegration("uninstall", "claude-code", dir);
+	const r = await runIntegration("uninstall", "claude-code");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /was not installed|absent/);
 	reset();
@@ -1265,13 +1449,45 @@ test("status flags an integration whose embedded version marker is stale", async
 	reset();
 });
 
-test("status reads claude-code version from the hooks config, not a marker file", async () => {
+test("status reads claude-code version from the hook script, with a metadata-free config", async () => {
 	const home = isolate();
-	const dir = installDir(home);
-	await withVpOnPath(home, () => runIntegration("install", "claude-code", dir));
+	await runIntegration("install", "claude-code");
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
 	assert.match(r.message, new RegExp(`✓ claude-code\\s+${VERSION.replace(/\./g, "\\.")}`));
 	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
+	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
+	assert.equal("version" in cfg.hooks.UserPromptSubmit[0], false);
+	reset();
+});
+
+test("status flags a stale claude-code hook script version", async () => {
+	isolate();
+	await runIntegration("install", "claude-code");
+	const script = join(process.env.HOME!, ".claude", "hooks", "vision-proxy.ts");
+	writeFileSync(
+		script,
+		readFileSync(script, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"),
+	);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(
+		r.message,
+		new RegExp(`! claude-code\\s+0\\.0\\.9.*installed vp is ${VERSION.replace(/\./g, "\\.")}`),
+	);
+	assert.match(r.message, /out of date/);
+	reset();
+});
+
+test("uninstall codex removes the script and registrations", async () => {
+	const home = isolate();
+	await runIntegration("install", "codex");
+	assert.equal(existsSync(codexHookPath(home)), true);
+	const r = await runIntegration("uninstall", "codex");
+	assert.equal(r.ok, true);
+	assert.equal(existsSync(codexHookPath(home)), false);
+	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
+	assert.equal(cfg.hooks, undefined);
 	reset();
 });

@@ -37,7 +37,7 @@ Updating depends on how you installed `vp`:
 - **Source build**: pull latest changes and run `npm run build`.
 
 `vp` refreshes a cached release check in the background at most once a day and prints a one-line stderr notice when a newer version exists.
-Set `VP_NO_UPDATE_NOTIFIER=1` to disable it; it is already suppressed during `vp hook`, with `--json`, in CI, and on non-interactive streams.
+Set `VP_NO_UPDATE_NOTIFIER=1` to disable it; it is already suppressed with `--json`, in CI, and on non-interactive streams.
 
 ## 3. Set a provider
 

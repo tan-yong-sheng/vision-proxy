@@ -158,9 +158,21 @@ function extractImagePaths(text: string): string[] {
 		"gi",
 	);
 	for (const m of text.matchAll(reAbs)) add(m[2]);
+	// Also match paths without spaces so a non-image path cannot swallow a
+	// later image path into one broad candidate.
+	var BW = "[^'\\\"()*?|\\s]";
+	var reAbsTight = new RegExp(
+		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+		"(^|" + D + ")((?:[a-zA-Z]:[/\\\\]|[/~])" + BW + "*?\\." + EXT + ")\\b",
+		"gi",
+	);
+	for (const m of text.matchAll(reAbsTight)) add(m[2]);
 	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
 	var reRel = new RegExp("(^|" + D + ")((?:\\.\\.?/)" + B + "*?\\." + EXT + ")\\b", "gi");
 	for (const m of text.matchAll(reRel)) add(m[2]);
+	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+	var reRelTight = new RegExp("(^|" + D + ")((?:\\.\\.?/)" + BW + "*?\\." + EXT + ")\\b", "gi");
+	for (const m of text.matchAll(reRelTight)) add(m[2]);
 	return found;
 }
 

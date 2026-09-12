@@ -229,7 +229,7 @@ export async function integrationUninstall(
 	if (cfgPath && existsSync(cfgPath)) {
 		const { raw } = spec.readConfig();
 		const result = spec.remove(raw);
-		writeFileSync(cfgPath, result.raw);
+		if (result.removed) writeFileSync(cfgPath, result.raw);
 		configRemoved = result.removed;
 	} else if (!existsSync(target)) {
 		return {

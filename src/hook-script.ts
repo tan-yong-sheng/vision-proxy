@@ -195,7 +195,11 @@ function runHook(event: Record<string, any> | null): void {
   }
 }
 
-runHook(readEvent());
+try {
+  runHook(readEvent());
+} catch (e) {
+  process.stderr.write("[vision-proxy] hook failed open: " + String(e) + "\n");
+}
 `;
 
 export const HOOK_SCRIPT_SOURCE: string =

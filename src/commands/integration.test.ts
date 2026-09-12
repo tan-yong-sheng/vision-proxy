@@ -1391,6 +1391,19 @@ test("uninstall pi reports the correct success message after install (regression
 	reset();
 });
 
+test("uninstall preserves a foreign config when no registration is removed", async () => {
+	const home = isolate();
+	const configPath = join(home, ".claude", "settings.json");
+	mkdirSync(dirname(configPath), { recursive: true });
+	const raw = '{\n  "hooks": {\n    "UserPromptSubmit": []\n  }\n}\n';
+	writeFileSync(configPath, raw);
+	const r = await runIntegration("uninstall", "claude-code");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /was not installed|absent/);
+	assert.equal(readFileSync(configPath, "utf8"), raw);
+	reset();
+});
+
 test("uninstall of a never-installed agent reports nothing-to-do", async () => {
 	isolate();
 	const r = await runIntegration("uninstall", "claude-code");

@@ -9,7 +9,7 @@ Keep it short and update it when workflows change.
 - **Purpose:** Lets any coding agent "see" images: submit-time hooks emit a static reminder to `Read` referenced images, and read-time hooks (`PreToolUse` / `tool_result` / `tool.execute.before`) route the read through `vp analyze` and inject the fenced description.
 - **Registry:** Published as `vision-proxy` on npm.
 - **Package keyword:** `pi-package`.
-- **Runtime:** Node 22+ (uses `--experimental-strip-types` for native TypeScript).
+- **Runtime:** Node 22.6+ (uses `--experimental-strip-types` for native TypeScript).
 
 ## Main entry points
 
@@ -63,7 +63,7 @@ Environment overrides use `VP_*`.
 
 Runtime requirements:
 
-- Node 22+ (required for `--experimental-strip-types`)
+- Node 22.6+ (required for `--experimental-strip-types`)
 
 ## Fallow
 

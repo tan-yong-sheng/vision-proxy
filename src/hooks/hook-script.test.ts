@@ -191,6 +191,18 @@ test("PreToolUse ignores non-Read tools and non-image paths", () => {
 	}
 });
 
+test("PreToolUse fails open when an image path cannot be passed to spawn", () => {
+	const script = writeScript();
+	const run = runHook(script, {
+		hook_event_name: "PreToolUse",
+		tool_name: "Read",
+		tool_input: { file_path: "/tmp/image\u0000.png" },
+	});
+	assert.equal(run.status, 0);
+	assert.equal(run.stdout.trim(), "");
+	assert.match(run.stderr, /hook failed open/);
+});
+
 test("PreToolUse fails open when vp is missing or exits non-zero", () => {
 	const script = writeScript();
 	const event = {

@@ -5,7 +5,7 @@ It lets coding agents like Claude Code, Codex, and Pi "see" images in prompts an
 
 ## Installation
 
-Requires Node 22+ on `PATH`.
+Requires Node 22.6+ on `PATH`.
 
 ### Homebrew (macOS / Linux)
 
@@ -100,7 +100,7 @@ vp integration uninstall <agent>
 - **Pi**: Installs a `vision-proxy.ts` extension into `~/.pi/agent/extensions/` that hooks into Pi's `input`, `context`, and `tool_result` lifecycle events: `context` appends a static reminder to read referenced image paths (no subprocess, no latency), and `tool_result` is the single analysis point for images the model actually reads.
 - **opencode (v1)**: Installs a TypeScript plugin into `~/.config/opencode/plugins/` that registers `chat.message` (static Read reminder, no subprocess) and `tool.execute.before` (the single analysis point) hooks for parity with claude-code/codex.
 
-Caveat: For Claude Code, images can only be referenced by file path in the user prompt. It does not support rendering `[Image #N]` because the `UserPromptSubmit` hook cannot modify the user prompt before it is sent to the LLM API.
+Caveat: For Claude Code, images can only be referenced by file path in the user prompt. The hook can resolve host-provided `[Image #N]` references through the session-scoped `image-cache`, but it cannot render or insert those references into the prompt because `UserPromptSubmit` cannot modify the user prompt before it is sent to the LLM API.
 
 See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for troubleshooting and details.
 

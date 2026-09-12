@@ -32,6 +32,7 @@ import { VERSION } from "./version.ts";
 export interface FlagParse {
 	flags: Record<string, string | boolean | string[]>;
 	positionals: string[];
+	error?: string;
 }
 
 function collectFlag(
@@ -83,6 +84,7 @@ export const VALUE_FLAGS = new Set([
 export function parseFlags(args: string[]): FlagParse {
 	const flags: Record<string, string | boolean | string[]> = {};
 	const positionals: string[] = [];
+	let error: string | undefined;
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i]!;
 		if (a.startsWith("--")) {
@@ -94,9 +96,13 @@ export function parseFlags(args: string[]): FlagParse {
 			} else {
 				const name = a.slice(2);
 				const next = args[i + 1];
-				if (VALUE_FLAGS.has(name) && next !== undefined && !next.startsWith("--")) {
-					collectFlag(flags, name, next);
-					i++;
+				if (VALUE_FLAGS.has(name)) {
+					if (next === undefined || next.startsWith("--")) {
+						error ??= `missing value for --${name}`;
+					} else {
+						collectFlag(flags, name, next);
+						i++;
+					}
 				} else {
 					collectFlag(flags, name, true);
 				}
@@ -109,9 +115,13 @@ export function parseFlags(args: string[]): FlagParse {
 				collectFlag(flags, body.slice(0, eq), body.slice(eq + 1));
 			} else {
 				const next = args[i + 1];
-				if (VALUE_FLAGS.has(body) && next !== undefined && !next.startsWith("-")) {
-					collectFlag(flags, body, next);
-					i++;
+				if (VALUE_FLAGS.has(body)) {
+					if (next === undefined || next.startsWith("-")) {
+						error ??= `missing value for -${body}`;
+					} else {
+						collectFlag(flags, body, next);
+						i++;
+					}
 				} else {
 					collectFlag(flags, body, true);
 				}
@@ -120,7 +130,7 @@ export function parseFlags(args: string[]): FlagParse {
 			positionals.push(a);
 		}
 	}
-	return { flags, positionals };
+	return { flags, positionals, error };
 }
 
 type FlagMap = Record<string, string | boolean | string[]>;
@@ -600,10 +610,12 @@ export async function runCommand(
 	if (command === "version" || command === "--version" || command === "-v") {
 		return ok(VERSION);
 	}
+	const parsed = parseFlags(rest);
+	if (parsed.error) return err(parsed.error);
+	const { flags, positionals } = parsed;
 
 	switch (command) {
 		case "analyze": {
-			const { flags, positionals } = parseFlags(rest);
 			if (wantsHelp(flags, positionals)) {
 				return ok(renderHelp(["analyze"]));
 			}
@@ -648,8 +660,7 @@ export async function runCommand(
 		}
 
 		case "config": {
-			const [sub, ...subRest] = rest;
-			const { flags, positionals } = parseFlags(subRest);
+			const [sub, ...subRest] = positionals;
 			if (wantsHelp(flags, [sub ?? ""])) {
 				return ok(renderHelp(["config", sub ?? ""].filter(Boolean) as string[]));
 			}
@@ -659,8 +670,8 @@ export async function runCommand(
 				case "get":
 					return fromStatus(await configGet({ configPath: str(flags, "config"), cwd, env }));
 				case "set": {
-					const key = positionals[0];
-					const value = positionals[1];
+					const key = subRest[0];
+					const value = subRest[1];
 					if (!key || value === undefined) {
 						return err("usage: vp config set <key> <value>");
 					}
@@ -680,8 +691,7 @@ export async function runCommand(
 		}
 
 		case "provider": {
-			const [sub, ...subRest] = rest;
-			const { flags, positionals } = parseFlags(subRest);
+			const [sub, ...subRest] = positionals;
 			if (wantsHelp(flags, [sub ?? ""])) {
 				return ok(renderHelp(["provider", sub ?? ""].filter(Boolean) as string[]));
 			}
@@ -692,17 +702,17 @@ export async function runCommand(
 				}
 				case "check": {
 					const { config } = await loadConfig({ cwd, env });
-					return fromStatus(providerCheck(positionals[0], env, config));
+					return fromStatus(providerCheck(subRest[0], env, config));
 				}
 				case "store-key": {
-					const name = positionals[0];
+					const name = subRest[0];
 					if (!name) {
 						return err("usage: vp provider store-key <name>");
 					}
 					return fromStatus(await providerStoreKey(name));
 				}
 				case "delete-key": {
-					const name = positionals[0];
+					const name = subRest[0];
 					if (!name) {
 						return err("usage: vp provider delete-key <name>");
 					}
@@ -718,8 +728,7 @@ export async function runCommand(
 		}
 
 		case "cache": {
-			const [sub, ...subRest] = rest;
-			const { flags } = parseFlags(subRest);
+			const [sub] = positionals;
 			if (wantsHelp(flags, [sub ?? ""])) {
 				return ok(renderHelp(["cache", sub ?? ""].filter(Boolean) as string[]));
 			}
@@ -738,17 +747,15 @@ export async function runCommand(
 		}
 
 		case "integration": {
-			const [sub, ...subRest] = rest;
-			const { flags, positionals } = parseFlags(subRest);
+			const [sub, ...subRest] = positionals;
 			if (wantsHelp(flags, [sub ?? ""])) {
 				return ok(renderHelp(["integration", sub ?? ""].filter(Boolean) as string[]));
 			}
-			const agent = positionals[0];
+			const agent = subRest[0];
 			return fromStatus(await runIntegration(sub ?? "", agent ?? ""));
 		}
 
 		case "update": {
-			const { flags } = parseFlags(rest);
 			if (wantsHelp(flags, rest)) {
 				return ok(renderHelp(["update"]));
 			}

@@ -88,6 +88,11 @@ test("extractImagePaths preserves spaces in absolute and relative paths", () => 
 	);
 });
 
+test("extractImagePaths finds an image after a preceding non-image path", () => {
+	const paths = extractImagePaths("compare /tmp/notes.txt with /tmp/diagram.png");
+	assert.ok(paths.includes("/tmp/diagram.png"));
+});
+
 test("extractImagePaths trims prose punctuation, rejects URLs, dedupes", () => {
 	assert.deepEqual(extractImagePaths("look at /tmp/a.png, then /tmp/a.png."), ["/tmp/a.png"]);
 	assert.deepEqual(extractImagePaths("see (/tmp/a.png);"), ["/tmp/a.png"]);

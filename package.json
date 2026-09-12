@@ -32,7 +32,7 @@
 		"hooks:install": "lefthook install"
 	},
 	"engines": {
-		"node": ">=22"
+		"node": ">=22.6.0"
 	},
 	"dependencies": {
 		"@ai-sdk/anthropic": "^4.0.0",

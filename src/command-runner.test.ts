@@ -31,6 +31,13 @@ describe("command-runner seam", () => {
 		assert.equal(flags.json, true);
 	});
 
+	it("rejects value flags without a following value", async () => {
+		assert.match(parseFlags(["--version"]).error ?? "", /missing value for --version/);
+		const result = await runCommand(["update", "--version"]);
+		assert.equal(result.code, 1);
+		assert.match(result.stderr ?? "", /missing value for --version/);
+	});
+
 	it("parses value flags and --no-fence like the historical parser", () => {
 		const valued = parseFlags(["--format", "qwen_pixels", "image.png"]);
 		assert.deepEqual(valued.positionals, ["image.png"]);

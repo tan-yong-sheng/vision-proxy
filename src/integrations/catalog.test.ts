@@ -107,6 +107,20 @@ test("quotePath uses double-quote grouping on win32 (cmd.exe has no single quote
 	);
 });
 
+test("file integration status tolerates a non-file target", () => {
+	const home = isolate();
+	try {
+		const piDir = join(home, "pi");
+		const opencodeDir = join(home, "opencode");
+		mkdirSync(join(piDir, "vision-proxy.ts"), { recursive: true });
+		mkdirSync(join(opencodeDir, "vision-proxy.ts"), { recursive: true });
+		assert.equal(specFor("pi")!.installedVersion({ installDir: piDir }), undefined);
+		assert.equal(specFor("opencode")!.installedVersion({ installDir: opencodeDir }), undefined);
+	} finally {
+		reset();
+	}
+});
+
 test("catalog paths honor process.env.HOME", () => {
 	const home = isolate();
 	try {

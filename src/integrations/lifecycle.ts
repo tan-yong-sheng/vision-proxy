@@ -5,8 +5,8 @@
  * host: artifact writes, config registration, empty-dir cleanup, version
  * reporting, and unknown-agent handling. Host-specific facts (paths, generated
  * sources, legacy cleanups) come from `catalog.ts`; the hooks-JSON shape comes
- * from `hooks-config.ts`. No host `if` branches beyond the Codex TOML legacy
- * cleanup the catalog already owns.
+ * from `hooks-config.ts`. The only host-specific display branch is opencode's
+ * plugin summary; the Codex TOML cleanup is catalog-owned.
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";

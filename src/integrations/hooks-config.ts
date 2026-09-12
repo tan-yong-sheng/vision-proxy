@@ -28,7 +28,9 @@ export function hookGroup(command: string, matcher?: string): Record<string, unk
 /** Parse a hooks config JSON string into an object (empty object on garbage). */
 export function parseConfig(raw: string): Record<string, unknown> {
 	try {
-		return raw.trim() ? (JSON.parse(raw) as Record<string, unknown>) : {};
+		const parsed: unknown = raw.trim() ? JSON.parse(raw) : {};
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+		return parsed as Record<string, unknown>;
 	} catch {
 		return {};
 	}
@@ -63,8 +65,11 @@ export function isVisionProxyGroup(group: Record<string, unknown>): boolean {
 			)
 		)
 			return true;
-		// Previous binary-as-hook installs that invoked `vp hook` directly.
-		if (/\b(vp|vision-proxy|cli\.js)\s+hook(\s|$)/.test(cmd)) return true;
+		// Previous binary-as-hook installs that invoked `vp hook` directly. The
+		// cli.js form is restricted to a vision-proxy/vp path so an unrelated
+		// `node ./scripts/cli.js hook` registration is never removed.
+		if (/\b(vp|vision-proxy)\s+hook(\s|$)/.test(cmd)) return true;
+		if (/(?:vision-proxy|vp)[/\\][^\s]*cli\.js\s+hook(\s|$)/i.test(cmd)) return true;
 		return false;
 	});
 }
@@ -118,8 +123,11 @@ export function stripHookGroups(existing: unknown): {
  */
 export function applyHooks(raw: string, command: string): string {
 	const cfg = parseConfig(raw);
-	if (!cfg.hooks) cfg.hooks = {};
-	const hooks = (cfg.hooks as Record<string, unknown>) || {};
+	const existing = cfg.hooks;
+	const hooks =
+		existing !== null && typeof existing === "object" && !Array.isArray(existing)
+			? (existing as Record<string, unknown>)
+			: {};
 	hooks.UserPromptSubmit = mergeHookGroup(hooks.UserPromptSubmit, hookGroup(command));
 	hooks.PreToolUse = mergeHookGroup(hooks.PreToolUse, hookGroup(command, "Read"));
 	cfg.hooks = hooks;

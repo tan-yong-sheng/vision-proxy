@@ -193,7 +193,12 @@ const piSpec: AgentSpec = {
 	isInstalled: () => existsSync(piSpec.target({})),
 	installedVersion: ({ installDir }) => {
 		const path = piSpec.target({ installDir });
-		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
+		if (!existsSync(path)) return undefined;
+		try {
+			return extractMarkerVersion(readFileSync(path, "utf8"));
+		} catch {
+			return undefined;
+		}
 	},
 };
 
@@ -249,7 +254,12 @@ const opencodeSpec: AgentSpec = {
 	isInstalled: () => existsSync(opencodeSpec.target({})),
 	installedVersion: ({ installDir }) => {
 		const path = opencodeSpec.target({ installDir });
-		return existsSync(path) ? extractMarkerVersion(readFileSync(path, "utf8")) : undefined;
+		if (!existsSync(path)) return undefined;
+		try {
+			return extractMarkerVersion(readFileSync(path, "utf8"));
+		} catch {
+			return undefined;
+		}
 	},
 };
 

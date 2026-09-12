@@ -84,15 +84,6 @@ async function applyCrop(
 	}
 }
 
-function buildProviderOptions(
-	format: GroundingFormat | undefined,
-): Record<string, unknown> | undefined {
-	// OpenAI imageDetail etc. would be attached here. Grounding format is
-	// conveyed via the system prompt instead, so nothing extra by default.
-	if (format && format !== "none") return undefined;
-	return undefined;
-}
-
 /**
  * Run analyze. Returns the outcome (does not print). The CLI layer decides how
  * to render stdout.
@@ -230,7 +221,6 @@ export async function runAnalyze(
 		model: modelOutcome.model.model,
 		systemPrompt,
 		question,
-		providerOptions: buildProviderOptions(effectiveFormat),
 		maxOutputTokens: flags.maxOutputTokens,
 	});
 	const description = resp.text;

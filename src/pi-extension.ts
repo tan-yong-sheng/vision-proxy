@@ -225,7 +225,14 @@ export default function setup(pi: ExtensionAPI): void {
         }
       }
       if (paths.length === 0) {
-        out.push(msg);
+        // Remove a reminder from a prior context pass even when its image has
+        // disappeared since then; otherwise the model keeps a stale path.
+        if (fresh.length !== content.length) {
+          modified = true;
+          out.push({ ...(msg as any), content: fresh });
+        } else {
+          out.push(msg);
+        }
         continue;
       }
       // Reminder only: never shell out to vp analyze here. A slow or stuck

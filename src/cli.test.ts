@@ -208,7 +208,7 @@ describe("cli update-notifier suppression", () => {
 		// Seed a fresh cache advertising a newer release, so an unsuppressed
 		// notifier prints the banner. Freshness also avoids the spawn path.
 		saveUpdateCache(
-			{ checked_at: new Date().toISOString(), latest_version: `v${VERSION}.99` },
+			{ checked_at: new Date().toISOString(), latest_version: "v99.0.0" },
 			{ cacheDir: dir },
 		);
 		nOut = "";
@@ -262,7 +262,7 @@ describe("cli update-notifier suppression", () => {
 		assert.match(nErr, /unknown command "--json"/);
 		assert.equal(process.exitCode ?? 0, 1);
 		// The seeded cache is untouched: no refresh, no rewrite.
-		assert.equal(loadUpdateCache({ cacheDir: dir })?.latest_version, `v${VERSION}.99`);
+		assert.equal(loadUpdateCache({ cacheDir: dir })?.latest_version, "v99.0.0");
 	});
 
 	it("suppresses the notifier for --background-check", async () => {

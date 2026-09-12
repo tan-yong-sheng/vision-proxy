@@ -36,8 +36,13 @@ export function parseConfig(raw: string): Record<string, unknown> {
 
 /**
  * Detect a vision-proxy hook registration, current or stale: the generated
- * `.ts` script, the previous `vp hook` binary installs (tagged or not), and
- * the old `.mjs` shims that shipped before the binary-as-hook rewrite.
+ * `.ts` script run via `npx tsx`, the previous `vp hook` binary installs
+ * (tagged or not), and the old `.mjs` shims that shipped before the
+ * binary-as-hook rewrite.
+ *
+ * A bare `\bvision-proxy\b` mention is deliberately NOT a match: user hooks
+ * that merely reference the repository path (e.g. `cd ~/vision-proxy && make`)
+ * must never be treated as ours and deleted on reinstall/uninstall.
  */
 export function isVisionProxyGroup(group: Record<string, unknown>): boolean {
 	// Registrations tagged by the previous installer generation.
@@ -48,18 +53,32 @@ export function isVisionProxyGroup(group: Record<string, unknown>): boolean {
 		const cmd = h.command;
 		// The generated hook script installed by the current installer.
 		if (/vision-proxy\.ts\b/.test(cmd)) return true;
-		// Old `.mjs` shims that shipped before the binary-as-hook rewrite.
-		if (/\b(claude-code-user-prompt-submit|codex-user-prompt-submit|shared)\.mjs\b/.test(cmd))
+		// Old `.mjs` shims that shipped before the binary-as-hook rewrite,
+		// including the `-vision-proxy-` infix variants from earlier generations.
+		// (Only filenames observed in history are listed; a bare
+		// `vision-proxy.mjs` never shipped, so it is deliberately absent.)
+		if (
+			/\b(claude-code-(vision-proxy-)?user-prompt-submit|codex-(vision-proxy-)?user-prompt-submit|shared)\.mjs\b/.test(
+				cmd,
+			)
+		)
 			return true;
 		// Previous binary-as-hook installs that invoked `vp hook` directly.
-		if (/\b(vp|vision-proxy|cli\.js)\s+hook$/.test(cmd)) return true;
-		// Any command explicitly mentioning the vision-proxy package/repository path.
-		if (/\bvision-proxy\b/.test(cmd)) return true;
+		if (/\b(vp|vision-proxy|cli\.js)\s+hook(\s|$)/.test(cmd)) return true;
 		return false;
 	});
 }
 
-/** Merge `group` into a hook-event array, replacing any existing vision-proxy registration. */
+/**
+ * Merge `group` into a hook-event array, replacing any existing vision-proxy registration.
+ *
+ * A non-array existing value is REPLACED, not merged: install must yield a
+ * valid array registration (the host schema requires arrays), and an unknown
+ * shape cannot carry our group. This is the deliberate counterpart to the
+ * uninstall path (`stripHookGroups`/`removeHooks`), which preserves non-array
+ * values untouched — install must register to fulfill its contract, uninstall
+ * must never destroy what it does not own.
+ */
 export function mergeHookGroup(
 	existing: unknown,
 	group: Record<string, unknown>,
@@ -70,12 +89,19 @@ export function mergeHookGroup(
 	return without;
 }
 
-/** Drop every vision-proxy group from a hook-event array. */
+/**
+ * Drop every vision-proxy group from a hook-event value.
+ *
+ * Non-array user-authored values are returned untouched (removed: false) so
+ * uninstall never deletes a custom shape it does not own; callers only
+ * rewrite the event when the original value was an array.
+ */
 export function stripHookGroups(existing: unknown): {
-	groups: Record<string, unknown>[];
+	groups: unknown;
 	removed: boolean;
 } {
-	const list = Array.isArray(existing) ? (existing as Record<string, unknown>[]) : [];
+	if (!Array.isArray(existing)) return { groups: existing, removed: false };
+	const list = existing as Record<string, unknown>[];
 	const kept = list.filter((g) => !isVisionProxyGroup(g));
 	return { groups: kept, removed: kept.length !== list.length };
 }
@@ -84,6 +110,11 @@ export function stripHookGroups(existing: unknown): {
  * Register both hook types (UserPromptSubmit + PreToolUse Read) into a hooks
  * config object serialized as JSON. Shared by Claude Code (settings.json) and
  * Codex (hooks.json), which use the same shape.
+ *
+ * Non-array event values are replaced with a fresh registration (see
+ * `mergeHookGroup`): install cannot merge into an unknown shape and must
+ * leave a working registration behind. The uninstall path preserves such
+ * values instead of discarding them.
  */
 export function applyHooks(raw: string, command: string): string {
 	const cfg = parseConfig(raw);
@@ -95,20 +126,28 @@ export function applyHooks(raw: string, command: string): string {
 	return JSON.stringify(cfg, null, 2);
 }
 
-/** Remove both vision-proxy hook registrations from a hooks config JSON string. */
+/**
+ * Remove both vision-proxy hook registrations from a hooks config JSON string.
+ *
+ * Non-array user-authored event values are preserved untouched: only array
+ * events have vision-proxy groups stripped out of them.
+ */
 export function removeHooks(raw: string): { raw: string; removed: boolean } {
 	const cfg = parseConfig(raw);
 	const hooks = (cfg.hooks as Record<string, unknown>) || {};
 	if (!Array.isArray(hooks.UserPromptSubmit) && !Array.isArray(hooks.PreToolUse)) {
 		return { raw, removed: false };
 	}
-	const ups = stripHookGroups(hooks.UserPromptSubmit);
-	const pts = stripHookGroups(hooks.PreToolUse);
-	const removed = ups.removed || pts.removed;
-	if (ups.groups.length === 0) delete hooks.UserPromptSubmit;
-	else hooks.UserPromptSubmit = ups.groups;
-	if (pts.groups.length === 0) delete hooks.PreToolUse;
-	else hooks.PreToolUse = pts.groups;
+	let removed = false;
+	for (const event of ["UserPromptSubmit", "PreToolUse"] as const) {
+		const value = hooks[event];
+		if (!Array.isArray(value)) continue;
+		const { groups, removed: eventRemoved } = stripHookGroups(value);
+		const kept = groups as Record<string, unknown>[];
+		removed = removed || eventRemoved;
+		if (kept.length === 0) delete hooks[event];
+		else hooks[event] = kept;
+	}
 	if (Object.keys(hooks).length === 0) delete cfg.hooks;
 	return { raw: JSON.stringify(cfg, null, 2), removed };
 }

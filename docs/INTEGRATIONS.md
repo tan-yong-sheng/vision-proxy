@@ -4,6 +4,8 @@ Install `vp` into an agent so it can see images in your prompts.
 
 ## Claude Code
 
+Prerequisite: `tsx` must be installed for the `npx tsx` hook command to run (`npm install -g tsx`).
+
 Writes a `vision-proxy.ts` hook script to `~/.claude/hooks/` and registers two hooks in `~/.claude/settings.json`, both running it as a plain `npx tsx ~/.claude/hooks/vision-proxy.ts` command with only standard hook keys (no vision-proxy metadata in the config):
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Pasted/attached images (rendered as `[Image #N]` refs) are resolved via Claude Code's `image-cache/<session>/<N>.<ext>` so each gets a reminder line too. Never shells out, so prompt submission is never blocked on a vision call.
@@ -21,6 +23,8 @@ vp integration uninstall claude-code
 ```
 
 ## Codex
+
+Prerequisite: `tsx` must be installed for the `npx tsx` hook command to run (`npm install -g tsx`).
 
 Writes the same `vision-proxy.ts` hook script to `~/.codex/hooks/` and registers the same two hooks in `~/.codex/hooks.json` as plain `npx tsx ~/.codex/hooks/vision-proxy.ts` commands with only standard hook keys:
 

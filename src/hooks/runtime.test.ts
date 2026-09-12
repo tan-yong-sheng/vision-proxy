@@ -96,6 +96,13 @@ test("extractImagePaths trims prose punctuation, rejects URLs, dedupes", () => {
 	assert.deepEqual(extractImagePaths("plain text, no images"), []);
 });
 
+test("extractImagePaths splits on bracket, comma, and semicolon delimiters", () => {
+	assert.deepEqual(extractImagePaths("see [/tmp/a.png] now"), ["/tmp/a.png"]);
+	assert.deepEqual(extractImagePaths("see /tmp/a.png,/tmp/b.png"), ["/tmp/a.png", "/tmp/b.png"]);
+	assert.deepEqual(extractImagePaths("see /tmp/a.png;/tmp/b.png"), ["/tmp/a.png", "/tmp/b.png"]);
+	assert.deepEqual(extractImagePaths("read [./assets/diagram.webp]!"), ["./assets/diagram.webp"]);
+});
+
 test("extractImagePaths matches extensions case-insensitively", () => {
 	assert.deepEqual(extractImagePaths("see /tmp/PHOTO.PNG"), ["/tmp/PHOTO.PNG"]);
 });
@@ -131,6 +138,8 @@ test("resolveVpBin honors VP_BIN and defaults to vp", () => {
 		process.env.VP_BIN = "  ";
 		assert.equal(resolveVpBin(), "vp");
 		process.env.VP_BIN = "/opt/vp/bin/vp";
+		assert.equal(resolveVpBin(), "/opt/vp/bin/vp");
+		process.env.VP_BIN = "  /opt/vp/bin/vp  ";
 		assert.equal(resolveVpBin(), "/opt/vp/bin/vp");
 	} finally {
 		if (prior === undefined) delete process.env.VP_BIN;

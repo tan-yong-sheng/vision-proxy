@@ -62,6 +62,37 @@ test("isVisionProxyGroup detects current and legacy registrations", () => {
 	assert.equal(isVisionProxyGroup({ hooks: [] }), false);
 });
 
+test("isVisionProxyGroup ignores user hooks that merely mention vision-proxy", () => {
+	// A bare path mention must never be treated as ours and deleted.
+	assert.equal(
+		isVisionProxyGroup({ hooks: [{ type: "command", command: "cd ~/vision-proxy && make" }] }),
+		false,
+	);
+	assert.equal(
+		isVisionProxyGroup({
+			hooks: [{ type: "command", command: "node /home/u/repos/vision-proxy/scripts/x.mjs" }],
+		}),
+		false,
+	);
+});
+
+test("isVisionProxyGroup still detects known legacy variants", () => {
+	for (const cmd of [
+		"node /old/claude-code-user-prompt-submit.mjs",
+		"node /old/codex-user-prompt-submit.mjs",
+		"node /old/claude-code-vision-proxy-user-prompt-submit.mjs",
+		"node /old/codex-vision-proxy-user-prompt-submit.mjs",
+		"/usr/local/bin/vp hook --verbose",
+		"node /opt/vp/dist/cli.js hook",
+	]) {
+		assert.equal(
+			isVisionProxyGroup({ hooks: [{ type: "command", command: cmd }] }),
+			true,
+			`${cmd} must be detected`,
+		);
+	}
+});
+
 test("mergeHookGroup replaces existing vp registration without duplicating", () => {
 	const cmd = "npx tsx /home/u/.claude/hooks/vision-proxy.ts";
 	const existing = [
@@ -82,6 +113,27 @@ test("stripHookGroups keeps foreign groups and reports removal", () => {
 	assert.equal(removed, true);
 	assert.deepEqual(groups, [foreign]);
 	assert.deepEqual(stripHookGroups([foreign]), { groups: [foreign], removed: false });
+});
+
+test("stripHookGroups preserves non-array user-authored values untouched", () => {
+	const custom = { custom: "shape" };
+	assert.deepEqual(stripHookGroups(custom), { groups: custom, removed: false });
+	assert.deepEqual(stripHookGroups("string-value"), {
+		groups: "string-value",
+		removed: false,
+	});
+	assert.deepEqual(stripHookGroups(undefined), { groups: undefined, removed: false });
+});
+
+test("applyHooks replaces a non-array event value with a working registration", () => {
+	// Install must register (the host schema requires arrays), while uninstall
+	// preserves such values untouched: deliberate asymmetry, pinned here.
+	const cmd = "npx tsx /home/u/.claude/hooks/vision-proxy.ts";
+	const raw = JSON.stringify({ hooks: { UserPromptSubmit: { custom: "shape" } } });
+	const merged = JSON.parse(applyHooks(raw, cmd));
+	assert.equal(merged.hooks.UserPromptSubmit.length, 1);
+	assert.match(merged.hooks.UserPromptSubmit[0].hooks[0].command, /vision-proxy\.ts/);
+	assert.equal(merged.hooks.PreToolUse.length, 1);
 });
 
 test("applyHooks registers both events and preserves foreign groups", () => {
@@ -117,6 +169,20 @@ test("removeHooks drops only vision-proxy groups", () => {
 	assert.match(cfg.hooks.UserPromptSubmit[0].hooks[0].command, /other-hook/);
 	assert.equal(cfg.hooks.PreToolUse, undefined);
 	assert.deepEqual(removeHooks(JSON.stringify({})), { raw: JSON.stringify({}), removed: false });
+});
+
+test("removeHooks preserves non-array user-authored event values", () => {
+	const raw = JSON.stringify({
+		hooks: {
+			UserPromptSubmit: { custom: "shape" },
+			PreToolUse: [{ hooks: [{ type: "command", command: "node /some/other-hook.mjs" }] }],
+		},
+	});
+	const { raw: cleaned, removed } = removeHooks(raw);
+	assert.equal(removed, false);
+	const cfg = JSON.parse(cleaned);
+	assert.deepEqual(cfg.hooks.UserPromptSubmit, { custom: "shape" });
+	assert.equal(cfg.hooks.PreToolUse.length, 1);
 });
 
 test("hooksInstalled detects either event", () => {

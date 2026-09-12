@@ -22,6 +22,9 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VERSION } from "../version.ts";
+import { vpEntryToSpawn } from "../vp-entry.ts";
+
+export { vpEntryToSpawn };
 
 export type InstallMethod = "curl" | "homebrew" | "npm" | "source";
 
@@ -302,21 +305,6 @@ export async function runUpdate(opts: UpdateOptions = {}): Promise<UpdateResult>
 }
 
 // ── Background update notifier ─────────────────────────────────────────────
-
-/**
- * Resolve how to re-spawn the running CLI entry for a detached child.
- *
- * When the entry is the compiled `dist/cli.js` (e.g. Homebrew ships it
- * without the exec bit and with a non-PATH shebang), spawning it directly
- * fails with EACCES — re-run it under `process.execPath` instead. For any
- * other path (the `vp` launcher wrapper or symlink) return it as-is.
- */
-export function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
-	if (/\.js$/i.test(cmd)) {
-		return { command: process.execPath, args: [cmd] };
-	}
-	return { command: cmd, args: [] };
-}
 
 /** How long a cached release tag stays fresh before a refresh is spawned. */
 export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;

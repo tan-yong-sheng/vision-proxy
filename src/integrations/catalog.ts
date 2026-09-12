@@ -82,12 +82,32 @@ export function legacyMarkerPath(agent: string): string {
 }
 
 /**
- * Quote a path for shell use when it contains whitespace.
+ * Quote a path for shell use.
+ *
+ * POSIX shells get single quotes with embedded single quotes escaped
+ * (`'\''`), so spaces, `$`, backticks, `!`, and other metacharacters cannot
+ * expand or inject. Double quotes are deliberately avoided there: they still
+ * allow `$`, backtick, and `!` expansion.
+ *
+ * On Windows the host runs the command through `cmd.exe`, where single
+ * quotes are literal characters — so Windows keeps double-quote grouping
+ * (with embedded double quotes doubled), and backslash joins the safe set.
+ *
+ * The install-time platform is the hook-execution platform (same machine),
+ * so the default is correct at runtime; the override exists so tests can
+ * cover both branches.
  *
  * @tags integration, catalog
  */
-export function quotePath(p: string): string {
-	return /\s/.test(p) ? `"${p}"` : p;
+export function quotePath(p: string, platform: string = process.platform): string {
+	if (platform === "win32") {
+		if (p === "") return '""';
+		if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(p)) return p;
+		return `"${p.replace(/"/g, '""')}"`;
+	}
+	if (p === "") return "''";
+	if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(p)) return p;
+	return `'${p.replace(/'/g, "'\\''")}'`;
 }
 
 /**
@@ -95,8 +115,8 @@ export function quotePath(p: string): string {
  *
  * @tags integration, catalog
  */
-export function makeTsHookCommand(scriptPath: string): string {
-	return `npx tsx ${quotePath(scriptPath)}`;
+export function makeTsHookCommand(scriptPath: string, platform: string = process.platform): string {
+	return `npx tsx ${quotePath(scriptPath, platform)}`;
 }
 
 /**

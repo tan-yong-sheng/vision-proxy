@@ -14,7 +14,10 @@
  * loader), so this module ships its policy in two shapes from one source of
  * truth:
  *
- * - real functions below, which repo unit tests exercise directly;
+ * - real functions below, which repo unit tests exercise directly
+ *   (`vpEntryToSpawn` is the one exception: it lives in `src/vp-entry.ts`,
+ *   the single source shared with the update notifier, and is re-exported
+ *   here so the command and test API is unchanged);
  * - HOOK_RUNTIME_SOURCE, a standalone source string composed from those same
  *   functions via toString and inlined into each emitted file at generate()
  *   time by the per-host source modules.
@@ -31,6 +34,7 @@
 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { vpEntryToSpawn } from "../vp-entry.ts";
 
 /** Known image file extensions (lowercased, no dot). Shared by every host adapter. */
 const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "ico", "avif"];
@@ -74,14 +78,13 @@ function maxOutputTokens(raw: unknown): number {
 	);
 }
 
-function vpEntryToSpawn(cmd: string): { command: string; args: string[] } {
-	if (/\.js$/i.test(cmd)) return { command: process.execPath, args: [cmd] };
-	return { command: cmd, args: [] };
-}
+// NOTE: vpEntryToSpawn is intentionally not defined here. It lives in
+// src/vp-entry.ts (shared with the update notifier) and is re-exported
+// through this module's export list so the command and test API is unchanged.
 
 function resolveVpBin(): string {
 	var env = process.env.VP_BIN;
-	if (env?.trim()) return env;
+	if (env?.trim()) return env.trim();
 	return "vp";
 }
 
@@ -127,9 +130,9 @@ function resolveImagePath(p: string | undefined | null, cwd?: string): string | 
 
 function extractImagePaths(text: string): string[] {
 	// Two passes, both anchored to a delimiter (start-of-text or
-	// whitespace/quote/bracket) so words like nota/path.jpeg do not match:
-	// absolute-ish paths (drive letter, slash, or tilde prefix) and relative
-	// paths starting with ./ or ../. Clipboard temp files such as
+	// whitespace/quote/bracket/comma/semicolon) so words like nota/path.jpeg
+	// do not match: absolute-ish paths (drive letter, slash, or tilde prefix)
+	// and relative paths starting with ./ or ../. Clipboard temp files such as
 	// /tmp/pi-clipboard-<id>.png match the absolute pass with no special case.
 	// Trailing prose punctuation is trimmed and values containing // are
 	// rejected so URLs never match.
@@ -142,7 +145,7 @@ function extractImagePaths(text: string): string[] {
 		seen.push(t);
 		found.push(t);
 	};
-	var D = "[\\s'\"()]";
+	var D = "[\\s'\"()\\[\\],;]";
 	// Keep spaces inside a candidate path. The non-greedy suffix stops at the
 	// first recognized image extension, while quotes, wildcards, pipes, and
 	// newlines remain hard boundaries for prose and shell-like input.

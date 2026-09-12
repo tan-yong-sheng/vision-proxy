@@ -87,7 +87,7 @@ export async function integrationInstall(
 	return {
 		ok: true,
 		message: cfgPath
-			? `installed ${agent} integration -> ${cfgPath} (hook script: ${target})`
+			? `installed ${agent} integration -> ${cfgPath} (hook script: ${target})\nPrerequisite: tsx must be installed for the 'npx tsx' hook command to run (npm install -g tsx).`
 			: `installed ${agent} extension -> ${spec.locationLabel({ installDir: opts.installDir })}`,
 		code: 0,
 	};
@@ -134,13 +134,14 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 	const { raw } = spec.readConfig();
 	const merged = spec.apply(raw);
 	const cfgPath = spec.configPath();
-	let message = `hook command: ${command}\n\n`;
+	let message = "";
+	if (command) message += `hook command: ${command}\n\n`;
 	if (!cfgPath) {
 		message += `extension file (${spec.locationLabel({})}):\n${spec.generate()}\n\n`;
 	} else {
 		message += `hook script (${spec.locationLabel({})}):\n${spec.generate()}\n\n`;
 	}
-	message += `${cfgPath ?? spec.locationLabel({})} (after install):\n${merged}`;
+	message += `${cfgPath || spec.locationLabel({})} (after install):\n${merged}`;
 	return {
 		ok: true,
 		message,

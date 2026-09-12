@@ -1307,6 +1307,23 @@ test("show claude-code prints the hook command without writing to disk", async (
 	reset();
 });
 
+test("install claude-code mentions the tsx prerequisite in its message", async () => {
+	isolate();
+	const r = await runIntegration("install", "claude-code");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /tsx/);
+	reset();
+});
+
+test("show pi omits the empty hook-command line", async () => {
+	isolate();
+	const r = await runIntegration("show", "pi");
+	assert.equal(r.ok, true);
+	assert.equal(r.message.includes("hook command:"), false);
+	assert.match(r.message, /extension file/);
+	reset();
+});
+
 test("list shows installed state across agents", async () => {
 	isolate();
 	await runIntegration("install", "claude-code");

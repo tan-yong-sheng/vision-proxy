@@ -71,13 +71,40 @@ test("hook command quotes paths with whitespace", () => {
 	);
 	assert.equal(
 		quotePath("/home/my user/hooks/vision-proxy.ts"),
-		'"/home/my user/hooks/vision-proxy.ts"',
+		"'/home/my user/hooks/vision-proxy.ts'",
 	);
 	assert.equal(
 		makeTsHookCommand("/home/my user/.claude/hooks/vision-proxy.ts"),
-		'npx tsx "/home/my user/.claude/hooks/vision-proxy.ts"',
+		"npx tsx '/home/my user/.claude/hooks/vision-proxy.ts'",
 	);
 	assert.equal(makeTsHookCommand("/plain/path.ts"), "npx tsx /plain/path.ts");
+});
+
+test("quotePath hardens shell metacharacters with single-quote escaping", () => {
+	// `$`, backticks, and `!` must not expand: single quotes, not double.
+	assert.equal(quotePath("/home/u/$HOME/x.ts"), "'/home/u/$HOME/x.ts'");
+	assert.equal(quotePath("/home/u/`whoami`.ts"), "'/home/u/`whoami`.ts'");
+	assert.equal(quotePath("/home/u/don't/x.ts"), "'/home/u/don'\\''t/x.ts'");
+	assert.equal(quotePath(""), "''");
+});
+
+test("quotePath uses double-quote grouping on win32 (cmd.exe has no single quotes)", () => {
+	// Backslash paths stay bare; spaces group with double quotes; embedded
+	// double quotes double up. Single quotes would be literal under cmd.exe.
+	assert.equal(
+		quotePath("C:\\Users\\me\\.claude\\hooks\\vision-proxy.ts", "win32"),
+		"C:\\Users\\me\\.claude\\hooks\\vision-proxy.ts",
+	);
+	assert.equal(
+		quotePath("C:\\Users\\my user\\hooks\\vision-proxy.ts", "win32"),
+		'"C:\\Users\\my user\\hooks\\vision-proxy.ts"',
+	);
+	assert.equal(quotePath('C:\\we"ird\\x.ts', "win32"), '"C:\\we""ird\\x.ts"');
+	assert.equal(quotePath("", "win32"), '""');
+	assert.equal(
+		makeTsHookCommand("C:\\Users\\my user\\hooks\\vision-proxy.ts", "win32"),
+		'npx tsx "C:\\Users\\my user\\hooks\\vision-proxy.ts"',
+	);
 });
 
 test("catalog paths honor process.env.HOME", () => {

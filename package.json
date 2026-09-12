@@ -23,6 +23,7 @@
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "node --experimental-strip-types --no-warnings --test src/*.test.ts src/**/*.test.ts",
+		"prebuild": "node scripts/clean-dist.mjs",
 		"build": "tsc -p tsconfig.build.json",
 		"prepare": "npm run build",
 		"lint": "biome check",

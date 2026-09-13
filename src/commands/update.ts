@@ -22,7 +22,9 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VERSION } from "../version.ts";
-import { vpEntryToSpawn } from "./hook.ts";
+import { vpEntryToSpawn } from "../vp-entry.ts";
+
+export { vpEntryToSpawn };
 
 export type InstallMethod = "curl" | "homebrew" | "npm" | "source";
 
@@ -320,8 +322,6 @@ export interface NotifierEnvironment {
 	cacheDir?: string;
 	/** Current running version; defaults to the built-in VERSION. */
 	currentVersion?: string;
-	/** Command being run, used to keep `vp hook` output pristine. */
-	command?: string;
 	/** Whether the active command emits machine-readable JSON. */
 	json?: boolean;
 	/** stderr TTY state; defaults to the real stream. */
@@ -396,12 +396,11 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 /**
  * Whether the notifier may write to stderr and spawn probes at all.
  *
- * `vp hook` feeds an agent's context window, so any stray byte there is a
- * correctness bug rather than a cosmetic one.
+ * Machine-readable output must stay byte-for-byte clean, so any stray
+ * banner byte there is a correctness bug rather than a cosmetic one.
  */
 export function isNotifierSuppressed(opts: NotifierEnvironment = {}): boolean {
 	const env = opts.env ?? process.env;
-	if (opts.command === "hook") return true;
 	if (opts.json) return true;
 	if (env.VP_NO_UPDATE_NOTIFIER) return true;
 	if (env.CI) return true;

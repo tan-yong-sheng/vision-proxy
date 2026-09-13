@@ -203,7 +203,7 @@ if command -v node >/dev/null 2>&1; then
 	node_major="$(node -p 'process.versions.node.split(".")[0]')"
 	if [ "$node_major" -lt 22 ]; then
 		echo "warning: node $node_major detected; vision-proxy requires node >= 22." >&2
-		echo "Install Node 22+ (e.g. 'brew install node@22') and re-run, or the 'vp' command will fail." >&2
+		echo "Install Node 22.6+ (e.g. 'brew install node@22') and re-run, or the 'vp' command will fail." >&2
 	fi
 else
 	echo "warning: node not found on PATH; vision-proxy requires node >= 22." >&2

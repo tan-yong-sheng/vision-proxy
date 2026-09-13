@@ -1,0 +1,259 @@
+/**
+ * Analysis pipeline — the coordination flow for `vp analyze`.
+ *
+ * Owns the end-to-end flow: config resolution, image intake/read/hash/crop,
+ * cache-first single + joint multi-image policy, provider/model dispatch via
+ * the Vercel AI SDK adapter, and safe fenced rendering. Callers (`cli.ts`
+ * via `commands/analyze.ts`) learn one flow; implementation details stay
+ * behind this seam in `core.ts`, `config.ts`, `cache.ts`, `adapter.ts`, and
+ * `provider.ts`, which remain the focused implementation files.
+ */
+
+import { analyzeImagesWithModel } from "../adapter.ts";
+import { cacheGet, cacheSet, configureCache } from "../cache.ts";
+import { loadConfig } from "../config.ts";
+import {
+	_imageMeta,
+	buildAnalyzeResult,
+	buildGroundingInstruction,
+	buildJointDescriptionFence,
+	buildToolCacheKey,
+	type CropEntry,
+	cropImage,
+	cropSignature,
+	describeReadReason,
+	type GroundingFormat,
+	getGroundingFormat,
+	hashImageData,
+	type ImageContent,
+	type ImagePayload,
+	parseCropArg,
+	readImageFileWithReason,
+	resolveCropEntry,
+	storeImageMeta,
+} from "../core.ts";
+import { isKnownProvider, resolveModel } from "../provider.ts";
+import type { AnalyzeFlags, AnalyzeOutcome } from "./types.ts";
+
+export type { AnalyzeFlags, AnalyzeOutcome };
+
+async function readPayload(path: string): Promise<ImagePayload | { error: string }> {
+	const r = await readImageFileWithReason(path);
+	if (!r.image) {
+		return {
+			error: `could not read image: ${describeReadReason(r.reason ?? "not-an-image", r.bytes)}`,
+		};
+	}
+	const img: ImageContent = r.image;
+	const hash = hashImageData(img.data);
+	storeImageMeta(hash, img.data, r.filename);
+	const meta = metaForHash(hash);
+	return { image: img, hash, meta, crop: undefined };
+}
+
+// metaForHash reads from the in-memory map populated by storeImageMeta.
+function metaForHash(hash: string) {
+	return _imageMeta.get(hash);
+}
+
+async function applyCrop(
+	payload: ImagePayload,
+	cropEntry: CropEntry,
+): Promise<ImagePayload | { error: string }> {
+	const meta = payload.meta;
+	if (!meta) return { error: "cannot crop image - dimensions unknown" };
+	try {
+		const resolved = resolveCropEntry(cropEntry, meta.width, meta.height);
+		const buf = Buffer.from(payload.image.data, "base64");
+		const cropped = await cropImage(buf, resolved, payload.image.mimeType);
+		if (!cropped) return { error: "crop failed" };
+		// encodeCroppedImage emits PNG only for image/png inputs; everything else
+		// becomes JPEG. Label the bytes with the actual encoded media type so the
+		// provider receives a correct Content-Type, not the source format.
+		const outMime = payload.image.mimeType === "image/png" ? "image/png" : "image/jpeg";
+		const newImg: ImageContent = {
+			type: "image",
+			data: cropped.toString("base64"),
+			mimeType: outMime,
+		};
+		const newHash = hashImageData(newImg.data);
+		storeImageMeta(newHash, newImg.data, meta.filename);
+		return { image: newImg, hash: newHash, meta: metaForHash(newHash), crop: resolved };
+	} catch (err) {
+		return { error: `crop failed: ${err instanceof Error ? err.message : String(err)}` };
+	}
+}
+
+/**
+ * Run analyze. Returns the outcome (does not print). The CLI layer decides how
+ * to render stdout.
+ */
+export async function runAnalyze(
+	imagePaths: string[],
+	flags: AnalyzeFlags,
+	analyzeImpl: typeof analyzeImagesWithModel = analyzeImagesWithModel,
+): Promise<AnalyzeOutcome> {
+	const env = flags.env ?? process.env;
+	const cwd = flags.cwd ?? process.cwd();
+
+	const { config } = await loadConfig({ explicitConfigPath: flags.configPath, cwd, env });
+	configureCache(config.cacheSize, undefined, config.cacheMaxAgeDays);
+
+	if (imagePaths.length > config.maxImagesPerCall) {
+		throw new AnalyzeError(
+			`too many images (${imagePaths.length}). Maximum is ${config.maxImagesPerCall}.`,
+		);
+	}
+
+	const provider = flags.provider ?? config.provider;
+	const modelId = flags.model ?? config.modelId;
+
+	if (!isKnownProvider(provider)) {
+		throw new AnalyzeError(`unknown provider "${provider}"`);
+	}
+
+	// The model must be resolvable (have a key); a missing key is fatal.
+	const modelOutcome = resolveModel(
+		provider,
+		modelId,
+		env,
+		flags.apiKey,
+		config.baseUrl,
+		config.apiKey,
+	);
+	if (!modelOutcome.ok) {
+		throw new AnalyzeError(
+			`no API key for provider "${modelOutcome.provider}". Set ${modelOutcome.apiKeyEnv} (or pass --api-key).`,
+		);
+	}
+	const grounding = getGroundingFormat(config, provider, modelId);
+	const effectiveFormat: GroundingFormat =
+		flags.format && flags.format !== "none" ? flags.format : grounding;
+	const systemPrompt = config.systemPrompt + buildGroundingInstruction(effectiveFormat);
+
+	// Read + hash + crop payloads.
+	const payloads: ImagePayload[] = [];
+	for (let i = 0; i < imagePaths.length; i++) {
+		const read = await readPayload(imagePaths[i]!);
+		if ("error" in read) throw new AnalyzeError(read.error);
+		const cropForIndex = flags.crops?.find((c) => c.image_index === i);
+		if (cropForIndex) {
+			const cropped = await applyCrop(read, cropForIndex);
+			if ("error" in cropped) throw new AnalyzeError(cropped.error);
+			payloads.push(cropped);
+		} else {
+			payloads.push(read);
+		}
+	}
+
+	const question = flags.question ?? "";
+
+	// Cache-first single-image default path.
+	if (!flags.joint && payloads.length === 1) {
+		const p = payloads[0]!;
+		const cropSig = p.crop ? cropSignature(p.crop) : undefined;
+		const cacheKey = buildToolCacheKey(
+			[p.hash],
+			cropSig,
+			hashImageData(question),
+			`${provider}/${modelId}`,
+		);
+		const cached = await cacheGet(cacheKey);
+		if (cached !== undefined) {
+			const description = cached;
+			const output = flags.fence
+				? buildAnalyzeResult([p], description, effectiveFormat)
+				: description;
+			return {
+				output,
+				cacheHit: true,
+				records: [{ hash: p.hash, description }],
+			};
+		}
+
+		const resp = await analyzeImpl({
+			imagePayloads: [p],
+			model: modelOutcome.model.model,
+			systemPrompt,
+			question,
+			maxOutputTokens: flags.maxOutputTokens,
+		});
+		const description = resp.text;
+		await cacheSet(cacheKey, description);
+		const output = flags.fence
+			? buildAnalyzeResult([p], description, effectiveFormat)
+			: description;
+		return {
+			output,
+			cacheHit: false,
+			records: [{ hash: p.hash, description }],
+		};
+	}
+
+	// Joint multi-image path (explicit --joint, or multiple images).
+	const allHashes = payloads.map((p) => p.hash);
+	const cropSig = payloads.map((p) => (p.crop ? cropSignature(p.crop) : "full")).join("+");
+	const jointCacheKey = buildToolCacheKey(
+		allHashes,
+		flags.joint ? `joint:${cropSig}` : cropSig,
+		hashImageData(question),
+		`${provider}/${modelId}`,
+	);
+	const cachedJoint = await cacheGet(jointCacheKey);
+	if (cachedJoint !== undefined) {
+		const description = cachedJoint;
+		const output = flags.fence
+			? buildJointDescriptionFence(
+					payloads.map((p) => ({ hash: p.hash, meta: p.meta })),
+					description,
+					effectiveFormat,
+				)
+			: description;
+		return {
+			output,
+			cacheHit: true,
+			records: payloads.map((p) => ({ hash: p.hash, description })),
+		};
+	}
+
+	const resp = await analyzeImpl({
+		imagePayloads: payloads,
+		model: modelOutcome.model.model,
+		systemPrompt,
+		question,
+		maxOutputTokens: flags.maxOutputTokens,
+	});
+	const description = resp.text;
+	await cacheSet(jointCacheKey, description);
+	const output = flags.fence
+		? buildJointDescriptionFence(
+				payloads.map((p) => ({ hash: p.hash, meta: p.meta })),
+				description,
+				effectiveFormat,
+			)
+		: description;
+	return {
+		output,
+		cacheHit: false,
+		records: payloads.map((p) => ({ hash: p.hash, description })),
+	};
+}
+
+/** Parse `--crop` flags (now in the parsed flags map) in the form `<index>:<form>`. */
+export function parseCropFlags(flags: Record<string, string | boolean | string[]>): {
+	crops: CropEntry[] | undefined;
+} {
+	const raw = flags.crop;
+	if (raw === undefined) return { crops: undefined };
+	const values = Array.isArray(raw) ? raw : [raw];
+	const crops: CropEntry[] = [];
+	for (const value of values) {
+		if (typeof value !== "string") continue;
+		const parsed = parseCropArg(value);
+		if (typeof parsed === "string") throw new AnalyzeError(parsed);
+		crops.push(parsed);
+	}
+	return { crops: crops.length > 0 ? crops : undefined };
+}
+
+export class AnalyzeError extends Error {}

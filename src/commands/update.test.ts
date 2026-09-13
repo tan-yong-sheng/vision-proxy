@@ -27,6 +27,7 @@ import {
 	runUpdate,
 	saveUpdateCache,
 	UPDATE_CHECK_TTL_MS,
+	vpEntryToSpawn,
 } from "./update.ts";
 
 describe("detectInstallMethod", () => {
@@ -467,10 +468,6 @@ describe("isNotifierSuppressed", () => {
 		assert.equal(isNotifierSuppressed(tty), false);
 	});
 
-	it("suppresses during vp hook", () => {
-		assert.equal(isNotifierSuppressed({ ...tty, command: "hook" }), true);
-	});
-
 	it("suppresses for --json output", () => {
 		assert.equal(isNotifierSuppressed({ ...tty, json: true }), true);
 	});
@@ -562,18 +559,6 @@ describe("checkAutoUpdateNotification", () => {
 		assert.equal(spawns.length, 1);
 	});
 
-	it("neither warns nor spawns during vp hook", () => {
-		saveUpdateCache(
-			{ checked_at: new Date().toISOString(), latest_version: "v0.2.0" },
-			{
-				cacheDir: dir,
-			},
-		);
-		checkAutoUpdateNotification(opts({ command: "hook" }));
-		assert.deepEqual(warnings, []);
-		assert.deepEqual(spawns, []);
-	});
-
 	it("neither warns nor spawns for --json", () => {
 		saveUpdateCache(
 			{ checked_at: new Date().toISOString(), latest_version: "v0.2.0" },
@@ -644,5 +629,19 @@ describe("runBackgroundCheck", () => {
 			},
 		});
 		assert.equal(loadUpdateCache({ cacheDir: dir }), null);
+	});
+});
+
+describe("vpEntryToSpawn", () => {
+	it("prefixes node for a .js entry path", () => {
+		const js = vpEntryToSpawn("/opt/vision-proxy/dist/cli.js");
+		assert.equal(js.command, process.execPath);
+		assert.deepEqual(js.args, ["/opt/vision-proxy/dist/cli.js"]);
+	});
+
+	it("returns the launcher as-is for non-.js paths", () => {
+		const launcher = vpEntryToSpawn("/home/me/.local/bin/vp");
+		assert.equal(launcher.command, "/home/me/.local/bin/vp");
+		assert.deepEqual(launcher.args, []);
 	});
 });

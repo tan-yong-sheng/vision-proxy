@@ -5,7 +5,7 @@ It lets coding agents like Claude Code, Codex, and Pi "see" images in prompts an
 
 ## Installation
 
-Requires Node 22+ on `PATH`.
+Requires Node 22.6+ on `PATH`.
 
 ### Homebrew (macOS / Linux)
 
@@ -46,7 +46,7 @@ How you update depends on how you installed vision-proxy:
 `vp update` detects your install method automatically and prints the right command if it cannot self-update.
 
 `vp` also checks for new releases in the background (at most once every 24 hours) and prints a one-line notice on stderr when one is available.
-The check never blocks a command, and is skipped during `vp hook`, with `--json`, in CI, and when stderr is not a terminal.
+The check never blocks a command, and is skipped with `--json`, in CI, and when stderr is not a terminal.
 Set `VP_NO_UPDATE_NOTIFIER=1` to turn it off entirely.
 
 ## Quick start
@@ -67,7 +67,7 @@ vp config set provider google
 vp config set apiKey AIzaSy...
 ```
 
-Because this file is read on every invocation, agents that run `vp hook` in isolated subshells pick the settings up automatically.
+Because this file is read on every invocation, agents that run the `npx tsx` hook script in isolated subshells pick the settings up automatically.
 Prefer `vp provider store-key google` to keep the key in your OS keyring instead of plain text, or export `GOOGLE_API_KEY` for a single session.
 
 2. Analyze an image:
@@ -96,11 +96,11 @@ vp integration status
 vp integration uninstall <agent>
 ```
 
-- **Claude Code & Codex**: Registers `UserPromptSubmit` and `PreToolUse Read` hooks that invoke `vp hook`. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache`.
-- **Pi**: Installs a `vision-proxy.ts` extension into `~/.pi/agent/extensions/` that hooks into Pi's `input`, `context`, and `tool_result` lifecycle events to analyze attached and referenced images at send-time without blocking prompt submission.
-- **opencode (v1)**: Installs a TypeScript plugin into `~/.config/opencode/plugins/` that registers `chat.message` and `tool.execute.before` hooks for parity with claude-code/codex.
+- **Claude Code & Codex**: Writes a `vision-proxy.ts` hook script (`~/.claude/hooks/` or `~/.codex/hooks/`) and registers `UserPromptSubmit` and `PreToolUse Read` hooks that run it as a plain `npx tsx <script>` command with only standard hook keys. Requires `tsx` to be installed (`npm install -g tsx`). `UserPromptSubmit` emits a static reminder to `Read` each referenced image (never shells out, so submission is never blocked); `PreToolUse Read` is the single analysis point. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache` so each gets a reminder line.
+- **Pi**: Installs a `vision-proxy.ts` extension into `~/.pi/agent/extensions/` that hooks into Pi's `input`, `context`, and `tool_result` lifecycle events: `context` appends a static reminder to read referenced image paths (no subprocess, no latency), and `tool_result` is the single analysis point for images the model actually reads.
+- **opencode (v1)**: Installs a TypeScript plugin into `~/.config/opencode/plugins/` that registers `chat.message` (static Read reminder, no subprocess) and `tool.execute.before` (the single analysis point) hooks for parity with claude-code/codex.
 
-Caveat: For Claude Code, images can only be referenced by file path in the user prompt. It does not support rendering `[Image #N]` because the `UserPromptSubmit` hook cannot modify the user prompt before it is sent to the LLM API.
+Caveat: For Claude Code, images can only be referenced by file path in the user prompt. The hook can resolve host-provided `[Image #N]` references through the session-scoped `image-cache`, but it cannot render or insert those references into the prompt because `UserPromptSubmit` cannot modify the user prompt before it is sent to the LLM API.
 
 See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for troubleshooting and details.
 

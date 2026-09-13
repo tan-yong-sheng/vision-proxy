@@ -4,7 +4,7 @@
  * Run:
  *   node --experimental-strip-types --no-warnings --test src/core.test.ts
  *
- * Requires Node 22+ for native TypeScript stripping. No build / no deps.
+ * Requires Node 22.6+ for native TypeScript stripping. No build / no deps.
  */
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";

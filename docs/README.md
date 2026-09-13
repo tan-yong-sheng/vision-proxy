@@ -12,3 +12,4 @@
 - [CONFIG.md](./CONFIG.md) — full config schema, JSON examples, and environment variables.
 - [providers/](./providers/) — OpenAI, Anthropic, and Google.
 - [INTEGRATIONS.md](./INTEGRATIONS.md) — install `vp` into Claude Code, Codex, or Pi.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — module boundaries (hook runtime, integrations, analysis, CLI runner) and the deferred image-primitive trigger.

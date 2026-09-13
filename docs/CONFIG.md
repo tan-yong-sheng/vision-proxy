@@ -120,7 +120,6 @@ When the file is missing or older than 24 hours, a detached background process r
 
 The notice and the background refresh are both skipped when:
 
-- the command is `vp hook`, keeping agent hook stdout and stderr clean
 - `--json` is in effect
 - `CI` is set
 - `VP_NO_UPDATE_NOTIFIER` is set

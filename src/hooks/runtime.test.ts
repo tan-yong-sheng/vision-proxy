@@ -152,11 +152,26 @@ test("resolveVpBin honors VP_BIN and defaults to vp", () => {
 	}
 });
 
-test("vpEntryToSpawn routes .js entries through the current node", () => {
+test("vpEntryToSpawn routes .js entries through Node outside Bun", () => {
 	assert.deepEqual(vpEntryToSpawn("vp"), { command: "vp", args: [] });
 	const routed = vpEntryToSpawn("/opt/vp/dist/cli.js");
 	assert.equal(routed.command, process.execPath);
 	assert.deepEqual(routed.args, ["/opt/vp/dist/cli.js"]);
+});
+
+test("vpEntryToSpawn uses the node launcher when hosted by Bun", () => {
+	Object.defineProperty(process.versions, "bun", {
+		configurable: true,
+		value: "test-bun",
+	});
+	try {
+		assert.deepEqual(vpEntryToSpawn("/opt/vp/dist/cli.js"), {
+			command: "node",
+			args: ["/opt/vp/dist/cli.js"],
+		});
+	} finally {
+		delete (process.versions as Record<string, unknown>).bun;
+	}
 });
 
 test("buildAnalyzeArgs shares one analyze contract for every executor", () => {

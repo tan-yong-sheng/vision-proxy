@@ -9,8 +9,8 @@
  *     static reminder to read referenced image paths (never spawning vp),
  *     and tool_result replaces image reads with the analyzed description
  *   - install claude-code/codex writes a plain `vision-proxy.ts` hook script
- *     (run via `npx tsx`) and registers both hooks (UserPromptSubmit +
- *     PreToolUse Read) in the agent config with no vision-proxy metadata keys
+ *     (run via `npx tsx`) and registers the hooks (UserPromptSubmit +
+ *     PreToolUse matchers) in the agent config with no vision-proxy metadata keys
  *   - uninstall removes only our registrations and the script (idempotent,
  *     leaves others intact)
  *   - codex install removes a legacy config.toml [[UserPromptSubmit]] block
@@ -1100,7 +1100,7 @@ test("opencode tool.execute.before denies image reads and fails open", async (t)
 	const before = calls.length;
 	const thrown = await hooks["tool.execute.before"](
 		{ tool: "read" },
-		{ args: { filePath: imagePath } },
+		{ args: { path: imagePath } },
 	).then(
 		() => null,
 		(err: unknown) => err,
@@ -1112,15 +1112,28 @@ test("opencode tool.execute.before denies image reads and fails open", async (t)
 	assert.equal(analyzeCalls.length, 1, "must analyze the read image once");
 	assert.ok(analyzeCalls[0]![1].includes(imagePath), "analyze must receive the image path");
 
+	// OpenCode releases have used both `path` and `filePath` for the native
+	// read tool. The hook must remain compatible with the installed release.
+	setNextResult({ status: 0, stdout: "@@FENCE legacy field desc@@", stderr: "" });
+	const legacyThrown = await hooks["tool.execute.before"](
+		{ tool: "read" },
+		{ args: { filePath: imagePath } },
+	).then(
+		() => null,
+		(err: unknown) => err,
+	);
+	assert.ok(legacyThrown instanceof Error, "filePath image read must also be denied");
+	assert.match((legacyThrown as Error).message, /@@FENCE legacy field desc@@/);
+
 	// vp failure -> fail-open: no throw, the original read proceeds.
 	setNextResult({ status: 1, stdout: "", stderr: "boom" });
-	await hooks["tool.execute.before"]({ tool: "read" }, { args: { filePath: imagePath } });
+	await hooks["tool.execute.before"]({ tool: "read" }, { args: { path: imagePath } });
 
 	// Non-image reads and other tools pass through untouched (no vp spawn).
 	const callsBeforePassthrough = calls.length;
 	await hooks["tool.execute.before"](
 		{ tool: "read" },
-		{ args: { filePath: join(testDir, "notes.txt") } },
+		{ args: { path: join(testDir, "notes.txt") } },
 	);
 	await hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "ls" } });
 	assert.equal(calls.length, callsBeforePassthrough, "non-image reads must not spawn vp");
@@ -1184,8 +1197,11 @@ test("install codex writes its hook script under ~/.codex and registers it in ho
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
-	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
+	assert.deepEqual(
+		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
+		["Read", "view_image"],
+	);
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
 		`npx tsx ${script}`,

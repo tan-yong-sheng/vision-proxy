@@ -232,7 +232,12 @@ function makeHookAgentSpec(opts: {
 		},
 		configPath: opts.configPath,
 		hookCommand: () => makeTsHookCommand(opts.scriptPath()),
-		apply: (raw) => applyHooks(raw, makeTsHookCommand(opts.scriptPath())),
+		apply: (raw) =>
+			applyHooks(
+				raw,
+				makeTsHookCommand(opts.scriptPath()),
+				opts.id === "codex" ? ["Read", "view_image"] : ["Read"],
+			),
 		remove: (raw) => removeHooks(raw),
 		isInstalled: (raw?: string) => hooksInstalled(raw ?? ""),
 		installedVersion: () => {

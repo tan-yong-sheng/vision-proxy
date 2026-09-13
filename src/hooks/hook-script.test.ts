@@ -177,6 +177,25 @@ test("PreToolUse Read analyzes once and denies with the description", () => {
 	assert.match(out.hookSpecificOutput.additionalContext, /A red square on white/);
 });
 
+test("PreToolUse view_image analyzes its path and denies before the native read", () => {
+	const script = writeScript();
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "view_image",
+			tool_input: { path: "/tmp/diagram.png", detail: "high" },
+		},
+		{ VP_BIN: fakeVp() },
+	);
+	assert.equal(run.status, 0);
+	const out = parseOutput(run);
+	assert.ok(out, "view_image must emit JSON");
+	assert.equal(out.hookSpecificOutput.hookEventName, "PreToolUse");
+	assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+	assert.match(out.hookSpecificOutput.additionalContext, /A red square on white/);
+});
+
 test("PreToolUse ignores non-Read tools and non-image paths", () => {
 	const script = writeScript();
 	const env = { VP_BIN: fakeVp() };

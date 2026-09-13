@@ -194,9 +194,11 @@ async function handleToolExecuteBefore(
 ): Promise<void> {
   if (input.tool !== "read") return;
   const argPath =
-    output.args && typeof output.args.filePath === "string"
-      ? output.args.filePath
-      : undefined;
+    output.args && typeof output.args.path === "string"
+      ? output.args.path
+      : output.args && typeof output.args.filePath === "string"
+        ? output.args.filePath
+        : undefined;
   if (!isImagePath(argPath)) return;
   const filePath = resolveImagePath(argPath, cwd);
   if (!filePath || !existsSync(filePath)) return;

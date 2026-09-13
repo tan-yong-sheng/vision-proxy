@@ -11,10 +11,10 @@
  *
  * The script handles both hook events: UserPromptSubmit emits a static Read reminder for prompt image
  * paths plus pasted/attached image refs resolved via the image cache (never
- * shells out, so prompt submission is never blocked), and PreToolUse Read
- * (image file_path reads) shells out to `vp analyze` and emits
- * hookSpecificOutput.additionalContext. Fail-open: on any error it exits 0
- * with no stdout so the agent proceeds unchanged.
+ * shells out, so prompt submission is never blocked), and PreToolUse Read or
+ * view_image (image path reads) shells out to `vp analyze` and emits
+ * hookSpecificOutput.additionalContext with a deny decision. Fail-open: on any
+ * error it exits 0 with no stdout so the agent proceeds unchanged.
  *
  * Composition: the shared analysis policy (path classification, env parsing,
  * reminder rendering, vp resolution) is inlined from the canonical runtime
@@ -43,9 +43,9 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
  * Handles UserPromptSubmit and PreToolUse events: UserPromptSubmit emits
  * a static Read reminder for prompt image paths and pasted or attached
  * image refs resolved via the image cache (never shells out, so prompt
- * submission is never blocked), while PreToolUse analyzes Read-tool image
- * file_path values by shelling out to vp analyze, then emits
- * hookSpecificOutput.additionalContext for the agent.
+ * submission is never blocked), while PreToolUse analyzes Read-tool or
+ * view_image image paths by shelling out to vp analyze, then emits
+ * hookSpecificOutput.additionalContext with a deny decision for the agent.
  *
  * Fail-open: on any error it exits 0 with no stdout, so the agent proceeds
  * unchanged. Image-derived text is attacker-controlled, so the analyzer
@@ -125,9 +125,11 @@ function readToolInput(event: Record<string, any>): Record<string, any> {
 
 function readToolFilePath(event: Record<string, any>): string | null {
   var toolName = event.tool_name != null ? event.tool_name : event.toolName;
-  if (toolName !== "Read") return null;
+  if (toolName !== "Read" && toolName !== "view_image") return null;
   var toolInput = readToolInput(event);
-  var file = toolInput.file_path != null ? toolInput.file_path : toolInput.path;
+  var file = toolName === "view_image"
+    ? (toolInput.path != null ? toolInput.path : toolInput.file_path)
+    : (toolInput.file_path != null ? toolInput.file_path : toolInput.path);
   if (!isImagePath(file)) return null;
   var cwd = typeof event.cwd === "string" ? event.cwd : undefined;
   return resolveImagePath(file, cwd);
@@ -190,7 +192,8 @@ function runHook(event: Record<string, any> | null): void {
     if (!file) return;
     var desc = runAnalyze([file]);
     if (!desc) return;
-    emit("PreToolUse", withImageInstruction(desc, undefined), "deny");
+    var toolName = event.tool_name != null ? event.tool_name : event.toolName;
+    emit("PreToolUse", withImageInstruction(desc, undefined, toolName === "view_image" ? "view_image" : "Read"), "deny");
     return;
   }
 }

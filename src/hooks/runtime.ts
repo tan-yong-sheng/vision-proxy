@@ -179,7 +179,11 @@ function extractImagePaths(text: string): string[] {
 	return found;
 }
 
-function withImageInstruction(description: string, marker?: string): string {
+function withImageInstruction(
+	description: string,
+	marker?: string,
+	toolWord: string = "Read",
+): string {
 	// Hosts whose lifecycle re-fires (opencode) pass the shared marker so the
 	// injected text stays recognizable; single-fire hosts pass none and keep
 	// their historical marker-free deny shape.
@@ -187,7 +191,9 @@ function withImageInstruction(description: string, marker?: string): string {
 	var prefix = marker ? marker + " " : "";
 	return (
 		prefix +
-		"Do not use the Read tool on image files. " +
+		"Do not use the " +
+		toolWord +
+		" tool on image files. " +
 		"vision-proxy has already routed the image(s) through a vision-input model " +
 		"and produced the description below. " +
 		"Treat that description as the image content. " +

@@ -125,9 +125,10 @@ test("generated artifacts preserve the historical reminder and deny wording", ()
 		"opencode plugin keeps its message/read reminder parameters",
 	);
 	for (const host of HOSTS) {
-		assert.ok(
-			host.source.includes("Do not use the Read tool on image files."),
-			`${host.name} must keep the deny instruction`,
+		assert.match(
+			host.source,
+			/"Do not use the "\s*\+\s*toolWord\s*\+\s*" tool on image files\./,
+			`${host.name} must keep the deny instruction composition`,
 		);
 		assert.ok(
 			host.source.includes("Treat that description as the image content."),

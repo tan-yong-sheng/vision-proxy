@@ -26,10 +26,13 @@ vp integration uninstall claude-code
 
 Prerequisite: `tsx` must be installed for the `npx tsx` hook command to run (`npm install -g tsx`).
 
-Writes the same `vision-proxy.ts` hook script to `~/.codex/hooks/` and registers the same two hooks in `~/.codex/hooks.json` as plain `npx tsx ~/.codex/hooks/vision-proxy.ts` commands with only standard hook keys:
+Writes the same `vision-proxy.ts` hook script to `~/.codex/hooks/` and registers three hooks in `~/.codex/hooks.json` as plain `npx tsx ~/.codex/hooks/vision-proxy.ts` commands with only standard hook keys:
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Never shells out, so prompt submission is never blocked on a vision call.
-- `PreToolUse Read` - the single analysis point: describes an image read via the `Read` tool (`file_path`).
+- `PreToolUse Read` - analyzes image reads requested through the `Read` tool (`file_path`).
+- `PreToolUse view_image` - analyzes Codex's native image-view request (`path`) and denies it before Codex reads image bytes, returning the vision description as hook context.
+
+The `Read` matcher remains as a fallback for direct file reads. The `view_image` matcher is Codex-specific; Claude Code keeps its existing `Read` registration.
 
 Legacy installs that appended a `[[UserPromptSubmit]]` block to `~/.codex/config.toml` are migrated automatically: `vp integration install codex` and `vp integration uninstall codex` both remove that stale block.
 
@@ -104,6 +107,8 @@ The plugin requires:
 - opencode v1 CLI installed
 - An opencode build that loads TypeScript plugins from `~/.config/opencode/plugins/` (this plugin is plain TypeScript with no build step; on a `.js`-only build the file is written but silently ignored)
 - `vp` binary on PATH (or set `VP_BIN` environment variable)
+
+When installed with `--dev`, the generated plugin points at this checkout's `dist/cli.js`. Because OpenCode runs plugins under Bun, vision-proxy launches that JavaScript entry point with `node` rather than OpenCode's own executable. Restart OpenCode after reinstalling so the plugin and launcher behavior are reloaded.
 
 Configuration options (via environment variables):
 - `VP_MAX_OUTPUT_TOKENS` - Max output tokens for `vp analyze` (default: 2000)

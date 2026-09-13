@@ -112,16 +112,20 @@ export function stripHookGroups(existing: unknown): {
 }
 
 /**
- * Register both hook types (UserPromptSubmit + PreToolUse Read) into a hooks
- * config object serialized as JSON. Shared by Claude Code (settings.json) and
- * Codex (hooks.json), which use the same shape.
+ * Register UserPromptSubmit plus the requested PreToolUse matchers into a
+ * hooks config object serialized as JSON. Shared by Claude Code (settings.json)
+ * and Codex (hooks.json), which use the same shape.
  *
  * Non-array event values are replaced with a fresh registration (see
  * `mergeHookGroup`): install cannot merge into an unknown shape and must
  * leave a working registration behind. The uninstall path preserves such
  * values instead of discarding them.
  */
-export function applyHooks(raw: string, command: string): string {
+export function applyHooks(
+	raw: string,
+	command: string,
+	preToolUseMatchers: string[] = ["Read"],
+): string {
 	const cfg = parseConfig(raw);
 	const existing = cfg.hooks;
 	const hooks =
@@ -129,7 +133,14 @@ export function applyHooks(raw: string, command: string): string {
 			? (existing as Record<string, unknown>)
 			: {};
 	hooks.UserPromptSubmit = mergeHookGroup(hooks.UserPromptSubmit, hookGroup(command));
-	hooks.PreToolUse = mergeHookGroup(hooks.PreToolUse, hookGroup(command, "Read"));
+	let preToolUse = hooks.PreToolUse;
+	if (preToolUseMatchers.length > 0) {
+		preToolUse = mergeHookGroup(preToolUse, hookGroup(command, preToolUseMatchers[0]));
+		for (const matcher of preToolUseMatchers.slice(1)) {
+			(preToolUse as Record<string, unknown>[]).push(hookGroup(command, matcher));
+		}
+	}
+	hooks.PreToolUse = preToolUse;
 	cfg.hooks = hooks;
 	return JSON.stringify(cfg, null, 2);
 }

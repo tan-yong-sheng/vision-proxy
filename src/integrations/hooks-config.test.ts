@@ -162,6 +162,20 @@ test("applyHooks registers both events and preserves foreign groups", () => {
 	assert.equal(twice.hooks.PreToolUse.length, 1);
 });
 
+test("applyHooks can register additional tool matchers", () => {
+	const cmd = "npx tsx /home/u/.codex/hooks/vision-proxy.ts";
+	const merged = JSON.parse(applyHooks("{}", cmd, ["Read", "view_image"]));
+	assert.deepEqual(
+		merged.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
+		["Read", "view_image"],
+	);
+	const twice = JSON.parse(applyHooks(JSON.stringify(merged), cmd, ["Read", "view_image"]));
+	assert.deepEqual(
+		twice.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
+		["Read", "view_image"],
+	);
+});
+
 test("removeHooks drops only vision-proxy groups", () => {
 	const cmd = "npx tsx /home/u/.claude/hooks/vision-proxy.ts";
 	const raw = JSON.stringify({

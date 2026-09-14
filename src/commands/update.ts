@@ -149,19 +149,20 @@ export async function fetchLatestVersion(
  * Resolve the latest pre-release tag from the GitHub pre-release Atom feed.
  *
  * `/releases/latest` excludes pre-releases by design, so beta updates read the
- * `prereleases.atom` feed (newest entry first) instead of hitting the rate
- * limited GitHub API. The default probe returns the first entry's tag.
+ * `releases.atom` feed instead of hitting the rate-limited GitHub API. The
+ * default probe selects the newest entry whose tag contains a semver
+ * prerelease suffix, because the feed includes stable releases too.
  */
 export async function fetchLatestPrerelease(
 	repo = DEFAULT_REPO,
 	probe: (url: string) => Promise<string | null> = defaultPrereleaseProbe,
 	attempts = 3,
 ): Promise<string> {
-	const url = `https://github.com/${repo}/releases/prereleases.atom`;
+	const url = `https://github.com/${repo}/releases.atom`;
 	return resolveReleaseTag(url, probe, "latest pre-release", attempts);
 }
 
-/** Probe the GitHub pre-release Atom feed and return the newest entry's tag. */
+/** Probe the GitHub releases Atom feed and return the newest prerelease tag. */
 async function defaultPrereleaseProbe(url: string): Promise<string | null> {
 	const res = await fetch(url, {
 		redirect: "manual",
@@ -170,10 +171,13 @@ async function defaultPrereleaseProbe(url: string): Promise<string | null> {
 	});
 	if (!res.ok) return null;
 	const xml = await res.text();
-	// Each <entry> is ordered newest-first; the tag is the <title>.
-	const title = xml.match(/<entry>[\s\S]*?<title>([^<]+)<\/title>/);
-	if (!title) return null;
-	return title[1]!.trim();
+	// Entries are ordered newest-first. Stable releases are also present, so
+	// select the first semver tag with a prerelease suffix (for example, -rc.1).
+	for (const entry of xml.matchAll(/<entry>[\s\S]*?<\/entry>/g)) {
+		const title = entry[0].match(/<title>([^<]+)<\/title>/)?.[1]?.trim();
+		if (title && /^v?[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$/.test(title)) return title;
+	}
+	return null;
 }
 
 /** Validate a release tag to keep it safe inside a shell pipeline. */

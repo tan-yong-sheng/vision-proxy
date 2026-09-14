@@ -131,13 +131,13 @@ describe("fetchLatestPrerelease", () => {
 		const priorFetch = globalThis.fetch;
 		globalThis.fetch = (async () =>
 			new Response(
-				"<feed><entry><title>v0.1.3</title></entry><entry><title>v0.1.3-rc.1</title></entry></feed>",
+				"<feed><entry><title>v0.1.3</title></entry><entry><title>v0.1.3-01</title></entry><entry><title>v0.1.3-alpha..1</title></entry><entry><title>v0.1.3-rc.1+build.7</title></entry></feed>",
 				{ status: 200 },
 			)) as typeof fetch;
 		try {
 			assert.equal(
 				await fetchLatestPrerelease("tan-yong-sheng/vision-proxy", undefined, 1),
-				"v0.1.3-rc.1",
+				"v0.1.3-rc.1+build.7",
 			);
 		} finally {
 			globalThis.fetch = priorFetch;

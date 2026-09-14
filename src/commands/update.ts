@@ -152,6 +152,8 @@ export async function fetchLatestVersion(
  * `releases.atom` feed instead of hitting the rate-limited GitHub API. The
  * default probe selects the newest entry whose tag contains a semver
  * prerelease suffix, because the feed includes stable releases too.
+ *
+ * @tags update, release
  */
 export async function fetchLatestPrerelease(
 	repo = DEFAULT_REPO,
@@ -160,6 +162,15 @@ export async function fetchLatestPrerelease(
 ): Promise<string> {
 	const url = `https://github.com/${repo}/releases.atom`;
 	return resolveReleaseTag(url, probe, "latest pre-release", attempts);
+}
+
+/** Parse a strict SemVer release tag, preserving its prerelease/build fields. */
+function parseSemverTag(tag: string): { prerelease?: string; build?: string } | null {
+	const match = tag.match(
+		/^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,
+	);
+	if (!match) return null;
+	return { prerelease: match[4], build: match[5] };
 }
 
 /** Probe the GitHub releases Atom feed and return the newest prerelease tag. */
@@ -172,17 +183,17 @@ async function defaultPrereleaseProbe(url: string): Promise<string | null> {
 	if (!res.ok) return null;
 	const xml = await res.text();
 	// Entries are ordered newest-first. Stable releases are also present, so
-	// select the first semver tag with a prerelease suffix (for example, -rc.1).
+	// select the first valid SemVer tag with a prerelease suffix.
 	for (const entry of xml.matchAll(/<entry>[\s\S]*?<\/entry>/g)) {
 		const title = entry[0].match(/<title>([^<]+)<\/title>/)?.[1]?.trim();
-		if (title && /^v?[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$/.test(title)) return title;
+		if (title && parseSemverTag(title)?.prerelease) return title;
 	}
 	return null;
 }
 
 /** Validate a release tag to keep it safe inside a shell pipeline. */
 function isValidTag(tag: string): boolean {
-	return /^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/.test(tag);
+	return parseSemverTag(tag) !== null;
 }
 
 function defaultRunner(scriptUrl: string, version: string): Promise<number> {

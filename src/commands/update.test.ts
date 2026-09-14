@@ -121,10 +121,27 @@ describe("fetchLatestVersion", () => {
 describe("fetchLatestPrerelease", () => {
 	it("extracts the newest entry title from the prerelease feed", async () => {
 		const probe = async (url: string) => {
-			assert.match(url, /\/releases\/prereleases\.atom$/);
+			assert.match(url, /\/releases\.atom$/);
 			return "v0.3.0-rc.1";
 		};
 		assert.equal(await fetchLatestPrerelease("tan-yong-sheng/vision-proxy", probe), "v0.3.0-rc.1");
+	});
+
+	it("selects the newest prerelease from the combined releases feed", async () => {
+		const priorFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response(
+				"<feed><entry><title>v0.1.3</title></entry><entry><title>v0.1.3-rc.1</title></entry></feed>",
+				{ status: 200 },
+			)) as typeof fetch;
+		try {
+			assert.equal(
+				await fetchLatestPrerelease("tan-yong-sheng/vision-proxy", undefined, 1),
+				"v0.1.3-rc.1",
+			);
+		} finally {
+			globalThis.fetch = priorFetch;
+		}
 	});
 
 	it("throws after exhausting retries with no feed entry", async () => {

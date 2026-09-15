@@ -85,17 +85,6 @@ const recentContextText = new Map<string, string>();
 const recentQuestionText = new Map<string, string>();
 const MAX_STASHED_SESSIONS = 50;
 
-function sessionKey(value: unknown): string | null {
-  const event = value as { sessionId?: unknown; sessionID?: unknown; session_id?: unknown };
-  return typeof event?.sessionId === "string"
-    ? event.sessionId
-    : typeof event?.sessionID === "string"
-      ? event.sessionID
-      : typeof event?.session_id === "string"
-        ? event.session_id
-        : null;
-}
-
 function refreshContextStash(messages: unknown, key: string | null): void {
   // Closure stash for --context: the context event carries the full turn
   // messages, so slice them through the shared parser once here and reuse the
@@ -131,10 +120,11 @@ function refreshContextStash(messages: unknown, key: string | null): void {
     }
     if (!includeContextEnabled(process.env)) {
       recentContextText.delete(key);
-      recentQuestionText.delete(key);
       return;
     }
-    const built = buildConversationContext(shaped);
+    const latest = shaped[shaped.length - 1];
+    const contextMessages = latest?.role === "user" ? shaped.slice(0, -1) : shaped;
+    const built = buildConversationContext(contextMessages);
     if (built) recentContextText.set(key, built);
     else recentContextText.delete(key);
     while (recentQuestionText.size > MAX_STASHED_SESSIONS) {
@@ -273,11 +263,14 @@ export default function setup(pi: ExtensionAPI): void {
   });
 
   // --- context: append a static reminder to read referenced image paths ---
-  pi.on("context", async (event) => {
+  pi.on("context", async (event, ctx) => {
     if (getMode() === "off") return undefined;
     const messages = Array.isArray(event.messages) ? event.messages : null;
     if (!messages) return undefined;
-    refreshContextStash(messages, sessionKey(event));
+    const key = ctx && (ctx as any).sessionManager?.getSessionId
+      ? String((ctx as any).sessionManager.getSessionId())
+      : null;
+    refreshContextStash(messages, key);
 
     let modified = false;
     const out: unknown[] = [];
@@ -341,7 +334,9 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
-    const key = sessionKey(event);
+    const key = ctx && (ctx as any).sessionManager?.getSessionId
+      ? String((ctx as any).sessionManager.getSessionId())
+      : null;
     const description = await runAnalyze(
       [filePath],
       ctx && (ctx as any).signal ? (ctx as any).signal : undefined,

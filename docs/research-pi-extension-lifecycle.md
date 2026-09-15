@@ -219,53 +219,38 @@ export interface ImageContent {
 
 ### Background: Why Hybrid B needs context
 
-Hybrid B adds `--context <text>` to `vp analyze`, alongside the existing `--question` flag. The goal: send the last-8 user messages as context to the vision model, replicating what pungggi/pi-vision-proxy achieves via `buildConversationContext` (which uses `ctx.sessionManager.getBranch()` + `getEntries()` to build an 8-message truncation with 3000-char cap).
+Hybrid B adds `--context <text>` to `vp analyze`, alongside the existing `--question` flag. The goal: send the last-8 user and assistant messages as context to the vision model, using the shared `buildConversationContext` parser with its 3000-character cap.
 
 **Reference:** The task description cites `upstream extensions/internal.ts:2243–2270` and constants `RECENT_MESSAGE_COUNT=8`, `ASSISTANT_TRUNCATE=500`, `CONTEXT_MAX=3000`. These constants describe the *intent*; the actual implementation in pungggi uses the session tree APIs directly.
 
-### Recommendation: Slice from context event, stash in closure
+### Recommendation: Stash context in a bounded session-keyed map
 
-**Closest to upstream `getBranch()`, no file or transcript parse needed:**
+**Use the context event, keyed by `ctx.sessionManager.getSessionId()`, with no file or transcript parse needed:**
 
 ```typescript
 // In src/pi-extension.ts, inside setup():
 
-// Stash last N user texts per session (closure-scoped).
-// Sliced from context event messages, not from sessionManager.getBranch().
-const RECENT_USER_COUNT = 8;
-let recentUserTexts: string[] = [];
+// The implementation keeps bounded question and mixed-role context maps.
+const recentQuestionText = new Map<string, string>();
+const recentContextText = new Map<string, string>();
+const MAX_STASHED_SESSIONS = 50;
 
-// context handler — slice last-8 user texts, update stash
-pi.on("context", async (event) => {
+// context handler — stash the bounded mixed-role window by the current session
+pi.on("context", async (event, ctx) => {
     if (getMode() === "off") return undefined;
     const messages = Array.isArray(event.messages) ? event.messages : null;
     if (!messages) return undefined;
-
-    // Collect user texts from the tail of messages
-    const userTexts: string[] = [];
-    for (let i = messages.length - 1; i >= 0 && userTexts.length < RECENT_USER_COUNT; i--) {
-        const msg = messages[i] as any;
-        if (!msg || msg.role !== "user") continue;
-        // Handle both string content and TextContent[] content
-        const content = typeof msg.content === "string"
-            ? msg.content
-            : Array.isArray(msg.content)
-                ? msg.content
-                      .filter((c: any) => c?.type === "text" && typeof c.text === "string")
-                      .map((c: any) => c.text)
-                      .join("\n")
-                : "";
-        if (content) userTexts.unshift(content);
-    }
-    if (userTexts.length > 0) {
-        recentUserTexts = userTexts;  // update stash atomically
-    }
-
+    const sessionId = ctx.sessionManager.getSessionId();
+    const shaped = messages.filter((m: any) => m?.role === "user" || m?.role === "assistant");
+    const contextText = buildConversationContext(shaped);
+    if (contextText) recentContextText.set(sessionId, contextText);
+    const latest = shaped.filter((m: any) => m.role === "user").at(-1);
+    if (typeof latest?.content === "string") recentQuestionText.set(sessionId, latest.content);
     // ... existing reminder logic unchanged ...
     return undefined;
 });
 
-// tool_result handler — reuse stash
+// tool_result handler — reuse the current session's question and context
 pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "read") return undefined;
     const argPath = event.input && typeof event.input.path === "string" ? event.input.path : undefined;
@@ -273,16 +258,12 @@ pi.on("tool_result", async (event, ctx) => {
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
-
-    // Build context from stash if available
-    const contextText = recentUserTexts.length > 0
-        ? recentUserTexts.join("\n\n---\n\n")
-        : undefined;
-
+    const sessionId = ctx.sessionManager.getSessionId();
     const description = await runAnalyze(
         [filePath],
         ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
-        contextText,   // new third param for --context
+        recentQuestionText.get(sessionId),
+        recentContextText.get(sessionId), // fourth buildAnalyzeArgs parameter
     );
     if (!description) return undefined; // fail-open
     return { content: [{ type: "text", text: withImageInstruction(description, undefined) }] };
@@ -293,7 +274,7 @@ pi.on("tool_result", async (event, ctx) => {
 - `context.event.messages` is the in-memory, compaction-aware message list that Pi builds from the session tree — it already reflects the same data `getBranch()` would produce, but without the tree-traversal overhead.
 - No file I/O (avoids the race conditions and stale-file problems of side-channel approaches).
 - No transcript parsing (the format is internal and unstable).
-- `recentUserTexts` is closed over, scoped to the extension process lifetime — identical semantics to a `Map<sessionId, strings>` but simpler because Pi runs one extension instance per process.
+- The bounded maps are keyed by the current session ID, so concurrent sessions cannot share question or context state.
 
 ### Alternative: Use `sessionManager.getBranch()` directly
 
@@ -418,7 +399,7 @@ async function runAnalyze(
     contextText?: string,   // NEW
 ): Promise<string | null> {
     // ...
-    var invocation = buildAnalyzeArgs(images, maxTokens, contextText);  // pass through
+    var invocation = buildAnalyzeArgs(images, maxTokens, undefined, contextText);  // pass context in the fourth slot
     // ...
 }
 ```
@@ -428,11 +409,13 @@ async function runAnalyze(
 function buildAnalyzeArgs(
     images: string[],
     maxTokens: number,
+    question?: string,
     contextText?: string,
 ): { command: string; args: string[] } {
     var vp = resolveVpBin();
     var prefix = vpEntryToSpawn(vp);
     var args = prefix.args.concat(["analyze"], images);
+    if (question) args.push("--question", question);
     if (contextText) args.push("--context", contextText);
     args.push("--max-output-tokens", String(maxTokens));
     return { command: prefix.command, args };
@@ -440,16 +423,16 @@ function buildAnalyzeArgs(
 ```
 
 **C. Add context-stashing logic in `setup()`** (inside `PI_EXTENSION_ADAPTER`):
-- Declare `recentUserTexts: string[] = []` at module scope.
-- In `context` handler, after existing reminder logic, append the stash-update block.
-- In `tool_result` handler, pass `contextText` to `runAnalyze`.
+- Declare bounded, session-keyed `recentQuestionText` and `recentContextText` maps at module scope.
+- In the `context` handler, obtain the current session ID from `ctx.sessionManager.getSessionId()` and stash the mixed-role last-8 context plus the latest user question.
+- In `tool_result`, look up both values by session ID and pass `buildAnalyzeArgs(images, maxTokens, question, contextText)`.
 
 **D. No changes to `HOOK_RUNTIME_SOURCE`** — the runtime functions stay unchanged; the context-stashing logic lives entirely in the adapter section.
 
 ### Fail-open guarantees
 
 - If `event.messages` is missing or malformed → stash is not updated; `tool_result` runs without context (existing behavior).
-- If `recentUserTexts` is empty → `contextText` is `undefined`; `runAnalyze` proceeds without `--context` (existing behavior).
+- If the session-keyed context map is empty → `contextText` is `undefined`; `runAnalyze` proceeds without `--context` (existing behavior).
 - If `runAnalyze` fails for any reason → returns `null`; tool_result handler returns `undefined` (existing fail-open).
 
 ---

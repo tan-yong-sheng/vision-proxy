@@ -73,6 +73,8 @@ interface LoadedGenerated {
 	mod: Record<string, unknown>;
 	dir: string;
 	calls: Array<[string, string[]]>;
+	stdins: string[];
+	options: unknown[];
 	setNextResult(result: unknown): void;
 }
 
@@ -91,6 +93,8 @@ async function loadGeneratedSource(
 		join(dir, "mock-child-process.ts"),
 		[
 			"export const calls: Array<[string, string[]]> = [];",
+			"export const stdins: string[] = [];",
+			"export const executionOptions: unknown[] = [];",
 			"let nextResult;",
 			"export function setNextResult(r) { nextResult = r; }",
 			"export function spawnSync(command, args) { calls.push([command, args]); return nextResult; }",
@@ -101,6 +105,7 @@ async function loadGeneratedSource(
 			"  const proc = {",
 			"    stdout: { on: (_ev, cb) => { stdoutHandler = cb; } },",
 			"    stderr: { on: () => {} },",
+			"    stdin: { on: () => {}, end: (value) => { stdins.push(String(value)); } },",
 			"    on: (ev, cb) => {",
 			"      if (ev === 'error') {",
 			"        if (result && result.error) setImmediate(() => cb(result.error));",
@@ -117,7 +122,9 @@ async function loadGeneratedSource(
 			"}",
 			"export function execFile(command, args, options, callback) {",
 			"  calls.push([command, args]);",
+			"  executionOptions.push(options);",
 			"  const result = nextResult;",
+			"  const child = { stdin: { on: () => {}, end: (value) => { stdins.push(String(value)); } } }",
 			"  setImmediate(() => {",
 			'    if (!result) { callback(null, "", ""); return; }',
 			'    if (result.error) { callback(result.error, result.stdout ?? "", result.stderr ?? ""); return; }',
@@ -129,6 +136,7 @@ async function loadGeneratedSource(
 			"    }",
 			'    callback(null, result.stdout ?? "", result.stderr ?? "");',
 			"  });",
+			"  return child;",
 			"}",
 			"",
 		].join("\n"),
@@ -138,6 +146,8 @@ async function loadGeneratedSource(
 		mod,
 		dir,
 		calls: (await import(join(dir, "mock-child-process.ts"))).calls,
+		stdins: (await import(join(dir, "mock-child-process.ts"))).stdins,
+		options: (await import(join(dir, "mock-child-process.ts"))).executionOptions,
 		setNextResult: (await import(join(dir, "mock-child-process.ts"))).setNextResult,
 	};
 }
@@ -164,7 +174,7 @@ type PiExtensionSetup = (input: {
 }) => unknown;
 
 async function loadPiExtension(source: string, home: string) {
-	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
+	const { mod, dir, calls, stdins, options, setNextResult } = await loadGeneratedSource(
 		source,
 		home,
 		"vision-proxy",
@@ -188,7 +198,7 @@ async function loadPiExtension(source: string, home: string) {
 	for (const required of ["input", "context", "tool_result"]) {
 		assert.ok(eventNames.includes(required), `must register ${required} handler`);
 	}
-	return { events, dir, calls, setNextResult };
+	return { events, dir, calls, stdins, options, setNextResult };
 }
 
 test("install pi writes the vision-proxy extension file with valid source", async () => {
@@ -649,6 +659,59 @@ test("pi extension leaves attachments untouched and reminds the referenced path"
 	reset();
 });
 
+test("pi extension transports question and context through stdin", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		stdins,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "question.png");
+	const sessionManager = { getSessionId: () => "pi-session" };
+	await events.context[0](
+		{
+			type: "context",
+			messages: [
+				{ role: "user", content: "previous request" },
+				{ role: "assistant", content: "previous answer" },
+				{ role: "user", content: "inspect this image" },
+			],
+		},
+		{ sessionManager },
+	);
+	setNextResult({ status: 0, stdout: "@@FENCE pi desc@@" });
+	await events.tool_result[0](
+		{
+			type: "tool_result",
+			toolName: "read",
+			input: { path: imagePath },
+		},
+		{ sessionManager },
+	);
+	const analyze = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyze.length, 1);
+	assert.ok(analyze[0]![1].includes("--prompt-stdin"));
+	assert.ok(
+		!analyze[0]![1].some(
+			(arg) => arg.includes("inspect this image") || arg.includes("previous request"),
+		),
+	);
+	assert.deepEqual(JSON.parse(stdins.at(-1)!), {
+		question: "inspect this image",
+		context: "User: previous request\nAssistant: previous answer",
+	});
+	reset();
+});
+
 test("pi extension analyzes a rewritten file fresh on every tool_result read", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
@@ -927,7 +990,7 @@ test("pi extension replaces read results on image files only", async (t) => {
  * for relative path resolution) and resolving to the hooks map.
  */
 async function loadOpencodePlugin(source: string, home: string) {
-	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
+	const { mod, dir, calls, stdins, options, setNextResult } = await loadGeneratedSource(
 		source,
 		home,
 		"opencode-plugin",
@@ -945,7 +1008,7 @@ async function loadOpencodePlugin(source: string, home: string) {
 		typeof hooks["tool.execute.before"] === "function",
 		"must register tool.execute.before hook",
 	);
-	return { hooks, dir, calls, setNextResult };
+	return { hooks, dir, calls, stdins, options, setNextResult };
 }
 
 test("install opencode writes the plugin file with valid source", async () => {
@@ -1073,6 +1136,53 @@ test("opencode chat.message strips its prior reminder on re-fire", async (t) => 
 	};
 	await hooks["chat.message"]({ sessionID: "sess-1", messageID: "msg-2" }, idle);
 	assert.equal(idle.parts.length, 1, "image-less message must not gain a reminder part");
+	reset();
+});
+
+test("opencode transports question and context through stdin", async (t) => {
+	t.after(() => reset());
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const {
+		hooks,
+		dir: testDir,
+		calls,
+		stdins,
+		setNextResult,
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	const imagePath = fakeImage(testDir, "question.png");
+	await hooks["chat.message"](
+		{ sessionID: "oc-session", messageID: "prior" },
+		{
+			message: { sessionID: "oc-session", id: "prior" },
+			parts: [{ type: "text", text: "previous request" }],
+		},
+	);
+	await hooks["chat.message"](
+		{ sessionID: "oc-session", messageID: "current" },
+		{
+			message: { sessionID: "oc-session", id: "current" },
+			parts: [{ type: "text", text: "inspect this image" }],
+		},
+	);
+	setNextResult({ status: 0, stdout: "@@FENCE opencode desc@@", stderr: "" });
+	await hooks["tool.execute.before"](
+		{ tool: "read", sessionID: "oc-session" },
+		{ args: { path: imagePath } },
+	).catch(() => undefined);
+	const analyze = calls.filter(([, args]) => args[0] === "analyze");
+	assert.equal(analyze.length, 1);
+	assert.ok(analyze[0]![1].includes("--prompt-stdin"));
+	assert.ok(
+		!analyze[0]![1].some(
+			(arg) => arg.includes("inspect this image") || arg.includes("previous request"),
+		),
+	);
+	assert.deepEqual(JSON.parse(stdins.at(-1)!), {
+		question: "inspect this image",
+		context: "User: previous request",
+	});
 	reset();
 });
 

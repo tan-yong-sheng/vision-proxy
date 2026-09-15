@@ -589,6 +589,8 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
  * Name the `VP_*` variables that actually contributed an override — i.e. the
  * ones that parsed to a defined value — so `resolvedFrom` diagnostics name
  * the winning env keys instead of every set variable.
+ *
+ * @tags config, environment, diagnostics
  */
 export function envOverrideNames(env: NodeJS.ProcessEnv = process.env): string[] {
 	const names: string[] = [];
@@ -734,13 +736,31 @@ export interface LayeredConfigInput {
 	env?: NodeJS.ProcessEnv;
 }
 
-function applyBatchAlias(layer: Partial<VisionConfig> | undefined): Partial<VisionConfig> {
+export interface ConfigDiagnostic {
+	message: string;
+	type: "DeprecationWarning";
+	code: "VP_DEPRECATED_MAX_BATCH";
+}
+
+export interface LayeredConfigResult {
+	config: VisionConfig;
+	diagnostics: ConfigDiagnostic[];
+}
+
+const MAX_BATCH_DIAGNOSTIC: ConfigDiagnostic = {
+	message:
+		"maxBatch / VP_MAX_BATCH is deprecated; use maxImagesPerCall / VP_MAX_IMAGES_PER_CALL instead.",
+	type: "DeprecationWarning",
+	code: "VP_DEPRECATED_MAX_BATCH",
+};
+
+function applyBatchAlias(
+	layer: Partial<VisionConfig> | undefined,
+	diagnostics: ConfigDiagnostic[],
+): Partial<VisionConfig> {
 	if (!layer || layer.maxImagesPerCall !== undefined || layer.maxBatch === undefined)
 		return layer ?? {};
-	process.emitWarning(
-		"maxBatch / VP_MAX_BATCH is deprecated; use maxImagesPerCall / VP_MAX_IMAGES_PER_CALL instead.",
-		{ type: "DeprecationWarning", code: "VP_DEPRECATED_MAX_BATCH" },
-	);
+	diagnostics.push(MAX_BATCH_DIAGNOSTIC);
 	return { ...layer, maxImagesPerCall: layer.maxBatch };
 }
 
@@ -754,21 +774,40 @@ function applyBatchAlias(layer: Partial<VisionConfig> | undefined): Partial<Visi
  * Ordinary env overrides beat project/user config, but an explicit `--config`
  * file remains the highest file layer: keys set there win over env.
  */
-export function resolveLayeredConfig(input: LayeredConfigInput = {}): VisionConfig {
+/**
+ * Resolve config layers without emitting process-level warnings.
+ *
+ * @tags config, precedence, diagnostics
+ */
+export function resolveLayeredConfigWithDiagnostics(
+	input: LayeredConfigInput = {},
+): LayeredConfigResult {
 	const { user, project, explicitFile, env = process.env } = input;
 	const envOverrides = readEnvOverrides(env);
+	const diagnostics: ConfigDiagnostic[] = [];
 
-	const userLayer = applyBatchAlias(user);
-	const projectLayer = applyBatchAlias(project);
-	const envLayer = applyBatchAlias(envOverrides);
-	const explicitLayer = applyBatchAlias(explicitFile);
-	return sanitize({
-		...DEFAULT_CONFIG,
-		...userLayer,
-		...projectLayer,
-		...envLayer,
-		...explicitLayer,
-	});
+	const userLayer = applyBatchAlias(user, diagnostics);
+	const projectLayer = applyBatchAlias(project, diagnostics);
+	const envLayer = applyBatchAlias(envOverrides, diagnostics);
+	const explicitLayer = applyBatchAlias(explicitFile, diagnostics);
+	return {
+		config: sanitize({
+			...DEFAULT_CONFIG,
+			...userLayer,
+			...projectLayer,
+			...envLayer,
+			...explicitLayer,
+		}),
+		diagnostics,
+	};
+}
+
+/** Resolve config layers and return only the effective config.
+ *
+ * @tags config, precedence
+ */
+export function resolveLayeredConfig(input: LayeredConfigInput = {}): VisionConfig {
+	return resolveLayeredConfigWithDiagnostics(input).config;
 }
 
 /**
@@ -1484,6 +1523,7 @@ interface MessageLike {
 	content: unknown;
 }
 
+/** Build the bounded untrusted conversation block sent to the vision model. */
 export function buildConversationContext(messages: readonly MessageLike[]): string {
 	const recent = messages
 		.filter((e) => e.role === "user" || e.role === "assistant")
@@ -1500,6 +1540,7 @@ export function buildConversationContext(messages: readonly MessageLike[]): stri
 	return truncateContext(joined);
 }
 
+/** Cap conversation context while preserving its most recent characters. */
 export function truncateContext(result: string): string {
 	if (result.length <= CONTEXT_MAX_CHARS) return result;
 	return `…${result.slice(-CONTEXT_MAX_CHARS)}`;

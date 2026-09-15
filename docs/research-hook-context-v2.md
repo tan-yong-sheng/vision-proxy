@@ -283,7 +283,7 @@ function buildAnalyzeArgs(images: string[], maxTokens: number): { command: strin
 
 ## 5. Pi Multimodal Proxy Reference Implementation
 
-### Source: p Cummings/pi-vision-proxy (now pi-multimodal-proxy)
+### Source: pummings/pi-vision-proxy (now pi-multimodal-proxy)
 **Repo:** https://github.com/pummings/pi-vision-proxy  
 **Stars:** 23⭐
 

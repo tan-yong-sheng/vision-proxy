@@ -58,19 +58,32 @@ export async function main(argv: string[]): Promise<void> {
 	checkAutoUpdateNotification({ env, json: machineReadable });
 
 	let stdin: string | undefined;
+	let stdinError: string | undefined;
 	if (
 		argv.some((arg) => arg === "--prompt-stdin" || arg.startsWith("--prompt-stdin=")) &&
 		!process.stdin.isTTY
 	) {
+		const chunks: Buffer[] = [];
+		let totalBytes = 0;
+		const maxBytes = 64 * 1024;
 		try {
-			const buffer = Buffer.alloc(64 * 1024);
-			const bytes = readSync(0, buffer, 0, buffer.length, null);
-			stdin = buffer.subarray(0, bytes).toString("utf8");
+			while (true) {
+				const buffer = Buffer.alloc(8192);
+				const bytes = readSync(0, buffer, 0, buffer.length, null);
+				if (bytes === 0) break;
+				totalBytes += bytes;
+				if (totalBytes > maxBytes) {
+					stdinError = `stdin payload exceeds the ${maxBytes}-byte limit`;
+					break;
+				}
+				chunks.push(buffer.subarray(0, bytes));
+			}
+			stdin = Buffer.concat(chunks).toString("utf8");
 		} catch {
-			stdin = "";
+			stdinError = "could not read prompt payload from stdin";
 		}
 	}
-	const result = await runCommand(argv, { env, cwd: process.cwd(), stdin });
+	const result = await runCommand(argv, { env, cwd: process.cwd(), stdin, stdinError });
 	if (result.stdout !== undefined) print(result.stdout);
 	if (result.stderr !== undefined) fail(result.stderr, result.code);
 	else if (result.code !== 0) process.exitCode = result.code;

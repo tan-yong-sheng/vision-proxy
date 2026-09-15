@@ -183,14 +183,24 @@ function writePromptCache(sessionId: string | undefined, prompt: string, turnId?
 var lastPromptPruneAt = 0;
 
 function prunePromptCache(): void {
-  // Prompt files can outlive a turn when no image read follows it. Prune old
-  // entries opportunistically on the next prompt without touching image files.
+  // Prompt files can outlive a turn when no image read follows it. The hook
+  // process exits after each event, so keep the throttle in a small marker
+  // file shared by processes instead of relying only on module state.
   try {
     var now = Date.now();
     if (now - lastPromptPruneAt < 60000) return;
-    lastPromptPruneAt = now;
     var dir = imageCacheDir();
     if (!existsSync(dir)) return;
+    var marker = join(dir, "vp-prune-at");
+    try {
+      var previous = Number(readFileSync(marker, "utf8").trim());
+      if (Number.isFinite(previous) && now - previous < 60000) {
+        lastPromptPruneAt = now;
+        return;
+      }
+    } catch { /* first run or a concurrently removed marker */ }
+    lastPromptPruneAt = now;
+    try { writeFileSync(marker, String(now), { mode: 0o600 }); } catch { /* fail open */ }
     var entries = readdirSync(dir, { withFileTypes: true });
     for (var i = 0; i < entries.length; i++) {
       var entry = entries[i];

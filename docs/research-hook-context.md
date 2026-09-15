@@ -134,14 +134,11 @@ function buildAnalyzeArgs(images: string[], maxTokens: number): { command: strin
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `includeContext` | boolean | `false` | Whether to include extra context in the prompt. |
+| `includeContext` | boolean | `true` | Whether to include extra context in the prompt. |
 
-The env var is `VP_INCLUDE_CONTEXT`. It is parsed, persisted, and used by the CLI analysis pipeline when invoked directly. However:
-- It is **not** referenced in `src/hooks/runtime.ts`
-- It is **not** referenced in `src/hook-script.ts`
-- It is **not** consumed by any hook-generated script
+The env var is `VP_INCLUDE_CONTEXT`. The CLI resolves `includeContext` through its layered config and suppresses `--context` before provider dispatch when it is false. Standalone generated hooks separately honor `VP_INCLUDE_CONTEXT` with a true default and do not synchronously read config files.
 
-**Conclusion:** `includeContext` is a documented, user-facing config option that works for direct CLI invocations but is not wired into the hook runtime. It should be evaluated separately from the `--question` feature for hooks.
+**Conclusion:** the CLI config path and hook environment path are intentionally separate: `includeContext` controls provider dispatch in the CLI, while `VP_INCLUDE_CONTEXT` gates context capture in generated hosts.
 
 **Confidence: 100%** — verified by full grep across `src/` and `docs/`.
 
@@ -245,9 +242,9 @@ Require users to install a plugin rather than a raw hook to supply the question.
 2. **PreToolUse path**: Read prompt file if it exists; pass to `buildAnalyzeArgs()` as `--question`; fall back to no `--question` if absent (maintains current behavior)
 3. **Cleanup**: Optionally delete prompt file after successful read to avoid stale prompts
 
-**Do NOT implement Option C** (transcript parsing) — the transcript format is undocumented and unstable; the side-channel achieves the same goal with more stable foundations.
+**Do NOT use transcript parsing as the primary question path** — the transcript format is undocumented and unstable; the side-channel remains the more stable source for the current prompt.
 
-**Revisit `includeContext` separately** — it is a valid CLI feature but not directly applicable to the hook workflow.
+**Hook configuration is separate:** the CLI uses layered `includeContext`, while generated hooks use `VP_INCLUDE_CONTEXT` because they must remain standalone and avoid synchronous config-file I/O.
 
 ---
 
@@ -255,16 +252,16 @@ Require users to install a plugin rather than a raw hook to supply the question.
 
 1. **Side-channel timing edge cases:** If PreToolUse fires before UserPromptSubmit completes (e.g., session resume, rapid tool calls), the prompt file may not exist. Fail-open handles this but the user gets no `--question` context. Should be tested empirically.
 2. **Multi-prompt sessions:** If user sends multiple prompts before reading images, which prompt to use? Simplest: overwrite with latest. Alternative: key by image path or timestamp.
-3. **`includeContext` intended behavior:** Documented as "include extra context in the prompt" but the mechanism is unclear from code inspection. Needs investigation before any feature decision.
+3. **`includeContext` path:** The CLI applies the resolved setting before provider dispatch; generated hooks use `VP_INCLUDE_CONTEXT` with a true default as their standalone gate.
 4. **Prompt file cleanup:** Should the prompt file be deleted after PreToolUse reads it, or retained for potential re-analysis?
 
 ---
 
-## 10. Final Recommendation: Side-Channel Only (No Transcript Parsing)
+## 10. Historical Recommendation (Superseded by Hybrid Option B)
 
 ### Core principle
 
-**Only the current user prompt matters for image analysis.** The vision model does not need conversation history — it needs to know what question to answer about the image. Claude Code's model already has that natively via its context window; the vision proxy does not, and `--question` fills that exact gap.
+**The original side-channel design only forwarded the current user prompt.** Hybrid Option B now forwards that question plus a bounded last-8 user/assistant context block when available.
 
 ### Why not transcript export?
 
@@ -293,7 +290,7 @@ Evidence gathered from actual Claude Code transcripts:
 | Failure mode | Missing file → no `--question` (fail-open) | Parse error → no `--question` (fail-open) |
 | Architectural fit | Follows existing `image-cache/<sessionId>/` pattern | No precedent in the codebase |
 
-### Recommended implementation
+### Historical implementation
 
 **Primary path — side-channel (high confidence):**
 
@@ -301,7 +298,7 @@ Evidence gathered from actual Claude Code transcripts:
 2. In `PreToolUse` Read path: read the file; if present, pass as `--question` to `buildAnalyzeArgs()`; if absent, omit (current behavior)
 3. Optionally overwrite on each UserPromptSubmit (simplest, covers the common case); alternatively delete after read to avoid stale prompts on multi-turn sessions where the user changes topic between prompts
 
-**Do not implement transcript parsing** as a primary or fallback path. The risk/reward ratio is unfavorable.
+**Current design supersedes this conclusion:** transcript parsing is used only as bounded, fail-open context enrichment; the side-channel remains the primary source for the current question.
 
 ### When to revisit
 
@@ -333,7 +330,7 @@ If users later request richer context (e.g., "the last 3 turns of conversation")
 ## 12. pi-multimodal-proxy 竞品分析（p Cummings/pi-vision-proxy）
 
 ### 项目概况
-- **仓库：** https://github.com/p Cummings/pi-vision-proxy（后更名为 pi-multimodal-proxy）
+- **仓库：** https://github.com/pummings/pi-vision-proxy（后更名为 pi-multimodal-proxy）
 - **Stars：** 23⭐
 - **定位：** Pi 平台专用图像/视频/音频描述代理，通过 `PI_VISION_PROXY_INCLUDE_CONTEXT` 配置注入上下文
 
@@ -445,7 +442,7 @@ PI_VISION_PROXY_INCLUDE_CONTEXT=false. Disable it for sensitive sessions."
 ## 12. pi-multimodal-proxy 竞品分析（p Cummings/pi-vision-proxy）
 
 ### 项目概况
-- **仓库：** https://github.com/p Cummings/pi-vision-proxy（后更名为 pi-multimodal-proxy）
+- **仓库：** https://github.com/pummings/pi-vision-proxy（后更名为 pi-multimodal-proxy）
 - **Stars：** 23⭐
 - **定位：** Pi 平台专用的图像/视频/音频描述代理，注入描述到模型上下文
 
@@ -670,8 +667,8 @@ function extractContextFromTranscript(transcriptPath: string, messageCount: numb
 
 // 使用示例
 const context = extractContextFromTranscript(event.transcript_path, 8);
-const args = buildAnalyzeArgs(images, maxTokens, context);
-// args: ['analyze', 'image.png', '--max-output-tokens', '2000', '--question', '...context...']
+const args = buildAnalyzeArgs(images, maxTokens, undefined, context);
+// args: ['analyze', 'image.png', '--max-output-tokens', '2000', '--context', '...context...']
 ```
 
 ### 与 Side-Channel 的关系

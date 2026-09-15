@@ -570,6 +570,8 @@ export interface CommandRunnerOptions {
 	cwd?: string;
 	/** Secure prompt/context payload supplied by the process adapter. */
 	stdin?: string;
+	/** Read failure from the process adapter, reported before JSON parsing. */
+	stdinError?: string;
 }
 
 export interface CommandRunnerResult {
@@ -593,6 +595,7 @@ function fromStatus(r: { ok: boolean; message: string; code: number }): CommandR
 	return r.ok ? ok(r.message) : err(r.message, r.code);
 }
 
+/** Parse the bounded JSON prompt payload supplied on stdin. */
 function parsePromptStdinPayload(
 	raw: string | undefined,
 ): { question?: string; context?: string } | { error: string } {
@@ -654,6 +657,7 @@ export async function runCommand(
 			const formatRaw = str(flags, "format");
 			const format =
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
+			if (bool(flags, "prompt-stdin", false) && opts.stdinError) return err(opts.stdinError);
 			const stdinPayload = bool(flags, "prompt-stdin", false)
 				? parsePromptStdinPayload(opts.stdin)
 				: {};

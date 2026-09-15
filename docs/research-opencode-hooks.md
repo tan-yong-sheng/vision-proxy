@@ -253,7 +253,7 @@ function getAppendedContext(sessionID: string, currentText: string): string {
 
 // In tool.execute.before handler:
 // 1. Read getAppendedContext(sessionID)
-// 2. Pass to buildAnalyzeArgs(images, maxTokens, context) as --question
+// 2. Pass to buildAnalyzeArgs(images, maxTokens, undefined, context) as --context
 ```
 
 **Idempotency:** Use `INJECTION_MARKER` strip on re-fire (same as current behavior).
@@ -350,20 +350,20 @@ function buildAnalyzeArgs(images: string[], maxTokens: number): { command: strin
 }
 ```
 
-**Required change for hybrid B:** Add optional `context` parameter:
+**Required change for hybrid B:** Keep the existing optional-argument order and add `context` fourth:
 
 ```typescript
 function buildAnalyzeArgs(
     images: string[],
     maxTokens: number,
+    question?: string,
     context?: string,  // NEW
 ): { command: string; args: string[] } {
     var vp = resolveVpBin();
     var prefix = vpEntryToSpawn(vp);
     var args = prefix.args.concat(["analyze"], images, ["--max-output-tokens", String(maxTokens)]);
-    if (context) {
-        args = args.concat(["--context", context]);  // OR --question if preferred
-    }
+    if (question) args = args.concat(["--question", question]);
+    if (context) args = args.concat(["--context", context]);
     return { command: prefix.command, args };
 }
 ```
@@ -381,7 +381,7 @@ const ASSISTANT_TRUNCATE = 500;   // chars
 const CONTEXT_MAX = 3000;         // total chars
 
 // === STATE ===
-const sessionContexts = new Map<string, { messages: Array<{role: "user"|"assistant"; text: string}> }>();
+const sessionContexts = new Map<string, { messages: Array<{id?: string; role: "user"|"assistant"; text: string}> }>();
 
 // === HELPER ===
 function buildContext(sessionID: string, excludeMessageID?: string): string {
@@ -409,7 +409,7 @@ async function handleChatMessage(input, output, cwd) {
     // 3. Store in ring buffer (update existing or append)
     const ctx = sessionContexts.get(input.sessionID) ?? { messages: [] };
     const existingIdx = ctx.messages.findIndex(m => m.id === currentMessageID);
-    if (existingIdx >= 0) ctx.messages[existingIdx] = { role: "user", text: currentText };
+    if (existingIdx >= 0) ctx.messages[existingIdx] = { id: currentMessageID, role: "user", text: currentText };
     else ctx.messages.push({ id: currentMessageID, role: "user", text: currentText });
     sessionContexts.set(input.sessionID, ctx);
 
@@ -438,10 +438,10 @@ async function handleToolExecuteBefore(input, output, cwd) {
     if (!filePath || !existsSync(filePath)) return;
 
     // 6. Get context from session ring buffer
-    const context = buildContext(input.sessionID, input.callID);
+    const context = buildContext(input.sessionID, input.messageID);
 
     // 7. Run analyze WITH --context
-    const description = await runAnalyze([filePath], context);
+    const description = await runAnalyze([filePath], undefined, context);
     if (!description) return;
     throw new Error(withImageInstruction(description, INJECTION_MARKER));
 }
@@ -487,7 +487,7 @@ async function handleToolExecuteBefore(input, output, cwd) {
 1. Add `sessionContexts` Map to `src/opencode-plugin.ts` (per-session, capped at 8 messages)
 2. In `handleChatMessage`: write current user text to ring buffer, build context from other messages, append as synthetic `TextPart`
 3. In `handleToolExecuteBefore`: read context from ring buffer, pass to `buildAnalyzeArgs` as `--context`
-4. Modify `buildAnalyzeArgs` in `src/hooks/runtime.ts` to accept optional `context` string
+4. Modify `buildAnalyzeArgs` in `src/hooks/runtime.ts` to accept `question?` third and `context?` fourth
 5. Keep fail-open: if context is empty or build fails, proceed with existing reminder-only behavior
 6. Cap total context at 3000 chars; truncate assistant messages to 500 chars
 

@@ -20,7 +20,7 @@ import path from "node:path";
 import {
 	envOverrideNames,
 	readPersistentFile,
-	resolveLayeredConfig,
+	resolveLayeredConfigWithDiagnostics,
 	type VisionConfig,
 } from "./core.ts";
 
@@ -39,6 +39,21 @@ function projectConfigPath(cwd: string): string {
 	return path.join(cwd, ".vision-proxy.json");
 }
 
+function emitConfigDiagnostics(
+	diagnostics: Array<{ message: string; type: string; code: string }>,
+): void {
+	const emitted = new Set<string>();
+	for (const diagnostic of diagnostics) {
+		if (emitted.has(diagnostic.code)) continue;
+		emitted.add(diagnostic.code);
+		process.emitWarning(diagnostic.message, {
+			type: diagnostic.type,
+			code: diagnostic.code,
+		});
+	}
+}
+
+/** Read a JSON config object, returning null for missing or invalid files. */
 export async function readJsonFile(file: string): Promise<Partial<VisionConfig> | null> {
 	try {
 		const raw = await fs.readFile(file, "utf8");
@@ -50,6 +65,7 @@ export async function readJsonFile(file: string): Promise<Partial<VisionConfig> 
 	return null;
 }
 
+/** Check whether a config layer contributes at least one key. */
 function isNonEmpty(
 	layer: Partial<VisionConfig> | null | undefined,
 ): layer is Partial<VisionConfig> {
@@ -79,6 +95,8 @@ function describeLayers(parts: {
  * Load the effective config, layering explicit file > env > project > user >
  * defaults. CLI flags stay above: callers apply them over the returned
  * config and they never appear in `resolvedFrom`.
+ *
+ * @tags config, loading, precedence
  */
 export async function loadConfig(
 	opts: { explicitConfigPath?: string; cwd?: string; env?: NodeJS.ProcessEnv } = {},
@@ -90,10 +108,14 @@ export async function loadConfig(
 	const user = (await readPersistentFile()) ?? {};
 	const project = (await readJsonFile(projectConfigPath(cwd))) ?? {};
 	if (opts.explicitConfigPath) {
-		const explicitFile = (await readJsonFile(opts.explicitConfigPath)) ?? {};
-		const config = resolveLayeredConfig({ user, project, explicitFile, env });
+		const explicitFile = await readJsonFile(opts.explicitConfigPath);
+		if (explicitFile === null) {
+			throw new Error(`could not read explicit config: ${opts.explicitConfigPath}`);
+		}
+		const resolved = resolveLayeredConfigWithDiagnostics({ user, project, explicitFile, env });
+		emitConfigDiagnostics(resolved.diagnostics);
 		return {
-			config,
+			config: resolved.config,
 			resolvedFrom: describeLayers({
 				explicitPath: opts.explicitConfigPath,
 				explicitFile,
@@ -104,6 +126,7 @@ export async function loadConfig(
 		};
 	}
 
-	const config = resolveLayeredConfig({ user, project, env });
-	return { config, resolvedFrom: describeLayers({ envKeys, project, user }) };
+	const resolved = resolveLayeredConfigWithDiagnostics({ user, project, env });
+	emitConfigDiagnostics(resolved.diagnostics);
+	return { config: resolved.config, resolvedFrom: describeLayers({ envKeys, project, user }) };
 }

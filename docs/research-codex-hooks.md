@@ -308,25 +308,29 @@ While Codex's specific JSONL format was not directly inspected (the binary is pe
 function extractContextFromTranscript(transcriptPath: string | null, count: number = 8): string | null {
   if (!transcriptPath) return null;
   try {
-    var lines = readFileSync(transcriptPath, "utf8").split("\n");
-    var messages: Array<{role: string; text: string}> = [];
-    for (var line of lines) {
+    const stat = statSync(transcriptPath);
+    const maxBytes = 65536;
+    const fd = openSync(transcriptPath, "r");
+    const start = Math.max(0, stat.size - maxBytes);
+    const buffer = Buffer.alloc(stat.size - start);
+    readSync(fd, buffer, 0, buffer.length, start);
+    closeSync(fd);
+    const tail = buffer.toString("utf8");
+    const lines = (start > 0 ? tail.slice(tail.indexOf("\n") + 1) : tail).split("\n");
+    const messages: Array<{role: string; text: string}> = [];
+    for (const line of lines) {
       if (!line.trim()) continue;
-      var entry = JSON.parse(line);
+      const entry = JSON.parse(line);
       if (entry.type !== "user" && entry.type !== "assistant") continue;
-      var content = entry.message?.content;
-      if (typeof content === "string") {
-        messages.push({ role: entry.type, text: content });
-      } else if (Array.isArray(content)) {
-        var text = content
-          .filter((b: any) => b.type === "text" && b.text)
-          .map((b: any) => b.text)
-          .join(" ");
-        if (text) messages.push({ role: entry.type, text });
-      }
+      const content = entry.message?.content;
+      const text = typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.filter((b: any) => b.type === "text" && b.text).map((b: any) => b.text).join(" ")
+          : "";
+      if (text) messages.push({ role: entry.type, text });
     }
-    var recent = messages.slice(-count);
-    return recent.map(m => `[${m.role}] ${m.text}`).join("\n");
+    return messages.slice(-count).map((m) => `[${m.role}] ${m.text}`).join("\n");
   } catch (e) {
     process.stderr.write("[vision-proxy] transcript parse failed: " + String(e) + "\n");
     return null;  // fail-open
@@ -483,10 +487,12 @@ const RECENT_MESSAGE_COUNT = 8;
 function buildConversationContext(transcriptPath: string | undefined): string | null {
   if (!transcriptPath) return null;
   try {
-    // Read and parse JSONL transcript
-    // Extract last RECENT_MESSAGE_COUNT user/assistant messages
-    // Apply caps (ASSISTANT_TRUNCATE, CONTEXT_MAX)
-    // Return formatted string or null on any error
+    // Read only the bounded tail of the JSONL file, discard its partial first
+    // line, parse complete records, then retain the last eight user/assistant
+    // messages and apply the shared assistant and total-character caps.
+    const tail = readBoundedTranscriptTail(transcriptPath, 65536);
+    const messages = parseCompleteTranscriptLines(tail);
+    return buildConversationContextFromMessages(messages.slice(-RECENT_MESSAGE_COUNT));
   } catch (e) {
     process.stderr.write("[vision-proxy] context build failed: " + String(e) + "\n");
     return null;
@@ -546,7 +552,7 @@ var desc = runAnalyze([file], context);
 | **vision-proxy existing handler** | `src/hook-script.ts:120-136` | **100%** |
 | **vision-proxy shared runtime** | `src/hooks/runtime.ts:94-104` | **100%** |
 | **Claude Code SDK types** | `claude_agent_sdk/types.py:278-346` | **100%** |
-| **Pi multimodal proxy reference** | p Cummings/pi-vision-proxy docs | **85%** (docs-only) |
+| **Pi multimodal proxy reference** | pummings/pi-vision-proxy docs | **85%** (docs-only) |
 | **Existing Codex hook research** | `.git/wt/trash/.../backend-codex-pretooluse-hook-feasibility-confirmation.md` | **90%** |
 
 ---

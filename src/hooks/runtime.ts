@@ -114,6 +114,9 @@ function buildAnalyzeArgs(
  * listings. Returns undefined when both sides are empty so callers can omit
  * the flag entirely. NUL bytes are stripped to match the argv contract.
  */
+/** Build a sanitized JSON payload for secure prompt transport.
+ * @tags hooks, transport, security
+ */
 function buildPromptStdinPayload(question?: string, context?: string): string | undefined {
 	var q = question ? question.replace(/\0/g, "") : "";
 	var c = context ? context.replace(/\0/g, "") : "";
@@ -128,6 +131,9 @@ function buildPromptStdinPayload(question?: string, context?: string): string | 
  * stays out of argv; the caller writes the returned stdin string to the
  * child's stdin. Direct --question/--context argv remains supported by
  * buildAnalyzeArgs for interactive CLI use.
+ */
+/** Build a host invocation that keeps prompt text out of argv.
+ * @tags hooks, transport, security
  */
 function buildAnalyzeStdinInvocation(
 	images: string[],
@@ -146,6 +152,9 @@ function buildAnalyzeStdinInvocation(
 /** Verbatim last-8 conversational windows, mirroring core.ts. */
 const RECENT_MESSAGE_COUNT = 8;
 const ASSISTANT_TRUNCATE_CHARS = 500;
+/** Maximum serialized conversation context sent to the provider.
+ * @tags hooks, context, limits
+ */
 const CONTEXT_MAX_CHARS = 3000;
 
 function extractMessageText(content: unknown): string {
@@ -168,6 +177,9 @@ function truncateBuiltContext(result: string): string {
 	return "…" + result.slice(-CONTEXT_MAX_CHARS);
 }
 
+/** Build the bounded user/assistant context block for a host adapter.
+ * @tags hooks, context, limits
+ */
 function buildConversationContext(
 	messages: Array<{ role: string; text?: unknown; content?: unknown }>,
 ): string {

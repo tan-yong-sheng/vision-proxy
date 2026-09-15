@@ -115,6 +115,20 @@ describe("configGet", () => {
 	});
 });
 
+describe("explicit config errors", () => {
+	it("rejects a missing explicit --config file instead of falling back", async () => {
+		await assert.rejects(
+			() =>
+				configGet({
+					configPath: path.join(cwd, "missing.json"),
+					cwd,
+					env: {} as NodeJS.ProcessEnv,
+				}),
+			/could not read explicit config/,
+		);
+	});
+});
+
 describe("configSet", () => {
 	it("sets a known string key in the project file", async () => {
 		const r = await configSet("provider", "openai", cwd);

@@ -320,7 +320,10 @@ test("PreToolUse forwards side-channel --question and transcript --context to vp
 	const out = parseOutput(pre);
 	assert.ok(out, "image Read must emit JSON");
 	const ctx = out.hookSpecificOutput.additionalContext as string;
+	const argvPart = ctx.slice(ctx.indexOf("ARGS:"), ctx.indexOf(" STDIN:"));
 	assert.ok(ctx.includes("--prompt-stdin"), "must use secure prompt stdin transport");
+	assert.ok(!argvPart.includes("What is in /tmp/q.png?"), "question must not be exposed in argv");
+	assert.ok(!argvPart.includes("what color is it?"), "context must not be exposed in argv");
 	assert.ok(
 		ctx.includes('"question":"What is in /tmp/q.png?"'),
 		"question must be the stashed prompt",
@@ -377,7 +380,7 @@ test("UserPromptSubmit prompt cache rejects sessionId traversal", () => {
 	assert.equal(run.status, 0);
 	assert.ok(parseOutput(run), "reminder must still be emitted (fail-open)");
 	assert.equal(
-		existsSync(join(configDir, "image-cache", "evil", "vp-prompt.txt")),
+		existsSync(join(configDir, "evil", "vp-prompt.txt")),
 		false,
 		"traversal sessionId must not write a prompt cache file",
 	);

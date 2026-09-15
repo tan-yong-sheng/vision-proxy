@@ -17,10 +17,6 @@ import {
 } from "ai";
 import type { ImageContent, ImagePayload } from "./core.ts";
 
-function escapePromptBlock(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 export interface AnalyzeRequest {
 	imagePayloads: ImagePayload[];
 	systemPrompt: string;
@@ -42,6 +38,11 @@ export interface AnalyzeResponse {
 	text: string;
 }
 
+/** Escape untrusted prompt text before wrapping it in sentinel tags. */
+function escapePromptBlock(s: string): string {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 /** Build a FilePart from decoded image content. */
 function imageContentToFilePart(img: ImageContent, filename?: string): SdkFilePart {
 	return {
@@ -52,6 +53,7 @@ function imageContentToFilePart(img: ImageContent, filename?: string): SdkFilePa
 	};
 }
 
+/** Build the escaped multimodal prompt sent to the vision provider. */
 function buildPromptText(
 	imagePayloads: ImagePayload[],
 	question: string,

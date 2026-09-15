@@ -107,8 +107,8 @@ function bufferSessionText(
     var entries = sessionContexts.get(sessionId);
     var duplicate = Boolean(messageId) && Boolean(entries?.some((entry) => entry.id === messageId));
     if (duplicate) return;
-    var boundedQuestion = text.length > CONTEXT_MAX_CHARS ? text.slice(-CONTEXT_MAX_CHARS) : text;
-    sessionQuestions.set(sessionId, boundedQuestion);
+    sessionQuestions.delete(sessionId);
+    sessionQuestions.set(sessionId, text);
     while (sessionQuestions.size > MAX_CONTEXT_SESSIONS) {
       var oldestQuestion = sessionQuestions.keys().next();
       if (!oldestQuestion.done) sessionQuestions.delete(oldestQuestion.value);
@@ -142,7 +142,7 @@ function bufferSessionText(
   }
 }
 
-function buildSessionContext(sessionId: string | undefined): string | null {
+function buildSessionContext(sessionId: string | undefined, question?: string): string | null {
   try {
     if (!includeContextEnabled(process.env)) return null;
     if (!sessionId) return null;
@@ -150,7 +150,12 @@ function buildSessionContext(sessionId: string | undefined): string | null {
     if (!entries || entries.length === 0) return null;
     sessionContexts.delete(sessionId);
     sessionContexts.set(sessionId, entries);
-    var built = buildConversationContext(entries);
+    var contextEntries = entries;
+    var last = entries[entries.length - 1];
+    if (question && last && last.role === "user" && last.text === question) {
+      contextEntries = entries.slice(0, -1);
+    }
+    var built = buildConversationContext(contextEntries);
     return built ? built : null;
   } catch (e) {
     console.error("[vision-proxy] context build failed open: " + String(e));
@@ -288,8 +293,8 @@ async function handleToolExecuteBefore(
   const filePath = resolveImagePath(argPath, cwd);
   if (!filePath || !existsSync(filePath)) return;
   const sessionId = input.sessionID ?? output.message?.sessionID;
-  const context = sessionId ? buildSessionContext(sessionId) : null;
   const question = sessionId ? sessionQuestions.get(sessionId) : undefined;
+  const context = sessionId ? buildSessionContext(sessionId, question) : null;
   const description = await runAnalyze([filePath], question, context);
   // Fail-open: when analysis is unavailable, allow the original read.
   if (!description) return;

@@ -11,7 +11,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { loadConfig, readJsonFile } from "../config.ts";
-import { DEFAULT_CONFIG, resolveConfig, type VisionConfig } from "../core.ts";
+import { DEFAULT_CONFIG, sanitize, type VisionConfig } from "../core.ts";
 import { listProviders, resolveModel } from "../provider.ts";
 
 export interface ConfigResult {
@@ -106,7 +106,10 @@ export async function configValidate(opts: {
 		cwd: opts.cwd,
 		env: opts.env,
 	});
-	const sanitized = resolveConfig(opts.env ?? process.env, config);
+	// `loadConfig` already applied the full layer stack (explicit > env >
+	// project > user > defaults). Re-sanitize defensively without re-applying
+	// env as a file layer, which would demote an explicit `--config` file.
+	const sanitized = sanitize(config);
 
 	const problems: string[] = [];
 	if (!listProviders().some((p) => p.id === sanitized.provider)) {

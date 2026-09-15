@@ -62,6 +62,124 @@ function stubAnalyze(text: string) {
 	};
 }
 
+describe("runAnalyze context handling", () => {
+	it("forwards context to the model and keys the cache on question+context", async () => {
+		let seen: AnalyzeRequest | undefined;
+		await runAnalyze([imgPath], baseFlags({ context: "User: history" }), async (req) => {
+			seen = req;
+			return { text: "with-context" };
+		});
+		assert.equal(seen?.context, "User: history");
+		let secondCalled = false;
+		const hit: AnalyzeOutcome = await runAnalyze(
+			[imgPath],
+			baseFlags({ context: "User: history" }),
+			async () => {
+				secondCalled = true;
+				return { text: "should-not-appear" };
+			},
+		);
+		assert.equal(hit.cacheHit, true);
+		assert.equal(secondCalled, false);
+		assert.ok(hit.output.includes("with-context"));
+	});
+
+	it("does not collide question+context entries with question-only entries", async () => {
+		await runAnalyze([imgPath], baseFlags(), stubAnalyze("no-context"));
+		let called = false;
+		const out: AnalyzeOutcome = await runAnalyze(
+			[imgPath],
+			baseFlags({ context: "User: different history" }),
+			async () => {
+				called = true;
+				return { text: "contextual" };
+			},
+		);
+		assert.equal(called, true, "context must change the cache key");
+		assert.equal(out.cacheHit, false);
+		assert.ok(out.output.includes("contextual"));
+	});
+
+	it("keeps question and context boundaries distinct in cache keys", async () => {
+		await runAnalyze(
+			[imgPath],
+			baseFlags({ question: "a\\nb", context: "c" }),
+			stubAnalyze("first"),
+		);
+		let called = false;
+		const out = await runAnalyze(
+			[imgPath],
+			baseFlags({ question: "a", context: "b\\nc" }),
+			async () => {
+				called = true;
+				return { text: "second" };
+			},
+		);
+		assert.equal(called, true);
+		assert.equal(out.cacheHit, false);
+		assert.ok(out.output.includes("second"));
+	});
+
+	it("treats whitespace-only context as absent", async () => {
+		await runAnalyze([imgPath], baseFlags(), stubAnalyze("without-context"));
+		const out = await runAnalyze([imgPath], baseFlags({ context: " \n\t" }), async () => ({
+			text: "should-not-run",
+		}));
+		assert.equal(out.cacheHit, true);
+		assert.ok(out.output.includes("without-context"));
+	});
+
+	it("honors persisted includeContext=false", async () => {
+		await writeFile(
+			path.join(dir, ".vision-proxy.json"),
+			JSON.stringify({ includeContext: false }),
+		);
+		let seen: AnalyzeRequest | undefined;
+		await runAnalyze([imgPath], baseFlags({ context: "User: secret history" }), async (req) => {
+			seen = req;
+			return { text: "without-context" };
+		});
+		assert.equal(seen?.context, undefined);
+	});
+
+	it("VP_INCLUDE_CONTEXT=false overrides a file layer that sets true", async () => {
+		await writeFile(path.join(dir, ".vision-proxy.json"), JSON.stringify({ includeContext: true }));
+		let seen: AnalyzeRequest | undefined;
+		await runAnalyze(
+			[imgPath],
+			baseFlags({
+				context: "User: secret history",
+				env: {
+					OPENAI_API_KEY: "sk-test",
+					ANTHROPIC_API_KEY: "sk-test",
+					VP_INCLUDE_CONTEXT: "false",
+				} as NodeJS.ProcessEnv,
+			}),
+			async (req) => {
+				seen = req;
+				return { text: "env-gated" };
+			},
+		);
+		assert.equal(seen?.context, undefined);
+	});
+
+	it("does not reach the provider when effective includeContext=false", async () => {
+		// Privacy: the effective config is the final authority. Even with a
+		// non-empty --context flag, the provider request carries no context.
+		await writeFile(
+			path.join(dir, ".vision-proxy.json"),
+			JSON.stringify({ includeContext: false }),
+		);
+		let seen: AnalyzeRequest | undefined;
+		await runAnalyze([imgPath], baseFlags({ context: "User: must not leak" }), async (req) => {
+			seen = req;
+			return { text: "gated" };
+		});
+		assert.ok(seen, "provider stub must be called");
+		assert.ok(!("context" in (seen as object)) || seen?.context === undefined);
+	});
+});
+
 function baseFlags(extra: Partial<AnalyzeFlags> = {}): AnalyzeFlags {
 	return {
 		fence: true,

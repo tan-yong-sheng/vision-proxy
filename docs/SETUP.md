@@ -32,13 +32,15 @@ vp provider list-keys
 vp provider delete-key openai
 ```
 
-## Config precedence
+## Config precedence (highest to lowest)
 
-1. `--config <path>` flag
-2. `.vision-proxy.json` in cwd
-3. `~/.vision-proxy/config.json`
-4. Environment variables (`VP_*` and provider env vars)
-5. Built-in defaults
+1. CLI flags (e.g. `--provider` / `--model` / `--api-key` on `vp analyze`,
+   applied by callers above the loaded config)
+2. Explicit `--config <path>` file
+3. Environment overrides (`VP_*`)
+4. Project `.vision-proxy.json` in cwd
+5. User `~/.vision-proxy/config.json`
+6. Built-in defaults
 
 See [CONFIG.md](./CONFIG.md) for the full schema and copy-paste JSON examples.
 

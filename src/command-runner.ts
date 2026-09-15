@@ -69,6 +69,7 @@ export const VALUE_FLAGS = new Set([
 	"max-output-tokens",
 	"question",
 	"q",
+	"context",
 	"api-key",
 	"apiKey",
 	"older",
@@ -176,6 +177,7 @@ analyze options:
   --json             machine-readable output
   --max-output-tokens <n>  cap response tokens
   --question <text>  text to analyze against the image
+  --context <text>   recent conversation context for the analysis
   --api-key <key>    explicit provider key
 
 config options:
@@ -242,6 +244,7 @@ Options:
   --json               emit machine-readable JSON to stdout
   --max-output-tokens <n>  cap the model response tokens
   --question <text>    text to analyze against the image (-q)
+  --context <text>     recent conversation context for the analysis
   --api-key <key>      explicit provider API key (-apiKey)
   -h, --help           show this help
 
@@ -565,6 +568,8 @@ export interface CommandRunnerOptions {
 	env?: NodeJS.ProcessEnv;
 	/** Working directory for project config resolution. Defaults to `process.cwd()`. */
 	cwd?: string;
+	/** Secure prompt/context payload supplied by the process adapter. */
+	stdin?: string;
 }
 
 export interface CommandRunnerResult {
@@ -586,6 +591,25 @@ function err(stderr: string, code = 1): CommandRunnerResult {
 
 function fromStatus(r: { ok: boolean; message: string; code: number }): CommandRunnerResult {
 	return r.ok ? ok(r.message) : err(r.message, r.code);
+}
+
+function parsePromptStdinPayload(
+	raw: string | undefined,
+): { question?: string; context?: string } | { error: string } {
+	const input = raw?.trim() ?? "";
+	if (!input) return {};
+	try {
+		const payload = JSON.parse(input) as { question?: unknown; context?: unknown };
+		if (!payload || typeof payload !== "object")
+			return { error: "invalid JSON payload on stdin for --prompt-stdin" };
+		return {
+			question:
+				typeof payload.question === "string" && payload.question ? payload.question : undefined,
+			context: typeof payload.context === "string" && payload.context ? payload.context : undefined,
+		};
+	} catch {
+		return { error: "invalid JSON payload on stdin for --prompt-stdin" };
+	}
 }
 
 /**
@@ -630,6 +654,10 @@ export async function runCommand(
 			const formatRaw = str(flags, "format");
 			const format =
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
+			const stdinPayload = bool(flags, "prompt-stdin", false)
+				? parsePromptStdinPayload(opts.stdin)
+				: {};
+			if ("error" in stdinPayload) return err(stdinPayload.error);
 			const analyzeFlags: AnalyzeFlags = {
 				format,
 				provider: str(flags, "provider"),
@@ -642,7 +670,8 @@ export async function runCommand(
 				maxOutputTokens: str(flags, "max-output-tokens")
 					? Number(str(flags, "max-output-tokens"))
 					: undefined,
-				question: str(flags, "question") ?? str(flags, "q"),
+				question: stdinPayload.question ?? str(flags, "question") ?? str(flags, "q"),
+				context: stdinPayload.context ?? str(flags, "context"),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

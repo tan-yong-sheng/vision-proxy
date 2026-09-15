@@ -12,8 +12,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { join } from "node:path";
 import { test } from "node:test";
 import { HOOK_SCRIPT_SOURCE } from "../hook-script.ts";
@@ -242,6 +243,238 @@ test("PreToolUse fails open when vp is missing or exits non-zero", () => {
 	const failed = runHook(script, event, { VP_BIN: failing });
 	assert.equal(failed.status, 0, "failing vp must still exit 0");
 	assert.equal(failed.stdout.trim(), "", "failing vp must emit nothing");
+});
+
+/** Fake `vp` that echoes its argv inside the description so flag passing is assertable. */
+function fakeVpEchoArgs(): string {
+	const dir = mkdtempSync(join(tmpdir(), "vp-fake-bin-args-"));
+	const file = join(dir, "vp");
+	writeFileSync(
+		file,
+		"#!/bin/sh\nprintf '%s' '<vision_proxy_description>ARGS:'\nprintf '%s' \"$*\"\nprintf '%s' ' STDIN:'\ncat\nprintf '%s\\n' '</vision_proxy_description>'\n",
+	);
+	chmodSync(file, 0o755);
+	return file;
+}
+
+function writeTranscript(lines: string[], root?: string): string {
+	const dir = mkdtempSync(join(root ?? tmpdir(), "vp-transcript-"));
+	const file = join(dir, "transcript.jsonl");
+	writeFileSync(file, `${lines.join("\n")}\n`);
+	return file;
+}
+
+const TRANSCRIPT_LINES = [
+	JSON.stringify({ type: "user", message: { role: "user", content: "what color is it?" } }),
+	JSON.stringify({
+		type: "assistant",
+		message: { role: "assistant", content: [{ type: "text", text: "It is red." }] },
+	}),
+	JSON.stringify({
+		type: "file-history-snapshot",
+		message: { role: "user", content: "SHOULD NOT APPEAR" },
+	}),
+];
+
+test("PreToolUse forwards side-channel --question and transcript --context to vp analyze", () => {
+	const home = mkdtempSync(join(tmpdir(), "vp-hook-home-qctx-"));
+	const configDir = join(home, ".claude");
+	const script = writeScript();
+	const env = {
+		HOME: home,
+		VP_CLAUDE_CONFIG_DIR: configDir,
+		CLAUDE_CONFIG_DIR: "",
+		VP_BIN: fakeVpEchoArgs(),
+	};
+	const submit = runHook(
+		script,
+		{
+			hook_event_name: "UserPromptSubmit",
+			prompt: "What is in /tmp/q.png?",
+			session_id: "sess-q",
+		},
+		env,
+	);
+	assert.equal(submit.status, 0);
+	assert.ok(parseOutput(submit), "submit with an image path must emit a reminder");
+	const promptCache = join(configDir, "image-cache", "sess-q", "vp-prompt.txt");
+	assert.ok(existsSync(promptCache), "submit must stash the prompt for the later PreToolUse");
+	assert.equal(
+		statSync(promptCache).mode & 0o777,
+		0o600,
+		"prompt cache must be owner-readable only",
+	);
+	const transcript = writeTranscript(TRANSCRIPT_LINES, configDir);
+	const pre = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/q.png" },
+			session_id: "sess-q",
+			transcript_path: transcript,
+		},
+		env,
+	);
+	assert.equal(pre.status, 0);
+	const out = parseOutput(pre);
+	assert.ok(out, "image Read must emit JSON");
+	const ctx = out.hookSpecificOutput.additionalContext as string;
+	assert.ok(ctx.includes("--prompt-stdin"), "must use secure prompt stdin transport");
+	assert.ok(
+		ctx.includes('"question":"What is in /tmp/q.png?"'),
+		"question must be the stashed prompt",
+	);
+	assert.ok(
+		ctx.includes('"context":"User: what color is it?\\nAssistant:'),
+		"context must use stdin transport",
+	);
+	assert.ok(ctx.includes("User: what color is it?"), "context must carry transcript history");
+	assert.ok(ctx.includes("Assistant: It is red."), "context must carry assistant turns");
+	assert.ok(!ctx.includes("SHOULD NOT APPEAR"), "context must filter non-user|assistant entries");
+	assert.ok(existsSync(promptCache), "prompt cache must survive multiple image reads");
+	const again = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/q.png" },
+			session_id: "sess-q",
+			transcript_path: transcript,
+		},
+		env,
+	);
+	const againCtx = (parseOutput(again)?.hookSpecificOutput.additionalContext ?? "") as string;
+	assert.ok(
+		againCtx.includes("--prompt-stdin"),
+		"the current prompt must apply to every image read",
+	);
+	assert.ok(againCtx.includes('"question":"What is in /tmp/q.png?"'));
+	assert.ok(
+		againCtx.includes('"context":"User: what color is it?'),
+		"transcript context still applies",
+	);
+});
+
+test("UserPromptSubmit prompt cache rejects sessionId traversal", () => {
+	const home = mkdtempSync(join(tmpdir(), "vp-hook-home-qtraversal-"));
+	const configDir = join(home, ".claude");
+	const script = writeScript();
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "UserPromptSubmit",
+			prompt: "What is in /tmp/q.png?",
+			session_id: "../evil",
+		},
+		{
+			HOME: home,
+			VP_CLAUDE_CONFIG_DIR: configDir,
+			CLAUDE_CONFIG_DIR: "",
+			VP_BIN: fakeVpEchoArgs(),
+		},
+	);
+	assert.equal(run.status, 0);
+	assert.ok(parseOutput(run), "reminder must still be emitted (fail-open)");
+	assert.equal(
+		existsSync(join(configDir, "image-cache", "evil", "vp-prompt.txt")),
+		false,
+		"traversal sessionId must not write a prompt cache file",
+	);
+	assert.equal(existsSync(join(home, "evil")), false);
+});
+
+test("empty UserPromptSubmit clears a stale prompt cache", () => {
+	const home = mkdtempSync(join(tmpdir(), "vp-hook-home-qclear-"));
+	const configDir = join(home, ".claude");
+	const script = writeScript();
+	const env = { HOME: home, VP_CLAUDE_CONFIG_DIR: configDir, VP_BIN: fakeVpEchoArgs() };
+	runHook(
+		script,
+		{ hook_event_name: "UserPromptSubmit", prompt: "old question", session_id: "sess-clear" },
+		env,
+	);
+	const file = join(configDir, "image-cache", "sess-clear", "vp-prompt.txt");
+	assert.ok(existsSync(file));
+	runHook(
+		script,
+		{ hook_event_name: "UserPromptSubmit", prompt: "", session_id: "sess-clear" },
+		env,
+	);
+	assert.equal(existsSync(file), false);
+});
+
+test("PreToolUse transcript context fails open on missing, malformed, or empty transcripts", () => {
+	const script = writeScript();
+	const vp = fakeVpEchoArgs();
+	for (const transcript_path of [
+		join(tmpdir(), "vp-definitely-absent-transcript.jsonl"),
+		writeTranscript(["not json at all", "{bad"]),
+		writeTranscript([]),
+	]) {
+		const run = runHook(
+			script,
+			{
+				hook_event_name: "PreToolUse",
+				tool_name: "Read",
+				tool_input: { file_path: "/tmp/diagram.png" },
+				transcript_path,
+			},
+			{
+				VP_BIN: vp,
+				VP_CLAUDE_CONFIG_DIR: path.dirname(transcript_path),
+			},
+		);
+		assert.equal(run.status, 0);
+		const ctx = (parseOutput(run)?.hookSpecificOutput.additionalContext ?? "") as string;
+		assert.ok(ctx.includes("ARGS:analyze"), `analysis must still run for ${transcript_path}`);
+		assert.ok(!ctx.includes("--context"), `no --context for ${transcript_path}`);
+	}
+});
+
+test("PreToolUse rejects transcript paths outside trusted host directories", () => {
+	const home = mkdtempSync(join(tmpdir(), "vp-hook-home-transcript-"));
+	const transcript = writeTranscript([
+		JSON.stringify({ type: "user", message: { role: "user", content: "secret" } }),
+	]);
+	const run = runHook(
+		writeScript(),
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ HOME: home, VP_BIN: fakeVpEchoArgs() },
+	);
+	const ctx = (parseOutput(run)?.hookSpecificOutput.additionalContext ?? "") as string;
+	assert.ok(!ctx.includes("--context"));
+	assert.ok(!ctx.includes("secret"));
+});
+
+test("PreToolUse omits --context when VP_INCLUDE_CONTEXT=false", () => {
+	const script = writeScript();
+	const transcript = writeTranscript([
+		JSON.stringify({ type: "user", message: { role: "user", content: "history here" } }),
+	]);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/diagram.png" },
+			transcriptPath: transcript,
+		},
+		{
+			VP_BIN: fakeVpEchoArgs(),
+			VP_INCLUDE_CONTEXT: "false",
+			VP_CLAUDE_CONFIG_DIR: path.dirname(transcript),
+		},
+	);
+	assert.equal(run.status, 0);
+	const ctx = (parseOutput(run)?.hookSpecificOutput.additionalContext ?? "") as string;
+	assert.ok(ctx.includes("ARGS:analyze"), "analysis must still run");
+	assert.ok(!ctx.includes("--context"), "gate off must omit --context");
 });
 
 test("malformed stdin fails open with exit 0 and no stdout", () => {

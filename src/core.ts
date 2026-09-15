@@ -323,9 +323,9 @@ export function parseCropArg(arg: string): CropEntry | string {
 	return parseCropForm(parsed.form, parsed.idx);
 }
 
-const RECENT_MESSAGE_COUNT = 8;
-const ASSISTANT_TRUNCATE_CHARS = 500;
-const CONTEXT_MAX_CHARS = 3000;
+export const RECENT_MESSAGE_COUNT = 8;
+export const ASSISTANT_TRUNCATE_CHARS = 500;
+export const CONTEXT_MAX_CHARS = 3000;
 const HASH_HEX_LEN = 32;
 const PROVIDER_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const MODEL_ID_PATTERN = /^[a-zA-Z0-9_./:-]+$/;
@@ -547,6 +547,10 @@ function parseBaseUrlOverride(value: string | undefined): string | undefined {
 /**
  * Read config overrides from environment variables.
  * Precedence prefix is VP_ (e.g. VP_MODEL, VP_CACHE_SIZE).
+ *
+ * Layer position: env overrides beat the project and user file layers but
+ * lose to an explicit `--config` file and to CLI flags. See
+ * `resolveLayeredConfig` for the full contract.
  */
 export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<VisionConfig> {
 	const overrides: Partial<VisionConfig> = {};
@@ -581,28 +585,30 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 	return overrides;
 }
 
-export function envFlags(env: NodeJS.ProcessEnv = process.env): {
-	mode: boolean;
-	model: boolean;
-	context: boolean;
-	tool: boolean;
-	maxImagesPerCall: boolean;
-	maxBatch: boolean;
-	cacheSize: boolean;
-	cacheMaxAgeDays: boolean;
-	baseUrl: boolean;
-} {
-	return {
-		mode: Boolean(env.VP_MODE),
-		model: Boolean(env.VP_MODEL),
-		context: env.VP_INCLUDE_CONTEXT !== undefined,
-		tool: env.VP_TOOL !== undefined,
-		maxImagesPerCall: env.VP_MAX_IMAGES_PER_CALL !== undefined,
-		maxBatch: env.VP_MAX_BATCH !== undefined,
-		cacheSize: env.VP_CACHE_SIZE !== undefined,
-		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
-		baseUrl: env.VP_BASE_URL !== undefined,
-	};
+/**
+ * Name the `VP_*` variables that actually contributed an override — i.e. the
+ * ones that parsed to a defined value — so `resolvedFrom` diagnostics name
+ * the winning env keys instead of every set variable.
+ */
+export function envOverrideNames(env: NodeJS.ProcessEnv = process.env): string[] {
+	const names: string[] = [];
+	if (parseModeOverride(env.VP_MODE) !== undefined) names.push("VP_MODE");
+	if (parseModelOverride(env.VP_MODEL) !== undefined) names.push("VP_MODEL");
+	if (parseBooleanOverride(env.VP_INCLUDE_CONTEXT) !== undefined) names.push("VP_INCLUDE_CONTEXT");
+	if (parseToolOverride(env.VP_TOOL) !== undefined) names.push("VP_TOOL");
+	if (parseIntOverride(env.VP_MAX_IMAGES_PER_CALL, 1, 20) !== undefined) {
+		names.push("VP_MAX_IMAGES_PER_CALL");
+	}
+	if (parseIntOverride(env.VP_MAX_BATCH, 1, 10) !== undefined) {
+		names.push("VP_MAX_BATCH");
+	}
+	if (parseIntOverride(env.VP_CACHE_SIZE, 0, 500) !== undefined) names.push("VP_CACHE_SIZE");
+	if (parseIntOverride(env.VP_CACHE_MAX_AGE_DAYS, 0, 3650) !== undefined)
+		names.push("VP_CACHE_MAX_AGE_DAYS");
+	if (parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1) !== undefined)
+		names.push("VP_PHASH_THRESHOLD");
+	if (parseBaseUrlOverride(env.VP_BASE_URL) !== undefined) names.push("VP_BASE_URL");
+	return names;
 }
 
 function isValidModelParts(provider: string, modelId: string): boolean {
@@ -717,36 +723,67 @@ export function sanitize(config: VisionConfig): VisionConfig {
 	return safe;
 }
 
-/** Resolve config from file + env (no session entries in the CLI). */
+export interface LayeredConfigInput {
+	/** User file layer (`~/.vision-proxy/config.json`). Lowest file layer. */
+	user?: Partial<VisionConfig>;
+	/** Project file layer (`.vision-proxy.json` in cwd). Beats `user`. */
+	project?: Partial<VisionConfig>;
+	/** Explicit `--config <path>` file. Highest file layer: beats env. */
+	explicitFile?: Partial<VisionConfig>;
+	/** Environment (`VP_*`). Beats project/user files, loses to `explicitFile`. */
+	env?: NodeJS.ProcessEnv;
+}
+
+function applyBatchAlias(layer: Partial<VisionConfig> | undefined): Partial<VisionConfig> {
+	if (!layer || layer.maxImagesPerCall !== undefined || layer.maxBatch === undefined)
+		return layer ?? {};
+	process.emitWarning(
+		"maxBatch / VP_MAX_BATCH is deprecated; use maxImagesPerCall / VP_MAX_IMAGES_PER_CALL instead.",
+		{ type: "DeprecationWarning", code: "VP_DEPRECATED_MAX_BATCH" },
+	);
+	return { ...layer, maxImagesPerCall: layer.maxBatch };
+}
+
+/**
+ * Resolve config layer-aware.
+ *
+ * Contract (highest to lowest): CLI flags (applied by callers, never here) >
+ * explicit `--config` file > `VP_*` env overrides > project file > user file
+ * > built-in defaults.
+ *
+ * Ordinary env overrides beat project/user config, but an explicit `--config`
+ * file remains the highest file layer: keys set there win over env.
+ */
+export function resolveLayeredConfig(input: LayeredConfigInput = {}): VisionConfig {
+	const { user, project, explicitFile, env = process.env } = input;
+	const envOverrides = readEnvOverrides(env);
+
+	const userLayer = applyBatchAlias(user);
+	const projectLayer = applyBatchAlias(project);
+	const envLayer = applyBatchAlias(envOverrides);
+	const explicitLayer = applyBatchAlias(explicitFile);
+	return sanitize({
+		...DEFAULT_CONFIG,
+		...userLayer,
+		...projectLayer,
+		...envLayer,
+		...explicitLayer,
+	});
+}
+
+/**
+ * Resolve config from env + a single ordinary file layer (no session entries
+ * in the CLI).
+ *
+ * `fileConfig` is a project/user-level file layer, so env overrides beat it.
+ * Callers with an explicit `--config` file must use `resolveLayeredConfig`
+ * with `explicitFile` so the file keeps its highest-file-layer position.
+ */
 export function resolveConfig(
 	env: NodeJS.ProcessEnv = process.env,
 	fileConfig: Partial<VisionConfig> = {},
 ): VisionConfig {
-	const envOverrides = readEnvOverrides(env);
-
-	// `maxBatch` / `VP_MAX_BATCH` are a deprecated one-release alias for the
-	// canonical `maxImagesPerCall` limit. Only when `maxImagesPerCall` is unset
-	// (neither in a config file nor an env var) do we fall back to `maxBatch` and
-	// emit a deprecation warning, so existing configs keep working during the
-	// grace period.
-	const maxImagesSet = "maxImagesPerCall" in fileConfig || "maxImagesPerCall" in envOverrides;
-	if (!maxImagesSet) {
-		const batchAlias =
-			"maxBatch" in envOverrides
-				? envOverrides.maxBatch
-				: "maxBatch" in fileConfig
-					? fileConfig.maxBatch
-					: undefined;
-		if (batchAlias !== undefined) {
-			process.emitWarning(
-				"maxBatch / VP_MAX_BATCH is deprecated; use maxImagesPerCall / VP_MAX_IMAGES_PER_CALL instead.",
-				{ type: "DeprecationWarning", code: "VP_DEPRECATED_MAX_BATCH" },
-			);
-			(envOverrides as Partial<VisionConfig>).maxImagesPerCall = batchAlias;
-		}
-	}
-
-	return sanitize({ ...DEFAULT_CONFIG, ...envOverrides, ...fileConfig });
+	return resolveLayeredConfig({ project: fileConfig, env });
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────
@@ -1463,7 +1500,7 @@ export function buildConversationContext(messages: readonly MessageLike[]): stri
 	return truncateContext(joined);
 }
 
-function truncateContext(result: string): string {
+export function truncateContext(result: string): string {
 	if (result.length <= CONTEXT_MAX_CHARS) return result;
 	return `…${result.slice(-CONTEXT_MAX_CHARS)}`;
 }

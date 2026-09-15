@@ -3,13 +3,23 @@
 `vp` reads configuration from files, environment variables, and CLI flags.
 This page describes every config key and shows copy-paste JSON examples.
 
-## Config file locations (precedence)
+## Config precedence (highest to lowest)
 
-1. `--config <path>` flag (highest)
-2. `.vision-proxy.json` in the current working directory
-3. `~/.vision-proxy/config.json` (user default)
-4. Environment variables (`VP_*` and provider env vars)
-5. Built-in defaults
+1. CLI flags (e.g. `--provider` / `--model` / `--api-key` on `vp analyze`,
+   applied by callers above the loaded config)
+2. Explicit `--config <path>` file
+3. Environment overrides (`VP_*`)
+4. Project `.vision-proxy.json` in the current working directory
+5. User `~/.vision-proxy/config.json`
+6. Built-in defaults
+
+Ordinary `VP_*` overrides beat the project and user file layers, but an
+explicit `--config` file remains the highest file layer: keys set there win
+over env. `vp config get` prints the contributing layers in `resolved from:`
+(highest first); CLI flags never appear there because callers apply them
+above the loaded config. Effective `config.includeContext` is the final
+authority before provider dispatch: when it is `false`, `--context` is
+dropped and never reaches the provider.
 
 ## Full schema
 
@@ -43,7 +53,7 @@ interface VisionConfig {
 | `modelId` | string | `claude-sonnet-4-5` | Model id for the selected provider. |
 | `mode` | string | `fallback` | When to route tool hooks: `fallback`, `always`, or `off`. |
 | `systemPrompt` | string | built-in | System prompt sent to the model. |
-| `includeContext` | boolean | `false` | Whether to include extra context in the prompt. |
+| `includeContext` | boolean | `true` | Whether to include extra context in the prompt. |
 | `tool` | string | `on` | Enable/disable the tool-mode proxy: `on` or `off`. |
 | `maxImagesPerCall` | number | `4` | Max images a single `vp analyze` call may receive. This is the canonical, single image limit. |
 | `maxBatch` | number | `4` | **Deprecated.** One-release alias for `maxImagesPerCall`. Set `maxImagesPerCall` instead. |
@@ -96,16 +106,15 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `OPENAI_BASE_URL` | `baseUrl` | Override OpenAI endpoint. |
 | `ANTHROPIC_BASE_URL` | `baseUrl` | Override Anthropic endpoint. |
 | `GOOGLE_BASE_URL` | `baseUrl` | Override Google endpoint. |
-| `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` |
-| `VP_MODEL` | `modelId` | `VP_MODEL=gpt-4o` |
+| `VP_MODEL` | `provider` + `modelId` | `VP_MODEL=openai/gpt-4o` (format `provider/modelId`) |
 | `VP_MODE` | `mode` | `VP_MODE=always` |
-| `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=true` |
+| `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=false` disables sending the last-8 conversation slice (`--context`) to the vision provider. The current prompt (`--question`) is still sent. |
 | `VP_TOOL` | `tool` | `VP_TOOL=off` |
 | `VP_MAX_IMAGES_PER_CALL` | `maxImagesPerCall` | `VP_MAX_IMAGES_PER_CALL=2` |
 | `VP_MAX_BATCH` | `maxBatch` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL`. |
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
-| `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |
+| `VP_PHASH_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_THRESHOLD=0.95` |
 | `VP_BASE_URL` | `baseUrl` | `VP_BASE_URL=http://localhost:8000/v1` |
 | `VP_DOWNLOAD_TIMEOUT` | - | `VP_DOWNLOAD_TIMEOUT=30000` |
 | `VP_STRICT_MIME` | - | `VP_STRICT_MIME=1` |
@@ -131,7 +140,7 @@ Deleting `~/.vision-proxy/update-check.json` is safe; it is recreated on the nex
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-VP_PROVIDER=openai VP_MODEL=gpt-4o vp analyze screenshot.png
+VP_MODEL=openai/gpt-4o vp analyze screenshot.png
 ```
 
 ### URL input and content sniffing

@@ -27,6 +27,7 @@ import {
 	readPositiveIntEnv,
 	resolveConfig,
 	resolveCropEntry,
+	resolveLayeredConfig,
 	resolveRegion,
 } from "./core.ts";
 
@@ -252,6 +253,63 @@ describe("resolveConfig", () => {
 	it("defaults apiKey to empty string", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv);
 		assert.equal(cfg.apiKey, "");
+	});
+
+	it("lets ordinary env overrides beat the project file layer", () => {
+		const cfg = resolveConfig({ VP_MODE: "always" } as NodeJS.ProcessEnv, {
+			mode: "off",
+		});
+		assert.equal(cfg.mode, "always");
+	});
+});
+
+describe("resolveLayeredConfig precedence", () => {
+	it("VP_INCLUDE_CONTEXT=false overrides a file layer that sets true", () => {
+		const cfg = resolveLayeredConfig({
+			project: { includeContext: true },
+			env: { VP_INCLUDE_CONTEXT: "false" } as NodeJS.ProcessEnv,
+		});
+		assert.equal(cfg.includeContext, false);
+	});
+
+	it("VP_MODEL overrides provider and modelId from the project file", () => {
+		const cfg = resolveLayeredConfig({
+			project: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+			env: { VP_MODEL: "openai/gpt-4o" } as NodeJS.ProcessEnv,
+		});
+		assert.equal(cfg.provider, "openai");
+		assert.equal(cfg.modelId, "gpt-4o");
+	});
+
+	it("a deprecated env maxBatch alias beats a lower project canonical value", () => {
+		const cfg = resolveLayeredConfig({
+			project: { maxImagesPerCall: 6 },
+			env: { VP_MAX_BATCH: "2" } as NodeJS.ProcessEnv,
+		});
+		assert.equal(cfg.maxImagesPerCall, 2);
+	});
+
+	it("an explicit --config file beats env overrides", () => {
+		const cfg = resolveLayeredConfig({
+			explicitFile: { provider: "openai", modelId: "gpt-4o" },
+			env: { VP_MODEL: "anthropic/claude-sonnet-4-5" } as NodeJS.ProcessEnv,
+		});
+		assert.equal(cfg.provider, "openai");
+		assert.equal(cfg.modelId, "gpt-4o");
+	});
+
+	it("orders layers explicit > env > project > user > defaults", () => {
+		const cfg = resolveLayeredConfig({
+			user: { cacheSize: 11, mode: "off", tool: "off" },
+			project: { cacheSize: 22, mode: "always" },
+			env: { VP_CACHE_SIZE: "33" } as NodeJS.ProcessEnv,
+			explicitFile: { mode: "fallback" },
+		});
+		// explicit wins for mode, env wins for cacheSize over both files, and
+		// the untouched user-only key (tool) survives from the lowest layer.
+		assert.equal(cfg.mode, "fallback");
+		assert.equal(cfg.cacheSize, 33);
+		assert.equal(cfg.tool, "off");
 	});
 });
 

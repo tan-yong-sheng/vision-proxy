@@ -80,12 +80,91 @@ import { homedir } from "node:os";
 const PI_EXTENSION_ADAPTER = String.raw`
 var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
 
+/** Per-session question/context stashed from the context event. */
+const recentContextText = new Map<string, string>();
+const recentQuestionText = new Map<string, string>();
+const MAX_STASHED_SESSIONS = 50;
+
+function sessionKey(value: unknown): string | null {
+  const event = value as { sessionId?: unknown; sessionID?: unknown; session_id?: unknown };
+  return typeof event?.sessionId === "string"
+    ? event.sessionId
+    : typeof event?.sessionID === "string"
+      ? event.sessionID
+      : typeof event?.session_id === "string"
+        ? event.session_id
+        : null;
+}
+
+function refreshContextStash(messages: unknown, key: string | null): void {
+  // Closure stash for --context: the context event carries the full turn
+  // messages, so slice them through the shared parser once here and reuse the
+  // built string in tool_result. Fail-open on any shape mismatch.
+  try {
+    if (!key || !Array.isArray(messages)) return;
+    const shaped: Array<{ role: string; content: unknown }> = [];
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i] as { role?: unknown; content?: unknown };
+      if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
+      if (typeof m.content === "string") {
+        if (m.content.indexOf(REMINDER_MARKER) === 0) continue;
+        if (m.role === "user") recentQuestionText.set(key, m.content);
+        shaped.push({ role: m.role as string, content: m.content });
+        continue;
+      }
+      const content = Array.isArray(m.content)
+        ? m.content.filter(
+            (part) =>
+              !(
+                part &&
+                part.type === "text" &&
+                typeof part.text === "string" &&
+                part.text.indexOf(REMINDER_MARKER) === 0
+              ),
+          )
+        : m.content;
+      if (m.role === "user") {
+        const text = extractMessageText(content);
+        if (text) recentQuestionText.set(key, text);
+      }
+      shaped.push({ role: m.role as string, content: content });
+    }
+    if (!includeContextEnabled(process.env)) {
+      recentContextText.delete(key);
+      recentQuestionText.delete(key);
+      return;
+    }
+    const built = buildConversationContext(shaped);
+    if (built) recentContextText.set(key, built);
+    else recentContextText.delete(key);
+    while (recentQuestionText.size > MAX_STASHED_SESSIONS) {
+      const oldestQuestion = recentQuestionText.keys().next().value;
+      if (typeof oldestQuestion !== "string") break;
+      recentQuestionText.delete(oldestQuestion);
+      recentContextText.delete(oldestQuestion);
+    }
+    while (recentContextText.size > MAX_STASHED_SESSIONS) {
+      const oldest = recentContextText.keys().next().value;
+      if (typeof oldest !== "string") break;
+      recentContextText.delete(oldest);
+      recentQuestionText.delete(oldest);
+    }
+  } catch (e) {
+    process.stderr.write("[vision-proxy] context stash failed open: " + String(e) + "\n");
+  }
+}
+
 /** Run vp analyze (async) and return the fenced description, or null on failure. */
-async function runAnalyze(images: string[], signal?: unknown): Promise<string | null> {
+async function runAnalyze(
+  images: string[],
+  signal?: unknown,
+  questionText?: string | null,
+  contextText?: string | null,
+): Promise<string | null> {
   return new Promise((resolve) => {
     if (!images || images.length === 0) return resolve(null);
     var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
-    var invocation = buildAnalyzeArgs(images, maxTokens);
+    var invocation = buildAnalyzeStdinInvocation(images, maxTokens, questionText ?? undefined, contextText ?? undefined);
     var command = invocation.command;
     var args = invocation.args;
     var vp = resolveVpBin();
@@ -107,6 +186,10 @@ async function runAnalyze(images: string[], signal?: unknown): Promise<string | 
     }
     let stdout = "";
     child.stdout.on("data", (d) => { stdout += String(d); });
+    if (invocation.stdin !== undefined) {
+      child.stdin.on("error", () => { /* fail open on EPIPE */ });
+      child.stdin.end(invocation.stdin);
+    }
     child.stderr.on("data", (d) => { process.stderr.write(String(d)); });
     child.on("error", (err) => {
       const e = err as NodeJS.ErrnoException;
@@ -194,6 +277,7 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const messages = Array.isArray(event.messages) ? event.messages : null;
     if (!messages) return undefined;
+    refreshContextStash(messages, sessionKey(event));
 
     let modified = false;
     const out: unknown[] = [];
@@ -257,9 +341,12 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
+    const key = sessionKey(event);
     const description = await runAnalyze(
       [filePath],
       ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
+      key ? recentQuestionText.get(key) : undefined,
+      key ? recentContextText.get(key) : undefined,
     );
     if (!description) return undefined; // fail-open
     return { content: [{ type: "text", text: withImageInstruction(description, undefined) }] };

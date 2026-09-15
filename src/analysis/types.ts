@@ -18,6 +18,7 @@ export interface AnalyzeFlags {
 	json: boolean;
 	maxOutputTokens?: number;
 	question?: string;
+	context?: string;
 	apiKey?: string;
 	env?: NodeJS.ProcessEnv;
 	cwd?: string;

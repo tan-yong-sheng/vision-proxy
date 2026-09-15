@@ -8,6 +8,26 @@
 	"duplicates": {
 		"threshold": 1000
 	},
+	"ignoreExports": [
+		{
+			"file": "src/core.ts",
+			"exports": [
+				"ASSISTANT_TRUNCATE_CHARS",
+				"CONTEXT_MAX_CHARS",
+				"RECENT_MESSAGE_COUNT",
+				"buildConversationContext"
+			]
+		},
+		{
+			"file": "src/hooks/runtime.ts",
+			"exports": [
+				"ASSISTANT_TRUNCATE_CHARS",
+				"CONTEXT_MAX_CHARS",
+				"RECENT_MESSAGE_COUNT",
+				"buildConversationContext"
+			]
+		}
+	],
 	"health": {
 		"thresholdOverrides": [
 			{

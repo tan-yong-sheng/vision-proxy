@@ -137,6 +137,60 @@ test("generated artifacts preserve the historical reminder and deny wording", ()
 	}
 });
 
+test("generated artifacts wire --question and --context through the shared contract", () => {
+	for (const host of HOSTS) {
+		assert.ok(host.source.includes("--context"), `${host.name} must pass --context to vp analyze`);
+		assert.ok(
+			host.source.includes("buildAnalyzeArgs"),
+			`${host.name} must build args via the shared contract`,
+		);
+		assert.ok(
+			host.source.includes("buildConversationContext"),
+			`${host.name} must shape last-8 history via the shared parser`,
+		);
+		assert.ok(
+			host.source.includes("includeContextEnabled"),
+			`${host.name} must honor the VP_INCLUDE_CONTEXT gate`,
+		);
+	}
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes("vp-prompt.txt"),
+		"hook script must stash the submit prompt as the --question side-channel",
+	);
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes("transcript_path"),
+		"hook script must read the session transcript for --context",
+	);
+	assert.ok(
+		PI_EXTENSION_SOURCE.includes("recentContextText"),
+		"pi extension must stash last-8 context for the tool_result analysis point",
+	);
+	assert.ok(
+		OPENCODE_PLUGIN_SOURCE.includes("sessionContexts"),
+		"opencode plugin must keep a per-session ring buffer for --context",
+	);
+});
+
+test("generated artifacts never gain synchronous config-file I/O", () => {
+	// Hooks keep the fast VP_INCLUDE_CONTEXT env gate; they must not read
+	// config files (the pi extension's cached `config get` subprocess is the
+	// only allowed exception, and it never appears as a file read here).
+	for (const host of HOSTS) {
+		for (const needle of [
+			"vision-proxy.json",
+			"config.json",
+			"readPersistentFile",
+			"loadConfig",
+			"resolvedFrom",
+		]) {
+			assert.ok(
+				!host.source.includes(needle),
+				`${host.name} must not reference ${needle} (no sync config-file I/O)`,
+			);
+		}
+	}
+});
+
 test("generated artifacts keep their fail-open and fence discipline", () => {
 	for (const host of HOSTS) {
 		assert.ok(

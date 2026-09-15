@@ -55,9 +55,23 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
 // __VP_VERSION__PLACEHOLDER__
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 `;
 
@@ -75,11 +89,14 @@ function imageCacheDir(): string {
   return join(claudeConfigHome(), "image-cache");
 }
 
+function isSafeSessionId(sessionId: unknown): sessionId is string {
+  return typeof sessionId === "string" && /^[A-Za-z0-9_-]+$/.test(sessionId);
+}
+
 function resolveImageRefs(prompt: string, sessionId: string | undefined): string[] {
   var paths: string[] = [];
   var seen: string[] = [];
-  if (!sessionId) return paths;
-  if (sessionId.indexOf("/") !== -1 || sessionId.indexOf("\\") !== -1 || sessionId.indexOf("..") !== -1 || sessionId === "." || sessionId.trim() === "") return paths;
+  if (!isSafeSessionId(sessionId)) return paths;
   var sessionDir = join(imageCacheDir(), sessionId);
   if (!existsSync(sessionDir)) return paths;
   IMAGE_REF_RE.lastIndex = 0;
@@ -135,16 +152,190 @@ function readToolFilePath(event: Record<string, any>): string | null {
   return resolveImagePath(file, cwd);
 }
 
-function runAnalyze(images: string[]): string | null {
+function promptCacheFile(sessionId: string): string | null {
+  if (!isSafeSessionId(sessionId)) return null;
+  return join(imageCacheDir(), sessionId, "vp-prompt.txt");
+}
+
+function writePromptCache(sessionId: string | undefined, prompt: string, turnId?: string): void {
+  // Side-channel for --question: UserPromptSubmit writes the current prompt so
+  // later PreToolUse events in the same turn can read it back. Latest wins.
+  try {
+    if (!isSafeSessionId(sessionId)) return;
+    prunePromptCache();
+    var file = promptCacheFile(sessionId);
+    if (!file) return;
+    var normalized = prompt.trim();
+    if (!normalized) {
+      try { unlinkSync(file); } catch { /* no stale question is harmless */ }
+      return;
+    }
+    mkdirSync(join(imageCacheDir(), sessionId), { recursive: true });
+    var truncated = normalized.length > QUESTION_MAX_CHARS;
+    var stored = truncated ? "…" + normalized.slice(-QUESTION_MAX_CHARS + 1) : normalized;
+    writeFileSync(file, JSON.stringify({ turnId: turnId || null, prompt: stored }), { mode: 0o600 });
+    chmodSync(file, 0o600);
+  } catch (e) {
+    process.stderr.write("[vision-proxy] prompt cache write failed open: " + String(e) + "\n");
+  }
+}
+
+var lastPromptPruneAt = 0;
+
+function prunePromptCache(): void {
+  // Prompt files can outlive a turn when no image read follows it. The hook
+  // process exits after each event, so keep the throttle in a small marker
+  // file shared by processes instead of relying only on module state.
+  try {
+    var now = Date.now();
+    if (now - lastPromptPruneAt < 60000) return;
+    var dir = imageCacheDir();
+    if (!existsSync(dir)) return;
+    var marker = join(dir, "vp-prune-at");
+    try {
+      var previous = Number(readFileSync(marker, "utf8").trim());
+      if (Number.isFinite(previous) && now - previous < 60000) {
+        lastPromptPruneAt = now;
+        return;
+      }
+    } catch { /* first run or a concurrently removed marker */ }
+    lastPromptPruneAt = now;
+    try { writeFileSync(marker, String(now), { mode: 0o600 }); } catch { /* fail open */ }
+    var entries = readdirSync(dir, { withFileTypes: true });
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      if (!entry || !entry.isDirectory()) continue;
+      var file = join(dir, entry.name, "vp-prompt.txt");
+      try {
+        var age = now - statSync(file).mtimeMs;
+        if (age > 24 * 60 * 60 * 1000) unlinkSync(file);
+      } catch { /* stale or concurrently removed entries are harmless */ }
+    }
+  } catch (e) {
+    process.stderr.write("[vision-proxy] prompt cache prune failed open: " + String(e) + "\n");
+  }
+}
+
+function readPromptCache(sessionId: string | undefined, turnId?: string): string | null {
+  // Keep the prompt through all image reads in a turn; the next submit replaces
+  // it, and an empty submit clears it.
+  try {
+    if (!isSafeSessionId(sessionId)) return null;
+    var file = promptCacheFile(sessionId);
+    if (!file || !existsSync(file)) return null;
+    var raw = readFileSync(file, "utf8").trim();
+    var text = raw;
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.prompt === "string") {
+        if (parsed.turnId && turnId && parsed.turnId !== turnId) {
+          unlinkSync(file);
+          return null;
+        }
+        text = parsed.prompt;
+      }
+    } catch { /* legacy raw prompt format remains readable */ }
+    return text ? text : null;
+  } catch (e) {
+    process.stderr.write("[vision-proxy] prompt cache read failed open: " + String(e) + "\n");
+    return null;
+  }
+}
+
+function trustedTranscriptPath(transcriptPath: string): string | null {
+  try {
+    var candidate = realpathSync(resolve(transcriptPath));
+    var home = process.env.HOME || homedir();
+    var roots = [claudeConfigHome(), join(home, ".codex")];
+    for (var i = 0; i < roots.length; i++) {
+      try {
+        var root = realpathSync(resolve(roots[i]));
+        if (candidate === root || candidate.indexOf(root + sep) === 0) return candidate;
+      } catch { /* an uninstalled host directory is not a trusted root */ }
+    }
+  } catch { /* invalid, missing, or symlinked-out paths fail closed */ }
+  return null;
+}
+
+const TRANSCRIPT_MAX_BYTES = 65536;
+const TRANSCRIPT_MAX_LINES = 200;
+const QUESTION_MAX_CHARS = 12000;
+
+function readTranscriptTail(transcriptPath: string): string {
+  var fd = openSync(transcriptPath, "r");
+  try {
+    var size = fstatSync(fd);
+    if (!size.isFile()) return "";
+    var start = Math.max(0, size.size - TRANSCRIPT_MAX_BYTES);
+    var buffer = Buffer.alloc(size.size - start);
+    var bytes = 0;
+    while (bytes < buffer.length) {
+      var n = readSync(fd, buffer, bytes, buffer.length - bytes, start + bytes);
+      if (n <= 0) break;
+      bytes += n;
+    }
+    return buffer.subarray(0, bytes).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function extractTranscriptContext(transcriptPath: unknown, question?: string | null): string | null {
+  // Bounded tail parse of the session JSONL transcript for --context: only the
+  // last 64KB / last 200 lines is read, user|assistant entries are shaped into
+  // the shared buildConversationContext window, and the current user turn is
+  // omitted when it is already being passed separately as --question.
+  try {
+    if (!includeContextEnabled(process.env)) return null;
+    if (typeof transcriptPath !== "string" || !transcriptPath) return null;
+    var trustedPath = trustedTranscriptPath(transcriptPath);
+    if (!trustedPath) return null;
+    var raw = readTranscriptTail(trustedPath);
+    var lines = raw.split("\n");
+    if (lines.length > TRANSCRIPT_MAX_LINES) lines = lines.slice(-TRANSCRIPT_MAX_LINES);
+    var messages: Array<{ role: string; content: unknown }> = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line) continue;
+      line = line.trim();
+      if (!line) continue;
+      var entry: Record<string, any>;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (!entry || typeof entry !== "object") continue;
+      if (entry.type !== "user" && entry.type !== "assistant") continue;
+      var msg = entry.message != null && typeof entry.message === "object" ? entry.message : null;
+      var role = msg && typeof msg.role === "string" ? msg.role : entry.type;
+      if (role !== "user" && role !== "assistant") continue;
+      messages.push({ role: role, content: msg ? msg.content : null });
+    }
+    if (question && messages.length > 0) {
+      var last = messages[messages.length - 1]!;
+      var lastText = extractMessageText(last.content).trim();
+      var normalizedQuestion = question.trim();
+      var matchesFull = lastText === normalizedQuestion;
+      var matchesTail = normalizedQuestion.indexOf("…") === 0 &&
+        lastText.endsWith(normalizedQuestion.slice(1));
+      if (last.role === "user" && (matchesFull || matchesTail)) messages.pop();
+    }
+    var built = buildConversationContext(messages);
+    return built ? built : null;
+  } catch (e) {
+    process.stderr.write("[vision-proxy] transcript context failed open: " + String(e) + "\n");
+    return null;
+  }
+}
+
+function runAnalyze(images: string[], question?: string | null, context?: string | null): string | null {
   if (!images || images.length === 0) return null;
   var timeout = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
   var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
-  var invocation = buildAnalyzeArgs(images, maxTokens);
+  var invocation = buildAnalyzeStdinInvocation(images, maxTokens, question ? question : undefined, context ? context : undefined);
   var vp = resolveVpBin();
   var result = spawnSync(invocation.command, invocation.args, {
     encoding: "utf8",
     timeout: timeout,
     maxBuffer: MAX_BUFFER_BYTES,
+    input: invocation.stdin,
   }) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown };
   if (result.error) {
     if (result.error.code === "ENOENT") {
@@ -179,8 +370,14 @@ function runHook(event: Record<string, any> | null): void {
   var eventName = event.hook_event_name != null ? event.hook_event_name : event.hookEventName;
   if (eventName === "UserPromptSubmit") {
     var prompt = typeof event.prompt === "string" ? event.prompt : "";
-    var images = extractImagePaths(prompt);
     var sessionId = event.session_id != null ? event.session_id : event.sessionId;
+    var turnId = event.turn_id != null ? event.turn_id : event.turnId;
+    writePromptCache(
+      typeof sessionId === "string" ? sessionId : undefined,
+      prompt,
+      typeof turnId === "string" ? turnId : undefined,
+    );
+    var images = extractImagePaths(prompt);
     var refImages = resolveImageRefs(prompt, typeof sessionId === "string" ? sessionId : undefined);
     var allImages = images.concat(refImages);
     if (allImages.length === 0) return;
@@ -190,7 +387,15 @@ function runHook(event: Record<string, any> | null): void {
   if (eventName === "PreToolUse") {
     var file = readToolFilePath(event);
     if (!file) return;
-    var desc = runAnalyze([file]);
+    var preSessionId = event.session_id != null ? event.session_id : event.sessionId;
+    var preTurnId = event.turn_id != null ? event.turn_id : event.turnId;
+    var question = readPromptCache(
+      typeof preSessionId === "string" ? preSessionId : undefined,
+      typeof preTurnId === "string" ? preTurnId : undefined,
+    );
+    var transcriptPath = event.transcript_path != null ? event.transcript_path : event.transcriptPath;
+    var context = extractTranscriptContext(transcriptPath, question);
+    var desc = runAnalyze([file], question, context);
     if (!desc) return;
     var toolName = event.tool_name != null ? event.tool_name : event.toolName;
     emit("PreToolUse", withImageInstruction(desc, undefined, toolName === "view_image" ? "view_image" : "Read"), "deny");

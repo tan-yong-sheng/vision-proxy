@@ -76,6 +76,57 @@ describe("configGet", () => {
 		assert.doesNotMatch(r.message, /secret-key/);
 		assert.match(r.message, /"apiKey": "\*\*\*"/);
 	});
+
+	it("lets ordinary env overrides beat the project file layer", async () => {
+		await writeFile(path.join(cwd, ".vision-proxy.json"), JSON.stringify({ mode: "off" }), "utf8");
+		const r = await configGet({ cwd, env: { VP_MODE: "always" } as NodeJS.ProcessEnv });
+		assert.match(r.message, /resolved from: env\(VP_MODE\) > project:/);
+		const cfg = JSON.parse(r.message.split("\n").slice(1).join("\n"));
+		assert.equal(cfg.mode, "always");
+	});
+
+	it("lets an explicit file fill unset keys from the project layer", async () => {
+		const explicit = path.join(cwd, "explicit.json");
+		await writeFile(explicit, JSON.stringify({ mode: "always" }), "utf8");
+		await writeFile(
+			path.join(cwd, ".vision-proxy.json"),
+			JSON.stringify({ provider: "openai", modelId: "gpt-4o" }),
+			"utf8",
+		);
+		const r = await configGet({ configPath: explicit, cwd, env: {} as NodeJS.ProcessEnv });
+		const cfg = JSON.parse(r.message.split("\n").slice(1).join("\n"));
+		assert.equal(cfg.mode, "always");
+		assert.equal(cfg.provider, "openai");
+		assert.match(r.message, /explicit:.* > project:.* > defaults/);
+	});
+
+	it("lets an explicit --config file beat env overrides", async () => {
+		const explicit = path.join(cwd, "explicit.json");
+		await writeFile(explicit, JSON.stringify({ provider: "openai", modelId: "gpt-4o" }), "utf8");
+		const r = await configGet({
+			configPath: explicit,
+			cwd,
+			env: { VP_MODEL: "anthropic/claude-sonnet-4-5" } as NodeJS.ProcessEnv,
+		});
+		assert.match(r.message, /resolved from: explicit:.* > env\(VP_MODEL\) > defaults/);
+		const cfg = JSON.parse(r.message.split("\n").slice(1).join("\n"));
+		assert.equal(cfg.provider, "openai");
+		assert.equal(cfg.modelId, "gpt-4o");
+	});
+});
+
+describe("explicit config errors", () => {
+	it("rejects a missing explicit --config file instead of falling back", async () => {
+		await assert.rejects(
+			() =>
+				configGet({
+					configPath: path.join(cwd, "missing.json"),
+					cwd,
+					env: {} as NodeJS.ProcessEnv,
+				}),
+			/could not read explicit config/,
+		);
+	});
 });
 
 describe("configSet", () => {

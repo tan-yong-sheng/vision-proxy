@@ -4,7 +4,7 @@
  *
  * Command tree:
  *   analyze <paths...> [--format] [--provider] [--model] [--joint] [--crop i:form]
- *                     [--no-fence] [--config] [--json] [--max-output-tokens] [--question] [--api-key]
+ *                     [--no-fence] [--config] [--json] [--max-output-tokens] [--question] [--context] [--api-key]
  *   config   init | get | set <k> <v> | validate
  *   provider list | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]
@@ -19,6 +19,7 @@
  * `./command-runner.ts`. This module only adapts that runner to the process:
  * argv in, stdout/stderr/exit-code out, plus the update-notifier setup.
  */
+import { readSync } from "node:fs";
 import { basename } from "node:path";
 import { type FlagParse, parseFlags, runCommand } from "./command-runner.ts";
 import { checkAutoUpdateNotification } from "./commands/update.ts";
@@ -56,7 +57,33 @@ export async function main(argv: string[]): Promise<void> {
 	);
 	checkAutoUpdateNotification({ env, json: machineReadable });
 
-	const result = await runCommand(argv, { env, cwd: process.cwd() });
+	let stdin: string | undefined;
+	let stdinError: string | undefined;
+	if (
+		argv.some((arg) => arg === "--prompt-stdin" || arg.startsWith("--prompt-stdin=")) &&
+		!process.stdin.isTTY
+	) {
+		const chunks: Buffer[] = [];
+		let totalBytes = 0;
+		const maxBytes = 64 * 1024;
+		try {
+			while (true) {
+				const buffer = Buffer.alloc(8192);
+				const bytes = readSync(0, buffer, 0, buffer.length, null);
+				if (bytes === 0) break;
+				totalBytes += bytes;
+				if (totalBytes > maxBytes) {
+					stdinError = `stdin payload exceeds the ${maxBytes}-byte limit`;
+					break;
+				}
+				chunks.push(buffer.subarray(0, bytes));
+			}
+			stdin = Buffer.concat(chunks).toString("utf8");
+		} catch {
+			stdinError = "could not read prompt payload from stdin";
+		}
+	}
+	const result = await runCommand(argv, { env, cwd: process.cwd(), stdin, stdinError });
 	if (result.stdout !== undefined) print(result.stdout);
 	if (result.stderr !== undefined) fail(result.stderr, result.code);
 	else if (result.code !== 0) process.exitCode = result.code;

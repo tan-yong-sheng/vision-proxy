@@ -12,13 +12,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+	buildConversationContext as buildCoreConversationContext,
+	ASSISTANT_TRUNCATE_CHARS as CORE_ASSISTANT_TRUNCATE_CHARS,
+	CONTEXT_MAX_CHARS as CORE_CONTEXT_MAX_CHARS,
+	RECENT_MESSAGE_COUNT as CORE_RECENT_MESSAGE_COUNT,
+} from "../core.ts";
+import {
+	ASSISTANT_TRUNCATE_CHARS,
 	buildAnalyzeArgs,
+	buildAnalyzeStdinInvocation,
+	buildConversationContext,
+	CONTEXT_MAX_CHARS,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
 	hookTimeoutMs,
+	includeContextEnabled,
 	isImagePath,
 	maxOutputTokens,
 	parsePositiveInt,
+	RECENT_MESSAGE_COUNT,
 	readReminder,
 	resolveImagePath,
 	resolveVpBin,
@@ -193,6 +205,143 @@ test("buildAnalyzeArgs shares one analyze contract for every executor", () => {
 	}
 });
 
+test("buildAnalyzeStdinInvocation keeps prompt text out of argv", () => {
+	const invocation = buildAnalyzeStdinInvocation(
+		["/tmp/a.png"],
+		2000,
+		"question text",
+		"User: context text",
+	);
+	assert.ok(invocation.args.includes("--prompt-stdin"));
+	assert.ok(!invocation.args.some((arg) => arg.includes("question text")));
+	assert.ok(!invocation.args.some((arg) => arg.includes("context text")));
+	assert.deepEqual(JSON.parse(invocation.stdin ?? "{}"), {
+		question: "question text",
+		context: "User: context text",
+	});
+});
+
+test("buildAnalyzeArgs appends --question then --context only when non-empty", () => {
+	const prior = process.env.VP_BIN;
+	try {
+		delete process.env.VP_BIN;
+		const neither = buildAnalyzeArgs(["/tmp/a.png"], 2000);
+		assert.deepEqual(neither.args, ["analyze", "/tmp/a.png", "--max-output-tokens", "2000"]);
+		const questionOnly = buildAnalyzeArgs(["/tmp/a.png"], 2000, "what is this?");
+		assert.deepEqual(questionOnly.args, [
+			"analyze",
+			"/tmp/a.png",
+			"--max-output-tokens",
+			"2000",
+			"--question=what is this?",
+		]);
+		const leadingFlag = buildAnalyzeArgs(["/tmp/a.png"], 2000, "--help");
+		assert.equal(leadingFlag.args.at(-1), "--question=--help");
+		const nulSafe = buildAnalyzeArgs(["/tmp/a.png"], 2000, "q\0", "c\0");
+		assert.deepEqual(nulSafe.args.slice(-2), ["--question=q", "--context=c"]);
+		const contextOnly = buildAnalyzeArgs(["/tmp/a.png"], 2000, undefined, "User: hi");
+		assert.deepEqual(contextOnly.args, [
+			"analyze",
+			"/tmp/a.png",
+			"--max-output-tokens",
+			"2000",
+			"--context=User: hi",
+		]);
+		const both = buildAnalyzeArgs(["/tmp/a.png"], 2000, "q?", "User: hi");
+		assert.deepEqual(both.args, [
+			"analyze",
+			"/tmp/a.png",
+			"--max-output-tokens",
+			"2000",
+			"--question=q?",
+			"--context=User: hi",
+		]);
+		const emptyStringsOmitted = buildAnalyzeArgs(["/tmp/a.png"], 2000, "", "");
+		assert.deepEqual(emptyStringsOmitted.args, [
+			"analyze",
+			"/tmp/a.png",
+			"--max-output-tokens",
+			"2000",
+		]);
+	} finally {
+		if (prior === undefined) delete process.env.VP_BIN;
+		else process.env.VP_BIN = prior;
+	}
+});
+
+test("buildConversationContext mirrors the core.ts last-8 window", () => {
+	assert.equal(RECENT_MESSAGE_COUNT, 8);
+	assert.equal(ASSISTANT_TRUNCATE_CHARS, 500);
+	assert.equal(CONTEXT_MAX_CHARS, 3000);
+	assert.equal(buildConversationContext([]), "");
+	assert.equal(buildConversationContext([{ role: "user", text: "hello" }]), "User: hello");
+	assert.equal(
+		buildConversationContext([{ role: "user", content: "hi via content" }]),
+		"User: hi via content",
+	);
+	assert.equal(
+		buildConversationContext([
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "a" },
+					{ type: "text", text: "b" },
+				],
+			},
+		]),
+		"User: a b",
+	);
+	const longAssistant = "x".repeat(600);
+	const assistantLine = buildConversationContext([{ role: "assistant", text: longAssistant }]);
+	assert.equal(assistantLine, `Assistant: ${"x".repeat(500)}`);
+	const many = Array.from({ length: 12 }, (_, i) => ({ role: "user", text: `m${i}` }));
+	const windowed = buildConversationContext(many);
+	assert.ok(!windowed.includes("m0"), "must keep only the last 8");
+	assert.ok(windowed.includes("m11"), "must keep the most recent message");
+	const mixed = buildConversationContext([
+		{ role: "system", text: "skip me" },
+		{ role: "user", text: "keep me" },
+		{ role: "tool", text: "skip me too" },
+	]);
+	assert.equal(mixed, "User: keep me");
+	const big = Array.from({ length: 8 }, () => ({ role: "user", text: "y".repeat(500) }));
+	const capped = buildConversationContext(big);
+	assert.ok(capped.length <= CONTEXT_MAX_CHARS + 1, "must cap total context length");
+	assert.ok(capped.startsWith("…"), "overflow must keep the tail with a leading ellipsis");
+});
+
+test("hook context limits stay in parity with core.ts", () => {
+	assert.equal(RECENT_MESSAGE_COUNT, CORE_RECENT_MESSAGE_COUNT);
+	assert.equal(ASSISTANT_TRUNCATE_CHARS, CORE_ASSISTANT_TRUNCATE_CHARS);
+	assert.equal(CONTEXT_MAX_CHARS, CORE_CONTEXT_MAX_CHARS);
+});
+
+test("buildConversationContext stays in parity with the core implementation", () => {
+	const messages = [
+		{ role: "system", content: "ignored" },
+		{ role: "user", content: "hello" },
+		{ role: "assistant", content: [{ type: "text", text: "world" }] },
+		{ role: "tool", content: "ignored" },
+	];
+	assert.equal(
+		buildConversationContext(messages),
+		buildCoreConversationContext(messages),
+		"standalone hook context formatting must match core.ts",
+	);
+});
+
+test("includeContextEnabled defaults true and honors VP_INCLUDE_CONTEXT", () => {
+	assert.equal(includeContextEnabled({}), true);
+	assert.equal(includeContextEnabled({ VP_INCLUDE_CONTEXT: undefined }), true);
+	for (const off of ["0", "false", "no", "off", "FALSE", "Off"]) {
+		assert.equal(includeContextEnabled({ VP_INCLUDE_CONTEXT: off }), false, off);
+	}
+	for (const on of ["1", "true", "yes", "on", "TRUE", "On"]) {
+		assert.equal(includeContextEnabled({ VP_INCLUDE_CONTEXT: on }), true, on);
+	}
+	assert.equal(includeContextEnabled({ VP_INCLUDE_CONTEXT: "bogus" }), true);
+});
+
 test("withImageInstruction keeps the historical deny wording", () => {
 	assert.equal(
 		withImageInstruction("DESC", undefined),
@@ -239,6 +388,8 @@ test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 		vpEntryToSpawn,
 		resolveVpBin,
 		buildAnalyzeArgs,
+		buildConversationContext,
+		includeContextEnabled,
 		isImagePath,
 		resolveImagePath,
 		extractImagePaths,

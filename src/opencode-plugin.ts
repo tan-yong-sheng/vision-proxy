@@ -90,17 +90,94 @@ var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
 // if the same message is ever processed again, so context is never duplicated.
 var INJECTION_MARKER = REMINDER_MARKER;
 
+/** Per-session ring buffer of recent user texts for --context. The chat.message
+ * hook sees only the incoming user message (never assistant turns), so entries
+ * are user-only; the shared parser shapes them into the last-8 window. */
+var sessionContexts: Map<string, Array<{ role: string; text: string; id?: string }>> = new Map();
+var sessionQuestions: Map<string, string> = new Map();
+var MAX_CONTEXT_SESSIONS = 50;
+
+function bufferSessionText(
+  sessionId: string | undefined,
+  text: string,
+  messageId?: string,
+): void {
+  try {
+    if (!sessionId || !text) return;
+    var entries = sessionContexts.get(sessionId);
+    var duplicate = Boolean(messageId) && Boolean(entries?.some((entry) => entry.id === messageId));
+    if (duplicate) return;
+    sessionQuestions.delete(sessionId);
+    sessionQuestions.set(sessionId, text);
+    while (sessionQuestions.size > MAX_CONTEXT_SESSIONS) {
+      var oldestQuestion = sessionQuestions.keys().next();
+      if (!oldestQuestion.done) sessionQuestions.delete(oldestQuestion.value);
+      else break;
+    }
+    if (!includeContextEnabled(process.env)) {
+      sessionContexts.delete(sessionId);
+      return;
+    }
+    entries = sessionContexts.get(sessionId);
+    if (entries) {
+      // Refresh active sessions so eviction is LRU rather than FIFO.
+      sessionContexts.delete(sessionId);
+      sessionContexts.set(sessionId, entries);
+    } else {
+      entries = [];
+      sessionContexts.set(sessionId, entries);
+      if (sessionContexts.size > MAX_CONTEXT_SESSIONS) {
+        var oldest = sessionContexts.keys().next();
+        if (!oldest.done) {
+          sessionContexts.delete(oldest.value);
+          sessionQuestions.delete(oldest.value);
+        }
+      }
+    }
+    var boundedText = text.length > CONTEXT_MAX_CHARS ? text.slice(-CONTEXT_MAX_CHARS) : text;
+    entries.push({ role: "user", text: boundedText, id: messageId });
+    if (entries.length > RECENT_MESSAGE_COUNT) entries.splice(0, entries.length - RECENT_MESSAGE_COUNT);
+  } catch (e) {
+    console.error("[vision-proxy] context buffer failed open: " + String(e));
+  }
+}
+
+function buildSessionContext(sessionId: string | undefined, question?: string): string | null {
+  try {
+    if (!includeContextEnabled(process.env)) return null;
+    if (!sessionId) return null;
+    var entries = sessionContexts.get(sessionId);
+    if (!entries || entries.length === 0) return null;
+    sessionContexts.delete(sessionId);
+    sessionContexts.set(sessionId, entries);
+    var contextEntries = entries;
+    var last = entries[entries.length - 1];
+    if (question && last && last.role === "user" && last.text === question) {
+      contextEntries = entries.slice(0, -1);
+    }
+    var built = buildConversationContext(contextEntries);
+    return built ? built : null;
+  } catch (e) {
+    console.error("[vision-proxy] context build failed open: " + String(e));
+    return null;
+  }
+}
+
 /** Run vp analyze and return the fenced description, or null on failure.
  * Only the tool.execute.before (read) path calls this: chat.message emits a
  * static Read reminder instead so message handling never waits on a vision
  * call. Uses an async child process so image analysis never blocks the host
  * event loop. */
-async function runAnalyze(images: string[]): Promise<string | null> {
+async function runAnalyze(
+  images: string[],
+  question?: string | null,
+  context?: string | null,
+): Promise<string | null> {
   if (images.length === 0) return null;
   var vp = resolveVpBin();
   var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
-  var invocation = buildAnalyzeArgs(images, maxTokens);
-  var result = await runVp(invocation.command, invocation.args);
+  var invocation = buildAnalyzeStdinInvocation(images, maxTokens, question ?? undefined, context ?? undefined);
+  var result = await runVp(invocation.command, invocation.args, invocation.stdin);
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === "ENOENT") {
       console.error("[vision-proxy] vp binary not found: " + vp);
@@ -120,9 +197,10 @@ async function runAnalyze(images: string[]): Promise<string | null> {
 function runVp(
   command: string,
   args: string[],
+  stdin?: string,
 ): Promise<{ status: number; stdout: string; stderr: string; error?: NodeJS.ErrnoException }> {
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       command,
       args,
       { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
@@ -134,6 +212,10 @@ function runVp(
         }
       },
     );
+    if (stdin !== undefined) {
+      child.stdin?.on("error", () => { /* fail open on EPIPE */ });
+      child.stdin?.end(stdin);
+    }
   });
 }
 
@@ -146,7 +228,7 @@ function newPartId(): string {
 
 async function handleChatMessage(
   input: { sessionID: string; messageID?: string },
-  output: { message: { sessionID?: string }; parts: any[] },
+  output: { message: { sessionID?: string; id?: string }; parts: any[] },
   cwd: string,
 ): Promise<void> {
   // Idempotency guard: strip reminder parts injected by a previous run of
@@ -165,6 +247,14 @@ async function handleChatMessage(
     }
   }
   const promptText = textChunks.join("\n");
+  // Buffer every user message (image or not) so the last-8 window accumulates
+  // across turns; the analysis point reads it back as --context. Buffering runs
+  // before the image early-return so image-less turns still count as context.
+  bufferSessionText(
+    input.sessionID ?? output.message?.sessionID,
+    promptText,
+    input.messageID ?? output.message?.id,
+  );
   const images: string[] = [];
   for (const candidate of extractImagePaths(promptText)) {
     const resolvedPath = resolveImagePath(candidate, cwd);
@@ -188,8 +278,8 @@ async function handleChatMessage(
 }
 
 async function handleToolExecuteBefore(
-  input: { tool: string },
-  output: { args: any },
+  input: { tool: string; sessionID?: string },
+  output: { args: any; message?: { sessionID?: string } },
   cwd: string,
 ): Promise<void> {
   if (input.tool !== "read") return;
@@ -202,7 +292,10 @@ async function handleToolExecuteBefore(
   if (!isImagePath(argPath)) return;
   const filePath = resolveImagePath(argPath, cwd);
   if (!filePath || !existsSync(filePath)) return;
-  const description = await runAnalyze([filePath]);
+  const sessionId = input.sessionID ?? output.message?.sessionID;
+  const question = sessionId ? sessionQuestions.get(sessionId) : undefined;
+  const context = sessionId ? buildSessionContext(sessionId, question) : null;
+  const description = await runAnalyze([filePath], question, context);
   // Fail-open: when analysis is unavailable, allow the original read.
   if (!description) return;
   // Denying by throw surfaces this message to the model as the tool result,

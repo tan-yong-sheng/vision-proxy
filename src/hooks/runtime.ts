@@ -94,13 +94,121 @@ function resolveVpBin(): string {
 function buildAnalyzeArgs(
 	images: string[],
 	maxTokens: number,
+	question?: string,
+	context?: string,
 ): { command: string; args: string[] } {
 	var vp = resolveVpBin();
 	var prefix = vpEntryToSpawn(vp);
-	return {
-		command: prefix.command,
-		args: prefix.args.concat(["analyze"], images, ["--max-output-tokens", String(maxTokens)]),
-	};
+	var args = prefix.args.concat(["analyze"], images, ["--max-output-tokens", String(maxTokens)]);
+	// biome-ignore lint/style/useTemplate: generated source must stay free of backticks.
+	if (question) args = args.concat(["--question=" + question.replace(/\0/g, "")]);
+	// biome-ignore lint/style/useTemplate: generated source must stay free of backticks.
+	if (context) args = args.concat(["--context=" + context.replace(/\0/g, "")]);
+	return { command: prefix.command, args: args };
+}
+
+/**
+ * Build the JSON payload for --prompt-stdin transport.
+ *
+ * Hosts pass user text via stdin (not argv) so prompts never appear in process
+ * listings. Returns undefined when both sides are empty so callers can omit
+ * the flag entirely. NUL bytes are stripped to match the argv contract.
+ */
+/** Build a sanitized JSON payload for secure prompt transport.
+ * @tags hooks, transport, security
+ */
+function buildPromptStdinPayload(question?: string, context?: string): string | undefined {
+	var q = question ? question.replace(/\0/g, "") : "";
+	var c = context ? context.replace(/\0/g, "") : "";
+	if (!q && !c) return undefined;
+	return JSON.stringify({ question: q, context: c });
+}
+
+/**
+ * Build a vp analyze invocation that carries question/context via stdin.
+ *
+ * Args carry only --prompt-stdin (never --question/--context), so user text
+ * stays out of argv; the caller writes the returned stdin string to the
+ * child's stdin. Direct --question/--context argv remains supported by
+ * buildAnalyzeArgs for interactive CLI use.
+ */
+/** Build a host invocation that keeps prompt text out of argv.
+ * @tags hooks, transport, security
+ */
+function buildAnalyzeStdinInvocation(
+	images: string[],
+	maxTokens: number,
+	question?: string,
+	context?: string,
+): { command: string; args: string[]; stdin?: string } {
+	var vp = resolveVpBin();
+	var prefix = vpEntryToSpawn(vp);
+	var args = prefix.args.concat(["analyze"], images, ["--max-output-tokens", String(maxTokens)]);
+	var payload = buildPromptStdinPayload(question, context);
+	if (payload !== undefined) args = args.concat(["--prompt-stdin"]);
+	return { command: prefix.command, args: args, stdin: payload };
+}
+
+/** Verbatim last-8 conversational windows, mirroring core.ts. */
+const RECENT_MESSAGE_COUNT = 8;
+const ASSISTANT_TRUNCATE_CHARS = 500;
+/** Maximum serialized conversation context sent to the provider.
+ * @tags hooks, context, limits
+ */
+const CONTEXT_MAX_CHARS = 3000;
+
+function extractMessageText(content: unknown): string {
+	// Accept both pre-extracted strings and raw content blocks (string or
+	// TextContent arrays), so Pi AgentMessage shapes and stdio transcript
+	// JSONL entries share one parser.
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	var parts: string[] = [];
+	for (let i = 0; i < content.length; i++) {
+		const c = content[i] as { type?: unknown; text?: unknown };
+		if (c && c.type === "text" && typeof c.text === "string") parts.push(c.text);
+	}
+	return parts.join(" ");
+}
+
+function truncateBuiltContext(result: string): string {
+	if (result.length <= CONTEXT_MAX_CHARS) return result;
+	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+	return "…" + result.slice(-CONTEXT_MAX_CHARS);
+}
+
+/** Build the bounded user/assistant context block for a host adapter.
+ * @tags hooks, context, limits
+ */
+function buildConversationContext(
+	messages: Array<{ role: string; text?: unknown; content?: unknown }>,
+): string {
+	var recent: Array<{ role: string; text?: unknown; content?: unknown }> = [];
+	for (const m of messages) {
+		if (m && (m.role === "user" || m.role === "assistant")) recent.push(m);
+	}
+	if (recent.length > RECENT_MESSAGE_COUNT) recent = recent.slice(-RECENT_MESSAGE_COUNT);
+	const lines: string[] = [];
+	for (const entry of recent) {
+		const raw = entry.text !== undefined ? entry.text : entry.content;
+		const text = extractMessageText(raw);
+		if (!text) continue;
+		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+		if (entry.role === "user") lines.push("User: " + text);
+		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+		else lines.push("Assistant: " + text.slice(0, ASSISTANT_TRUNCATE_CHARS));
+	}
+	return truncateBuiltContext(lines.join("\n"));
+}
+
+/** VP_INCLUDE_CONTEXT gate. Defaults true to match the core.ts default. */
+function includeContextEnabled(env: Record<string, string | undefined>): boolean {
+	var raw = env ? env.VP_INCLUDE_CONTEXT : undefined;
+	if (raw === undefined) return true;
+	var v = String(raw).toLowerCase();
+	if (v === "0" || v === "false" || v === "no" || v === "off") return false;
+	if (v === "1" || v === "true" || v === "yes" || v === "on") return true;
+	return true;
 }
 
 function isImagePath(p: unknown): boolean {
@@ -230,12 +338,18 @@ function readReminder(
 }
 
 export {
+	ASSISTANT_TRUNCATE_CHARS,
 	buildAnalyzeArgs,
+	buildAnalyzeStdinInvocation,
+	buildConversationContext,
+	buildPromptStdinPayload,
+	CONTEXT_MAX_CHARS,
 	DEFAULT_HOOK_TIMEOUT_MS,
 	DEFAULT_MAX_OUTPUT_TOKENS,
 	extractImagePaths,
 	hookTimeoutMs,
 	IMAGE_EXT,
+	includeContextEnabled,
 	isImagePath,
 	MAX_BUFFER_BYTES,
 	MAX_HOOK_TIMEOUT_MS,
@@ -244,6 +358,7 @@ export {
 	MIN_MAX_OUTPUT_TOKENS,
 	maxOutputTokens,
 	parsePositiveInt,
+	RECENT_MESSAGE_COUNT,
 	REMINDER_MARKER,
 	readReminder,
 	resolveImagePath,
@@ -255,6 +370,11 @@ export {
 function constLine(name: string, value: unknown): string {
 	// biome-ignore lint/style/useTemplate: plain concatenation, no template syntax involved.
 	return "var " + name + " = " + JSON.stringify(value) + ";";
+}
+
+function immutableConstLine(name: string, value: unknown): string {
+	// biome-ignore lint/style/useTemplate: plain concatenation, no template syntax involved.
+	return "const " + name + " = " + JSON.stringify(value) + ";";
 }
 
 /**
@@ -294,12 +414,21 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	constLine("MAX_MAX_OUTPUT_TOKENS", MAX_MAX_OUTPUT_TOKENS),
 	constLine("MAX_BUFFER_BYTES", MAX_BUFFER_BYTES),
 	constLine("DEFAULT_VP_BIN", "vp"),
+	immutableConstLine("RECENT_MESSAGE_COUNT", RECENT_MESSAGE_COUNT),
+	immutableConstLine("ASSISTANT_TRUNCATE_CHARS", ASSISTANT_TRUNCATE_CHARS),
+	immutableConstLine("CONTEXT_MAX_CHARS", CONTEXT_MAX_CHARS),
 	parsePositiveInt.toString(),
 	hookTimeoutMs.toString(),
 	maxOutputTokens.toString(),
 	vpEntryToSpawn.toString(),
 	resolveVpBin.toString(),
 	buildAnalyzeArgs.toString(),
+	buildPromptStdinPayload.toString(),
+	buildAnalyzeStdinInvocation.toString(),
+	extractMessageText.toString(),
+	truncateBuiltContext.toString(),
+	buildConversationContext.toString(),
+	includeContextEnabled.toString(),
 	isImagePath.toString(),
 	resolveImagePath.toString(),
 	extractImagePaths.toString(),

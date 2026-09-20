@@ -12,8 +12,13 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { dirname, resolve } from "node:path";
 import { VERSION } from "../version.ts";
 import {
+	ARTIFACT_FILENAME,
+	getLegacyArtifactState,
+	legacyArtifactPath,
+	legacyArtifactPresent,
 	legacyMarkerPath,
 	opencodePluginsDir,
+	removeLegacyArtifact,
 	removeLegacyCodexConfigToml,
 	SUPPORTED,
 	specFor,
@@ -99,6 +104,34 @@ export async function integrationInstall(
 	// Codex migrated from config.toml (legacy .mjs shim) to hooks.json; drop the
 	// stale TOML block so it can't shadow the new JSON registration.
 	if (agent === "codex") removeLegacyCodexConfigToml();
+	// Remove the pre-feature-suffix legacy artifact from the same install dir:
+	// pi/opencode auto-load every file in their dirs, so a stale legacy file
+	// would double-load our hooks on top of the new one. The tri-state result
+	// says directly whether cleanup failed, without a redundant re-probe.
+	const legacyCleanup = removeLegacyArtifact(target);
+	if (legacyCleanup.state === "survives") {
+		const legacyPath = legacyArtifactPath(target);
+		if (cfgPath) {
+			// Hook-agent configs already point at the freshly written script, so
+			// a surviving legacy file is inert; report it, don't fail the install.
+			return {
+				ok: true,
+				message:
+					`installed ${agent} integration -> ${cfgPath} (hook script: ${target})\n` +
+					`Prerequisite: tsx must be installed for the 'npx tsx' hook command to run (npm install -g tsx).\n` +
+					`Warning: legacy artifact at ${legacyPath} could not be removed; it is not executed (the config points at ${target}); delete it manually if desired.`,
+				code: 0,
+			};
+		}
+		// File agents (pi/opencode) auto-load every file in their dirs: a
+		// surviving legacy artifact would double-load our hooks next to the
+		// freshly installed one, so fail visibly instead of shipping both.
+		return {
+			ok: false,
+			message: `legacy artifact at ${legacyPath} could not be removed and would double-load ${agent} hooks; delete it manually, then re-run: vp integration install ${agent}`,
+			code: 1,
+		};
+	}
 	return {
 		ok: true,
 		message: cfgPath
@@ -132,7 +165,7 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 		return {
 			ok: true,
 			message:
-				`opencode plugin: vision-proxy.ts\n\nInstall location: ${pluginPath}/\n\n` +
+				`opencode plugin: ${ARTIFACT_FILENAME}\n\nInstall location: ${pluginPath}/\n\n` +
 				`The plugin registers hooks for parity with claude-code/codex:\n` +
 				`- chat.message -> like UserPromptSubmit (appends a static reminder to read prompt image paths; attached image parts are left untouched)\n` +
 				`- tool.execute.before (read) -> like PreToolUse Read (intercepts reads on images)\n\n` +
@@ -196,24 +229,61 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 		const spec = specFor(agent)!;
 		const installed = isAgentInstalled(spec, installDir);
 		if (!installed) {
-			lines.push(`✗ ${agent}  not installed`);
+			const target = spec.target({ installDir });
+			if (legacyArtifactPresent(target)) {
+				// Legacy-only integration: file-agent dirs auto-load every file
+				// in them, so a surviving stamped legacy artifact is an active
+				// pre-migration integration - count it as installed and out of
+				// date instead of reporting it "not installed".
+				lines.push(
+					`! ${agent}  legacy artifact at ${legacyArtifactPath(target)} - re-run: vp integration install ${agent}`,
+				);
+				installedCount++;
+				outdated++;
+			} else {
+				lines.push(`✗ ${agent}  not installed`);
+			}
 			continue;
 		}
 		installedCount++;
+		const target = spec.target({ installDir });
+		// An agent contributes at most one to `outdated` even when it has
+		// both a surviving legacy artifact and a stale/unknown marker.
+		let agentOutdated = false;
+		if (getLegacyArtifactState(target) === "survives") {
+			const legacyPath = legacyArtifactPath(target);
+			if (spec.configPath() && spec.installedVersion({ installDir }) !== undefined) {
+				// Hook agent with its current script installed: the host config
+				// points at it and hook dirs are not auto-scanned, so the
+				// surviving legacy file is inert. Note it informationally
+				// without counting the agent out of date.
+				lines.push(
+					`- ${agent}  inert legacy artifact at ${legacyPath} (optional: vp integration install ${agent} or delete it manually)`,
+				);
+			} else {
+				// Legacy is live: a legacy-only registration still executes the
+				// legacy file (hook agent), or the dir auto-loads every file so
+				// a surviving legacy would double-load pi/opencode hooks next to
+				// a current one. Re-installing fixes both states.
+				lines.push(
+					`! ${agent}  legacy artifact at ${legacyPath} - re-run: vp integration install ${agent}`,
+				);
+				agentOutdated = true;
+			}
+		}
 		const marker = spec.installedVersion({ installDir });
 		if (!marker) {
 			lines.push(`✓ ${agent}  installed (version unknown)`);
-			outdated++;
-			continue;
-		}
-		if (marker === VERSION) {
-			lines.push(`✓ ${agent}  ${marker}`);
-		} else {
+			agentOutdated = true;
+		} else if (marker !== VERSION) {
 			lines.push(
 				`! ${agent}  ${marker} (installed vp is ${VERSION}, run: vp integration install ${agent})`,
 			);
-			outdated++;
+			agentOutdated = true;
+		} else {
+			lines.push(`✓ ${agent}  ${marker}`);
 		}
+		if (agentOutdated) outdated++;
 	}
 	lines.push("");
 	lines.push(
@@ -246,7 +316,7 @@ export async function integrationUninstall(
 		const result = spec.remove(raw);
 		if (result.removed) writeFileSync(cfgPath, result.raw);
 		configRemoved = result.removed;
-	} else if (!existsSync(target)) {
+	} else if (!existsSync(target) && !legacyArtifactPresent(target)) {
 		return {
 			ok: true,
 			message: `nothing to uninstall (${target} absent)`,
@@ -272,7 +342,35 @@ export async function integrationUninstall(
 	}
 	// Remove the legacy Codex config.toml block defensively on uninstall too.
 	if (agent === "codex") removeLegacyCodexConfigToml();
-	const removed = configRemoved || fileDeleted;
+	// Uninstall also clears a legacy-named artifact from the same dir so an
+	// auto-loading host (pi/opencode) never resurrects our hooks. This also
+	// covers the legacy-only state (new target absent) that skipped the early
+	// return above, so uninstalling a pre-migration install cleans up fully.
+	const legacyCleanup = removeLegacyArtifact(target);
+	// Mirror the install path: the tri-state result says directly whether a
+	// stamped legacy file survived the cleanup attempt. A surviving one on an
+	// auto-loading host (pi/opencode, no cfgPath) would keep double-loading
+	// our hooks after uninstall, so fail visibly instead of reporting
+	// success; hook agents only get a warning because their config no longer
+	// references any script (the leftover is inert).
+	if (legacyCleanup.state === "survives") {
+		const legacyPath = legacyArtifactPath(target);
+		if (!cfgPath) {
+			return {
+				ok: false,
+				message: `legacy artifact at ${legacyPath} could not be removed and would double-load ${agent} hooks; delete it manually, then re-run: vp integration uninstall ${agent}`,
+				code: 1,
+			};
+		}
+		return {
+			ok: true,
+			message:
+				`${configRemoved || fileDeleted || legacyCleanup.removed ? `uninstalled ${agent} integration` : `${agent} integration was not installed`}\n` +
+				`Warning: legacy artifact at ${legacyPath} could not be removed; it is inert (the config no longer references it) and can be deleted manually.`,
+			code: 0,
+		};
+	}
+	const removed = configRemoved || fileDeleted || legacyCleanup.removed;
 	// If the install dir now holds only the artifact we just deleted, clean it
 	// up. Hook-agent script dirs (~/.claude/hooks, ~/.codex/hooks) are shared
 	// with the user's own hooks, so they are left alone.

@@ -9,34 +9,40 @@ boundary below.
 
 ## Shared standalone hook runtime
 
-`src/hooks/runtime.ts` is the single home for the analysis policy shared
+`src/integrations/runtime.ts` is the single home for the analysis policy shared
 by every generated host artifact: image path classification, path
 extraction, env parsing, reminder/instruction rendering, `vp` command
 resolution, and analyze argument construction. Each host adapter
-(`src/hook-script.ts` for Claude Code/Codex, `src/pi-extension.ts`,
-`src/opencode-plugin.ts`) calls into this policy and owns only its
+(`src/integrations/hook-script.ts` for Claude Code/Codex, `src/integrations/pi-extension.ts`,
+`src/integrations/opencode-plugin.ts`) calls into this policy and owns only its
 lifecycle translation (event shapes, image-cache refs, mode gating,
 executors, deny/output shapes).
 
 Standalone constraint: generated artifacts must run with no
 vision-proxy package present (plain `npx tsx`, Pi jiti, opencode plugin
 loader), so the module ships its policy in two shapes from one source
-of truth: real functions (exercised directly by `src/hooks/runtime.test.ts`)
+of truth: real functions (exercised directly by `src/integrations/runtime.test.ts`)
 plus `HOOK_RUNTIME_SOURCE`, composed from those same functions via
 `toString` and inlined into each emitted file at `generate()` time.
 Functions composed into the source string follow the embedding
 discipline (no backtick, no `${`, no imports beyond `node:os`/`node:path`
 plus `process`, plain declarations with no `export`), enforced by golden
-tests over the final artifacts (`src/hooks/generated-sources.test.ts`).
+tests over the final artifacts (`src/integrations/generated-sources.test.ts`).
 
 ## Integration catalog and lifecycle
 
-`src/integrations/` splits host knowledge from orchestration:
+`src/integrations/` splits host knowledge from orchestration, with the
+embedded host sources (`hook-script.ts`, `pi-extension.ts`,
+`opencode-plugin.ts`) and the shared hook runtime living in the same
+module:
 
 - `catalog.ts` owns every host-specific fact: artifact/config paths,
   generated file content (version marker + standalone source), the hook
   command written into host configs, and legacy cleanups. Host configs
-  stay metadata-free (standard keys only).
+  stay metadata-free (standard keys only). Installed artifacts use the
+  feature-suffix naming scheme (`vision-proxy_read.ts`); a marker-stamped
+  legacy `vision-proxy.ts` in the install dir is auto-removed on
+  install/uninstall so auto-loading hosts (pi/opencode) never double-load.
 - `lifecycle.ts` owns install/show/list/status/uninstall orchestration:
   artifact writes, config registration, empty-dir cleanup, version
   reporting, unknown-agent handling.

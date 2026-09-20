@@ -21,11 +21,14 @@ import {
 	generateOpencodePlugin,
 	generatePiExtension,
 	getHomeDir,
+	legacyArtifactPath,
+	legacyArtifactPresent,
 	legacyMarkerPath,
 	makeTsHookCommand,
 	opencodePluginsDir,
 	piExtensionsDir,
 	quotePath,
+	removeLegacyArtifact,
 	removeLegacyCodexConfigToml,
 	SUPPORTED,
 	specFor,
@@ -134,8 +137,8 @@ test("catalog paths honor process.env.HOME", () => {
 	const home = isolate();
 	try {
 		assert.equal(getHomeDir(), home);
-		assert.equal(claudeHookScriptPath(), join(home, ".claude", "hooks", "vision-proxy.ts"));
-		assert.equal(codexHookScriptPath(), join(home, ".codex", "hooks", "vision-proxy.ts"));
+		assert.equal(claudeHookScriptPath(), join(home, ".claude", "hooks", "vision-proxy_read.ts"));
+		assert.equal(codexHookScriptPath(), join(home, ".codex", "hooks", "vision-proxy_read.ts"));
 		assert.equal(claudeCodeConfigPath(), join(home, ".claude", "settings.json"));
 		assert.equal(codexConfigPath(), join(home, ".codex", "hooks.json"));
 		assert.equal(piExtensionsDir(), join(home, ".pi", "agent", "extensions"));
@@ -153,7 +156,7 @@ test("hook-agent specs report script paths and metadata-free commands", () => {
 		for (const agent of ["claude-code", "codex"] as const) {
 			const spec = specFor(agent)!;
 			assert.match(spec.hookCommand(), /^npx tsx /);
-			assert.ok(spec.hookCommand().includes("vision-proxy.ts"));
+			assert.ok(spec.hookCommand().includes("vision-proxy_read.ts"));
 			assert.equal(
 				spec.configPath(),
 				agent === "claude-code"
@@ -179,6 +182,31 @@ test("file-agent specs treat the artifact as the install signal", () => {
 		assert.equal(specFor("opencode")!.hookCommand(), "");
 		assert.ok(specFor("pi")!.target({}).startsWith(home));
 		assert.ok(specFor("opencode")!.target({}).startsWith(home));
+	} finally {
+		reset();
+	}
+});
+
+test("legacy artifact helpers gate on the version marker", () => {
+	isolate();
+	try {
+		const dir = piExtensionsDir();
+		mkdirSync(dir, { recursive: true });
+		const target = join(dir, "vision-proxy_read.ts");
+		const legacy = legacyArtifactPath(target);
+		assert.equal(legacy, join(dir, "vision-proxy.ts"));
+		assert.equal(legacyArtifactPresent(target), false);
+		assert.deepEqual(removeLegacyArtifact(target), { state: "clean", removed: false }); // no-op when absent
+		// User-authored (unstamped) legacy file is never reported or removed.
+		writeFileSync(legacy, "console.log('mine');\n");
+		assert.equal(legacyArtifactPresent(target), false);
+		assert.deepEqual(removeLegacyArtifact(target), { state: "unknown", removed: false });
+		assert.equal(existsSync(legacy), true);
+		// Marker-stamped legacy file is reported and removed.
+		writeFileSync(legacy, `${renderVersionMarker()}\nconsole.log(1);\n`);
+		assert.equal(legacyArtifactPresent(target), true);
+		assert.deepEqual(removeLegacyArtifact(target), { state: "clean", removed: true });
+		assert.equal(existsSync(legacy), false);
 	} finally {
 		reset();
 	}

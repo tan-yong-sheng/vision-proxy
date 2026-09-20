@@ -8,7 +8,7 @@
  *     so the prompt submit is never blocked, the context event appends a
  *     static reminder to read referenced image paths (never spawning vp),
  *     and tool_result replaces image reads with the analyzed description
- *   - install claude-code/codex writes a plain `vision-proxy.ts` hook script
+ *   - install claude-code/codex writes a plain `vision-proxy_read.ts` hook script
  *     (run via `npx tsx`) and registers the hooks (UserPromptSubmit +
  *     PreToolUse matchers) in the agent config with no vision-proxy metadata keys
  *   - uninstall removes only our registrations and the script (idempotent,
@@ -20,7 +20,14 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -40,18 +47,23 @@ function reset() {
 	else process.env.HOME = ORIG_HOME;
 }
 
+// A read-only directory only blocks removal for a non-root POSIX user; root
+// bypasses directory permissions and chmod does not prevent deletion on
+// Windows. Permission-based tests skip where removal cannot be blocked.
+const CAN_BLOCK_REMOVAL = process.platform !== "win32" && (process.getuid?.() ?? 0) !== 0;
+
 function installDir(home: string): string {
 	return join(home, "ext");
 }
 
 /** Absolute path to the generated Claude Code hook script under the isolated HOME. */
 function claudeHookPath(home: string): string {
-	return join(home, ".claude", "hooks", "vision-proxy.ts");
+	return join(home, ".claude", "hooks", "vision-proxy_read.ts");
 }
 
 /** Absolute path to the generated Codex hook script under the isolated HOME. */
 function codexHookPath(home: string): string {
-	return join(home, ".codex", "hooks", "vision-proxy.ts");
+	return join(home, ".codex", "hooks", "vision-proxy_read.ts");
 }
 
 /** Pi's default extensions dir under the isolated HOME (`~/.pi/agent/extensions`). */
@@ -196,7 +208,7 @@ test("install pi writes the vision-proxy extension file with valid source", asyn
 	const dir = installDir(home);
 	const r = await runIntegration("install", "pi", dir);
 	assert.equal(r.ok, true);
-	const target = join(dir, "vision-proxy.ts");
+	const target = join(dir, "vision-proxy_read.ts");
 	assert.equal(existsSync(target), true);
 	const written = readFileSync(target, "utf8");
 	await loadPiExtension(written, home);
@@ -211,7 +223,7 @@ test("pi extension appends a Read reminder in the context event without spawning
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
-	const written = readFileSync(join(dir, "vision-proxy.ts"), "utf8");
+	const written = readFileSync(join(dir, "vision-proxy_read.ts"), "utf8");
 	const { events, dir: testDir, calls, setNextResult } = await loadPiExtension(written, home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
@@ -270,7 +282,7 @@ test("pi extension resolves a tilde (~) image path in the context reminder", asy
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
 	const { events, calls } = await loadPiExtension(
-		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
 		home,
 	);
 	process.env.VP_MODE = "always";
@@ -313,7 +325,7 @@ test("pi extension context event appends a Read reminder to the messages", async
 		events,
 		dir: testDir,
 		calls,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
 
@@ -362,7 +374,7 @@ test("pi extension context event never duplicates the reminder across repeated c
 		events,
 		dir: testDir,
 		calls,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "sub", "photo.jpeg");
 	const b64 = Buffer.from("fakepng").toString("base64");
@@ -416,7 +428,7 @@ test("pi extension context event writes no cache file (reminder-only, no analysi
 	assert.equal(existsSync(cachePath), false, "cache file must not exist before context");
 
 	const source = readFileSync(
-		join(process.env.HOME!, ".pi", "agent", "extensions", "vision-proxy.ts"),
+		join(process.env.HOME!, ".pi", "agent", "extensions", "vision-proxy_read.ts"),
 		"utf8",
 	);
 	const { events, dir: testDir, calls } = await loadPiExtension(source, home);
@@ -455,7 +467,7 @@ test("pi extension keeps the prompt submit instant for queued streaming prompts"
 		events,
 		dir: testDir,
 		calls,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
 
@@ -504,7 +516,7 @@ test("pi extension input handler never spawns vp (no blocking config lookup)", a
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
 	const { events, calls, setNextResult } = await loadPiExtension(
-		readFileSync(join(dir, "vision-proxy.ts"), "utf8"),
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
 		home,
 	);
 	process.env.VP_MODE = "always";
@@ -535,7 +547,7 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		events,
 		dir: testDir,
 		setNextResult,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "pic.png");
 	const b64 = Buffer.from("x").toString("base64");
 	const userMessage = (): any => ({
@@ -606,7 +618,7 @@ test("pi extension leaves attachments untouched and reminds the referenced path"
 		events,
 		dir: testDir,
 		calls,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
 	const unsupported = {
@@ -666,7 +678,7 @@ test("pi extension analyzes a rewritten file fresh on every tool_result read", a
 		dir: testDir,
 		calls,
 		setNextResult,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "screenshot.png");
 	const readEvent = (): any => ({
@@ -714,7 +726,7 @@ test("pi extension preserves the image block across repeated reminder events", a
 		events,
 		dir: testDir,
 		calls,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
 	const unsupported = {
@@ -803,7 +815,7 @@ test("pi extension honors a non-default VP_HOOK_TIMEOUT_MS and falls back on gar
 		dir: testDir,
 		calls,
 		setNextResult,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	// Malformed values must NOT crash the handler and must NOT inject a NaN or
 	// 0 timeout/token. The default fallback (2000) is the only safe value.
@@ -852,7 +864,7 @@ test("pi extension accepts a valid VP_MAX_OUTPUT_TOKENS override", async (t) => 
 		dir: testDir,
 		calls,
 		setNextResult,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	process.env.VP_MAX_OUTPUT_TOKENS = "4096";
 	const imagePath = fakeImage(testDir, "pic.png");
@@ -886,7 +898,7 @@ test("pi extension replaces read results on image files only", async (t) => {
 		events,
 		dir: testDir,
 		setNextResult,
-	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	process.env.VP_MODE = "always";
 	const imagePath = fakeImage(testDir, "pic.png");
 
@@ -953,7 +965,7 @@ test("install opencode writes the plugin file with valid source", async () => {
 	const dir = installDir(home);
 	const r = await runIntegration("install", "opencode", dir);
 	assert.equal(r.ok, true);
-	const target = join(dir, "vision-proxy.ts");
+	const target = join(dir, "vision-proxy_read.ts");
 	assert.equal(existsSync(target), true);
 	const written = readFileSync(target, "utf8");
 	assert.ok(
@@ -978,7 +990,7 @@ test("opencode chat.message appends a Read reminder without spawning vp", async 
 		hooks,
 		dir: testDir,
 		calls,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "photo.png");
 	const output = {
 		message: { sessionID: "sess-1", id: "msg-1" },
@@ -1032,7 +1044,7 @@ test("opencode chat.message strips its prior reminder on re-fire", async (t) => 
 		hooks,
 		dir: testDir,
 		calls,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "photo.png");
 	const output = {
 		message: { sessionID: "sess-1", id: "msg-1" },
@@ -1091,7 +1103,7 @@ test("opencode tool.execute.before denies image reads and fails open", async (t)
 		dir: testDir,
 		calls,
 		setNextResult,
-	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy.ts"), "utf8"), home);
+	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "photo.png");
 
 	// Successful analysis: the read is denied by throwing, with the fenced
@@ -1147,7 +1159,7 @@ test("install pi is idempotent (no error on re-install)", async () => {
 	assert.equal(first.ok, true);
 	const second = await runIntegration("install", "pi", dir);
 	assert.equal(second.ok, true);
-	const target = join(dir, "vision-proxy.ts");
+	const target = join(dir, "vision-proxy_read.ts");
 	assert.equal(existsSync(target), true);
 	reset();
 });
@@ -1316,8 +1328,8 @@ test("show claude-code prints the hook command without writing to disk", async (
 	const home = isolate();
 	const r = await runIntegration("show", "claude-code");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /npx tsx .*vision-proxy\.ts/);
-	assert.match(r.message, /vision-proxy\.ts/);
+	assert.match(r.message, /npx tsx .*vision-proxy_read\.ts/);
+	assert.match(r.message, /vision-proxy_read\.ts/);
 	assert.equal(existsSync(join(process.env.HOME!, ".claude", "settings.json")), false);
 	assert.equal(existsSync(claudeHookPath(home)), false);
 	reset();
@@ -1385,7 +1397,7 @@ test("uninstall pi removes the file and cleans up an empty extensions directory"
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
-	const target = join(dir, "vision-proxy.ts");
+	const target = join(dir, "vision-proxy_read.ts");
 	assert.equal(existsSync(target), true);
 	const r = await runIntegration("uninstall", "pi", dir);
 	assert.equal(r.ok, true);
@@ -1398,7 +1410,7 @@ test("uninstall pi reports the correct success message after install (regression
 	const home = isolate();
 	const dir = installDir(home);
 	await runIntegration("install", "pi", dir);
-	const target = join(dir, "vision-proxy.ts");
+	const target = join(dir, "vision-proxy_read.ts");
 	assert.equal(existsSync(target), true);
 	const r = await runIntegration("uninstall", "pi", dir);
 	assert.equal(r.ok, true);
@@ -1480,7 +1492,7 @@ test("status reports installed version markers and up-to-date summary", async ()
 test("status flags an integration whose embedded version marker is stale", async () => {
 	isolate();
 	await runIntegration("install", "pi");
-	const ext = join(home_pi(), "vision-proxy.ts");
+	const ext = join(home_pi(), "vision-proxy_read.ts");
 	writeFileSync(
 		ext,
 		readFileSync(ext, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"),
@@ -1511,7 +1523,7 @@ test("status reads claude-code version from the hook script, with a metadata-fre
 test("status flags a stale claude-code hook script version", async () => {
 	isolate();
 	await runIntegration("install", "claude-code");
-	const script = join(process.env.HOME!, ".claude", "hooks", "vision-proxy.ts");
+	const script = join(process.env.HOME!, ".claude", "hooks", "vision-proxy_read.ts");
 	writeFileSync(
 		script,
 		readFileSync(script, "utf8").replace(/__VP_VERSION__:[0-9.]+/, "__VP_VERSION__:0.0.9"),
@@ -1523,6 +1535,276 @@ test("status flags a stale claude-code hook script version", async () => {
 		new RegExp(`! claude-code\\s+0\\.0\\.9.*installed vp is ${VERSION.replace(/\./g, "\\.")}`),
 	);
 	assert.match(r.message, /out of date/);
+	reset();
+});
+
+test("install removes a marker-stamped legacy artifact next to the new one", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\nconsole.log("legacy");\n`);
+	await runIntegration("install", "pi");
+	assert.equal(existsSync(legacy), false, "marker-stamped legacy artifact must be removed");
+	assert.equal(existsSync(join(piDir, "vision-proxy_read.ts")), true);
+	reset();
+});
+
+test("install keeps a user-authored file that merely shares the legacy name", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(legacy, "console.log('user file');\n");
+	await runIntegration("install", "pi");
+	assert.equal(readFileSync(legacy, "utf8"), "console.log('user file');\n");
+	reset();
+});
+
+test("uninstall also removes a marker-stamped legacy artifact", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(join(piDir, "vision-proxy_read.ts"), `__VP_VERSION__:${VERSION}\n`);
+	const r = await runIntegration("uninstall", "pi");
+	assert.equal(r.ok, true);
+	assert.equal(existsSync(legacy), false);
+	assert.equal(existsSync(join(piDir, "vision-proxy_read.ts")), false);
+	reset();
+});
+
+test("uninstall of a legacy-only install removes the marker-stamped legacy artifact", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	// Only the pre-migration artifact exists (new target absent): uninstall
+	// must still clear it instead of early-returning "nothing to uninstall".
+	const r = await runIntegration("uninstall", "pi");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /uninstalled pi/);
+	assert.equal(existsSync(legacy), false);
+	// A user-authored legacy file is never removed or reported as uninstalled
+	// (the install dir may have been cleaned up by the uninstall above).
+	mkdirSync(piDir, { recursive: true });
+	writeFileSync(legacy, "console.log('user file');\n");
+	const r2 = await runIntegration("uninstall", "pi");
+	assert.equal(r2.ok, true);
+	assert.match(r2.message, /was not installed|nothing to uninstall/);
+	assert.equal(existsSync(legacy), true);
+	reset();
+});
+
+test("uninstall fails visibly when legacy cleanup cannot remove a stamped legacy file", {
+	skip: !CAN_BLOCK_REMOVAL,
+}, async () => {
+	// POSIX only (CI runs ubuntu): a read-only install dir blocks rmSync on
+	// the stamped legacy file, simulating the cleanup-failure state. With no
+	// current target present, uninstall must fail instead of reporting
+	// success while the legacy file keeps auto-loading pi hooks.
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(piDir, 0o555);
+	try {
+		const r = await runIntegration("uninstall", "pi");
+		assert.equal(
+			r.ok,
+			false,
+			"uninstall must fail when a stamped legacy survives on an auto-loading host",
+		);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /legacy artifact at .+vision-proxy\.ts/);
+		assert.match(r.message, /delete it manually/);
+		assert.equal(existsSync(legacy), true, "unremovable legacy file is left in place");
+	} finally {
+		chmodSync(piDir, 0o755);
+		reset();
+	}
+});
+
+test("uninstall of a hook agent warns about a surviving legacy script instead of failing", {
+	skip: !CAN_BLOCK_REMOVAL,
+}, async () => {
+	const home = isolate();
+	const hooksDir = join(home, ".claude", "hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const legacy = join(hooksDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(hooksDir, 0o555);
+	try {
+		const r = await runIntegration("uninstall", "claude-code");
+		// No config registration and no current target: the leftover legacy
+		// script is inert on hook agents, so uninstall stays successful
+		// with a warning.
+		assert.equal(r.ok, true);
+		assert.equal(r.code, 0);
+		assert.match(r.message, /was not installed/);
+		assert.match(r.message, /Warning: legacy artifact at .+vision-proxy\.ts/);
+	} finally {
+		chmodSync(hooksDir, 0o755);
+		reset();
+	}
+});
+
+test("install fails visibly when legacy cleanup cannot remove a stamped legacy file", {
+	skip: !CAN_BLOCK_REMOVAL,
+}, async () => {
+	// POSIX only (CI runs ubuntu): a read-only install dir lets the install
+	// rewrite the pre-existing target file but blocks rmSync on the legacy
+	// one, simulating the cleanup-failure state CodeRabbit flagged.
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const fresh = join(piDir, "vision-proxy_read.ts");
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(fresh, `__VP_VERSION__:${VERSION}\n`);
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(piDir, 0o555);
+	try {
+		const r = await runIntegration("install", "pi");
+		assert.equal(
+			r.ok,
+			false,
+			"install must fail when a stamped legacy survives on an auto-loading host",
+		);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /legacy artifact at .+vision-proxy\.ts/);
+		assert.match(r.message, /delete it manually/);
+		assert.equal(existsSync(legacy), true, "unremovable legacy file is left in place");
+	} finally {
+		chmodSync(piDir, 0o755);
+		reset();
+	}
+});
+
+test("status hints at a stale legacy artifact until re-installed", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	writeFileSync(join(piDir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(
+		r.message,
+		/legacy artifact at .+vision-proxy\.ts - re-run: vp integration install pi/,
+	);
+	// A legacy-only file-agent install is active (the dir auto-loads it), so
+	// the summary must count it as installed and out of date, not as absent.
+	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
+	reset();
+});
+
+test("status marks an installed agent out of date when a legacy artifact survives", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	writeFileSync(join(piDir, "vision-proxy_read.ts"), `__VP_VERSION__:${VERSION}\n`);
+	writeFileSync(join(piDir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(
+		r.message,
+		/! pi\s+legacy artifact at .+vision-proxy\.ts - re-run: vp integration install pi/,
+	);
+	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
+	reset();
+});
+
+test("status counts a legacy-and-stale agent as out of date only once", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	writeFileSync(join(piDir, "vision-proxy_read.ts"), `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(join(piDir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /! pi\s+legacy artifact at/);
+	assert.match(r.message, /! pi\s+0\.0\.9/);
+	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
+	reset();
+});
+
+test("status reports a surviving legacy hook-agent script as inert, not out of date", async () => {
+	const home = isolate();
+	const hooksDir = join(home, ".claude", "hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const fresh = join(hooksDir, "vision-proxy_read.ts");
+	writeFileSync(fresh, `__VP_VERSION__:${VERSION}\n`);
+	writeFileSync(join(hooksDir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{ hooks: [{ type: "command", command: `npx tsx ${fresh}`, timeout: 30 }] },
+				],
+			},
+		}),
+	);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /- claude-code\s+inert legacy artifact at .+vision-proxy\.ts/);
+	assert.match(r.message, /all 1 integration\(s\) up to date/);
+	reset();
+});
+
+test("status flags a legacy-only hook-agent registration for re-install, not inert", async () => {
+	const home = isolate();
+	const hooksDir = join(home, ".claude", "hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const legacyScript = join(hooksDir, "vision-proxy.ts");
+	writeFileSync(legacyScript, `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{ hooks: [{ type: "command", command: `npx tsx ${legacyScript}`, timeout: 30 }] },
+				],
+			},
+		}),
+	);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	// No _read artifact is installed, so the legacy file is the live registered
+	// hook - status must flag it for re-install, not call it inert (advising
+	// manual deletion would break the user's hooks).
+	assert.match(
+		r.message,
+		/! claude-code\s+legacy artifact at .+vision-proxy\.ts - re-run: vp integration install claude-code/,
+	);
+	assert.match(r.message, /out of date/);
+	reset();
+});
+
+test("reinstall claude-code migrates a legacy-named registration and script", async () => {
+	const home = isolate();
+	const hooksDir = join(home, ".claude", "hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const legacyScript = join(hooksDir, "vision-proxy.ts");
+	writeFileSync(legacyScript, `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{ hooks: [{ type: "command", command: `npx tsx ${legacyScript}`, timeout: 30 }] },
+				],
+			},
+		}),
+	);
+	const r = await runIntegration("install", "claude-code");
+	assert.equal(r.ok, true);
+	assert.equal(existsSync(legacyScript), false, "legacy script must be removed on install");
+	const cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+	assert.equal(cfg.hooks.UserPromptSubmit.length, 1, "install must not duplicate the registration");
+	assert.match(cfg.hooks.UserPromptSubmit[0].hooks[0].command, /vision-proxy_read\.ts/);
 	reset();
 });
 

@@ -8,23 +8,28 @@
  * translation lives here; filesystem orchestration lives in `lifecycle.ts`;
  * the shared hooks-JSON shape lives in `hooks-config.ts`.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { HOOK_SCRIPT_SOURCE } from "../hook-script.ts";
-import { OPENCODE_PLUGIN_SOURCE } from "../opencode-plugin.ts";
-import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
+import { dirname, join } from "node:path";
 import { extractMarkerVersion, renderVersionMarker } from "../version.ts";
+import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
 import { applyHooks, hooksInstalled, removeHooks } from "./hooks-config.ts";
+import { OPENCODE_PLUGIN_SOURCE } from "./opencode-plugin.ts";
+import { PI_EXTENSION_SOURCE } from "./pi-extension.ts";
 import type { AgentSpec } from "./types.ts";
 
 /** Every agent `vp integration` knows how to install. */
 export const SUPPORTED = ["pi", "claude-code", "codex", "opencode"];
 
-const PI_EXTENSION_FILENAME = "vision-proxy.ts";
-const CLAUDE_HOOK_FILENAME = "vision-proxy.ts";
-const CODEX_HOOK_FILENAME = "vision-proxy.ts";
-const OPENCODE_PLUGIN_FILENAME = "vision-proxy.ts";
+/** Installed host artifact name (feature-suffix convention: the Read-time analyze hooks). */
+export const ARTIFACT_FILENAME = "vision-proxy_read.ts";
+const PI_EXTENSION_FILENAME = ARTIFACT_FILENAME;
+const CLAUDE_HOOK_FILENAME = ARTIFACT_FILENAME;
+const CODEX_HOOK_FILENAME = ARTIFACT_FILENAME;
+const OPENCODE_PLUGIN_FILENAME = ARTIFACT_FILENAME;
+
+/** Legacy artifact name used before the feature-suffix naming. */
+export const LEGACY_ARTIFACT_FILENAME = "vision-proxy.ts";
 
 /**
  * Returns the home directory, respecting process.env.HOME for test isolation.
@@ -288,6 +293,94 @@ const codex: AgentSpec = makeHookAgentSpec({
 	scriptPath: codexHookScriptPath,
 	configPath: codexConfigPath,
 });
+
+/** Path of the legacy-named artifact in the directory containing `target`. */
+export function legacyArtifactPath(target: string): string {
+	return join(dirname(target), LEGACY_ARTIFACT_FILENAME);
+}
+
+/**
+ * Observable state of the legacy artifact next to `target`.
+ *
+ * - "survives": a marker-stamped generated legacy file is present
+ *   (cleanups failed or have not run yet).
+ * - "unknown": a legacy file is present but carries no version marker
+ *   (user-authored or unverifiable) - never reported or removed.
+ * - "clean": no legacy artifact to worry about.
+ *
+ * @tags integration, catalog
+ */
+export type LegacyArtifactState = "clean" | "unknown" | "survives";
+
+/**
+ * Probe the legacy artifact next to `target` without removing anything.
+ * Only marker-stamped files we generated count as "survives"; the marker
+ * gate is what protects user-authored files and the shared hook dirs
+ * (claude/codex).
+ *
+ * @tags integration, catalog
+ */
+export function getLegacyArtifactState(target: string): LegacyArtifactState {
+	const legacy = legacyArtifactPath(target);
+	if (!existsSync(legacy)) return "clean";
+	try {
+		return extractMarkerVersion(readFileSync(legacy, "utf8")) !== undefined
+			? "survives"
+			: "unknown";
+	} catch {
+		return "unknown";
+	}
+}
+
+/**
+ * Whether a generated (marker-stamped) legacy artifact exists in the
+ * directory containing `target`. Unstamped files are user-authored and are
+ * never reported or removed.
+ *
+ * @tags integration, catalog
+ */
+export function legacyArtifactPresent(target: string): boolean {
+	return getLegacyArtifactState(target) === "survives";
+}
+
+/**
+ * Result of attempting to remove the legacy artifact next to `target`.
+ *
+ * @tags integration, catalog
+ */
+export interface LegacyCleanupResult {
+	/** "clean" when no stamped legacy was present or removal succeeded,
+	 *  "survives" when a stamped legacy file remains (removal failed),
+	 *  "unknown" when an unstamped legacy file was left untouched. */
+	state: LegacyArtifactState;
+	/** Whether a marker-stamped legacy artifact was removed in this call. */
+	removed: boolean;
+}
+
+/**
+ * Remove the generated legacy artifact next to `target` (pi/opencode dirs
+ * auto-load every file in their dirs, so a stale legacy file would double-load).
+ * Only marker-stamped files we generated are ever removed; the marker gate is
+ * what protects user-authored files and the shared hook dirs (claude/codex).
+ *
+ * The silent catch is deliberate: rmSync failures (EACCES, locked files) are
+ * swallowed here so install/uninstall never abort on cleanup; callers that
+ * must act on a surviving legacy file branch on `state === "survives"`
+ * directly instead of re-probing.
+ *
+ * @tags integration, catalog
+ */
+export function removeLegacyArtifact(target: string): LegacyCleanupResult {
+	const state = getLegacyArtifactState(target);
+	if (state !== "survives") return { state, removed: false };
+	try {
+		rmSync(legacyArtifactPath(target));
+		return { state: "clean", removed: true };
+	} catch {
+		/* leave the stale legacy artifact if removal fails */
+		return { state: "survives", removed: false };
+	}
+}
 
 /**
  * Look up the install adapter for an agent id, or undefined when unknown.

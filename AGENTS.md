@@ -19,14 +19,14 @@ Keep it short and update it when workflows change.
 | Pi-free core | `src/core.ts` | Config, env overrides, image loading/hashing, fencing, and provider dispatch. No Pi runtime deps. |
 | AI SDK adapter | `src/adapter.ts` | Vercel AI SDK `generateText` wrapper for image payloads. |
 | CLI commands | `src/commands/*.ts` | `analyze`, `config`, `provider`, `cache`, `integration`, and `update` subcommands. |
-| Hook script | `src/hook-script.ts` | Embedded `npx tsx` hook script installed by `vp integration install claude-code\|codex`. |
+| Host artifacts | `src/integrations/` | Embedded agent hook sources (`hook-script.ts`, `pi-extension.ts`, `opencode-plugin.ts`), shared hook runtime (`runtime.ts`), and the installer catalog/lifecycle. |
 | Keyring storage | `src/keyring.ts` | Optional `@napi-rs/keyring` OS keyring credential storage. |
 
 ## Important directories
 
 - `src/` - CLI source and Pi-free core.
 - `src/commands/` - CLI subcommands.
-- `src/hook-script.ts` - Embedded `vision-proxy.ts` hook script installed into `~/.claude/hooks/` and `~/.codex/hooks/` (plain `npx tsx`, no config metadata).
+- `src/integrations/` - Host integration module: embedded artifact sources (`hook-script.ts`, `pi-extension.ts`, `opencode-plugin.ts`), shared standalone hook runtime (`runtime.ts`), installer catalog and lifecycle. Generated artifacts are written as `vision-proxy_read.ts` (feature-suffix naming) into `~/.claude/hooks/`, `~/.codex/hooks/`, `~/.pi/agent/extensions/`, `~/.config/opencode/plugins/`; stale marker-stamped `vision-proxy.ts` files are auto-cleaned on install/uninstall.
 - `scripts/` - Installer and launcher helpers (`install.sh`, `vp`).
 - `.claude/hooks/` - Generated fallow gate hook.
 - `.github/workflows/` - CI workflows (ci.yml, release.yml, osv-scanner-pr.yml, osv-scanner-scheduled.yml).
@@ -36,7 +36,7 @@ Keep it short and update it when workflows change.
 - **Module boundary:** `src/core.ts` is the Pi-free core - pure functions and no peer-dep runtime requirements.
 `src/adapter.ts` calls the Vercel AI SDK.
 `src/commands/*.ts` wire CLI arguments to `src/core.ts` and `src/adapter.ts`.
-Agent hook logic lives in `src/hook-script.ts` for the `npx tsx` hook scripts installed by `vp integration install claude-code|codex`; the Pi extension (`src/pi-extension.ts`) and the opencode plugin (`src/opencode-plugin.ts`) carry the same reminder-only submit plus Read-time analyze flow for their hosts.
+Agent hook logic lives in `src/integrations/`: `hook-script.ts` for the `npx tsx` hook scripts installed by `vp integration install claude-code|codex`; the Pi extension (`pi-extension.ts`) and the opencode plugin (`opencode-plugin.ts`) carry the same reminder-only submit plus Read-time analyze flow for their hosts; `runtime.ts` is the shared standalone analysis policy inlined into all three.
 - **Generated code:** `.fallow/cache.bin` is fallow cache data - do not edit manually.
 `.claude/hooks/fallow-gate.sh` is a generated hook wrapper.
 - **Sensitive areas:** `src/adapter.ts` and `src/commands/analyze.ts` make actual API calls to external vision models.
@@ -92,7 +92,7 @@ Runtime requirements:
 - **Do not edit:** `.fallow/cache.bin` - it's fallow binary cache data, not source.
 `.claude/hooks/fallow-gate.sh` - it's a generated hook; edit `src/core.ts` for sanitization/fencing behavior and `src/commands/analyze.ts` for analysis behavior.
 - **Always ask before:** Adding new production dependencies to `package.json` - current deps are minimal and chosen deliberately.
-Changing `VP_*` env var names - they must stay in sync with `src/core.ts`, `src/cache.ts`, `src/keyring.ts`, `src/hook-script.ts`, `src/pi-extension.ts`, and `src/opencode-plugin.ts`.
+Changing `VP_*` env var names - they must stay in sync with `src/core.ts`, `src/cache.ts`, `src/keyring.ts`, `src/integrations/hook-script.ts`, `src/integrations/pi-extension.ts`, and `src/integrations/opencode-plugin.ts`.
 - **Preferred style:** Pure functions in `src/core.ts` and `src/commands/*.ts` with type-only imports from peer deps.
 No side effects at module scope.
 Tests use `node:test` and `node:assert` - no test runner dependency.

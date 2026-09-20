@@ -11,10 +11,10 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HOOK_SCRIPT_SOURCE } from "../hook-script.ts";
-import { OPENCODE_PLUGIN_SOURCE } from "../opencode-plugin.ts";
-import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
 import { renderVersionMarker } from "../version.ts";
+import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
+import { OPENCODE_PLUGIN_SOURCE } from "./opencode-plugin.ts";
+import { PI_EXTENSION_SOURCE } from "./pi-extension.ts";
 import { HOOK_RUNTIME_SOURCE, standaloneViolations } from "./runtime.ts";
 
 const HOSTS: Array<{ name: string; source: string }> = [

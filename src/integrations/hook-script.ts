@@ -2,8 +2,8 @@
  * Embedded agent hook script source.
  *
  * `vp integration install claude-code` writes this exact TypeScript to
- * `~/.claude/hooks/vision-proxy.ts`, and `vp integration install codex`
- * writes it to `~/.codex/hooks/vision-proxy.ts`. Each host registers its
+ * `~/.claude/hooks/vision-proxy_read.ts`, and `vp integration install codex`
+ * writes it to `~/.codex/hooks/vision-proxy_read.ts`. Each host registers its
  * copy as a plain command (`npx tsx <path>`) in its hooks config, so the
  * config carries only standard keys (type, command, timeout, matcher) and
  * no vision-proxy metadata. The installed file carries a version marker
@@ -18,7 +18,7 @@
  *
  * Composition: the shared analysis policy (path classification, env parsing,
  * reminder rendering, vp resolution) is inlined from the canonical runtime
- * (`src/hooks/runtime.ts`) at generate() time; the adapter below owns only
+ * (`src/integrations/runtime.ts`) at generate() time; the adapter below owns only
  * stdio event translation, image-cache refs, the sync executor, and the
  * deny/output shapes. The emitted file stays standalone (no package import).
  *
@@ -27,7 +27,7 @@
  * The generated source must therefore never contain a backtick or a dollar
  * sign followed by an opening brace.
  */
-import { HOOK_RUNTIME_SOURCE } from "./hooks/runtime.ts";
+import { HOOK_RUNTIME_SOURCE } from "./runtime.ts";
 
 // biome-ignore lint/complexity/noUselessStringRaw: String.raw keeps every composed chunk under the same embedding discipline so a future escape cannot silently interpolate.
 const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx

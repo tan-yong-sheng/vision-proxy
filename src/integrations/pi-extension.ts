@@ -2,7 +2,7 @@
  * Embedded Pi extension source.
  *
  * `vp integration install pi` writes this exact TypeScript into Pi's global
- * extensions directory (`~/.pi/agent/extensions/vision-proxy.ts`). Pi auto-loads
+ * extensions directory (`~/.pi/agent/extensions/vision-proxy_read.ts`). Pi auto-loads
  * it via its `jiti` loader, so it must run as plain TypeScript with no build step.
  *
  * The extension hooks into Pi's lifecycle events at parity with the Claude Code /
@@ -34,7 +34,7 @@
  *
  * Composition: the shared analysis policy (path classification, env parsing,
  * reminder rendering, vp resolution) is inlined from the canonical runtime
- * (`src/hooks/runtime.ts`) at generate() time; the adapter below owns only
+ * (`src/integrations/runtime.ts`) at generate() time; the adapter below owns only
  * Pi lifecycle translation, mode gating, the async executor with AbortSignal
  * handling, and the tool_result output shape. The emitted file stays
  * standalone (no package import).
@@ -44,7 +44,7 @@
  * The generated source must therefore never contain a backtick or a dollar
  * sign followed by an opening brace.
  */
-import { HOOK_RUNTIME_SOURCE } from "./hooks/runtime.ts";
+import { HOOK_RUNTIME_SOURCE } from "./runtime.ts";
 
 // biome-ignore lint/complexity/noUselessStringRaw: String.raw keeps every composed chunk under the same embedding discipline so a future escape cannot silently interpolate.
 const PI_EXTENSION_HEADER = String.raw`/**

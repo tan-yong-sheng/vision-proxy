@@ -31,6 +31,7 @@ import {
 	readImageFileWithReason,
 	resolveCropEntry,
 	storeImageMeta,
+	truncateContext,
 } from "../core.ts";
 import { isKnownProvider, resolveModel } from "../provider.ts";
 import type { AnalyzeFlags, AnalyzeOutcome } from "./types.ts";
@@ -147,17 +148,14 @@ export async function runAnalyze(
 	}
 
 	const question = flags.question ?? "";
+	const context = config.includeContext ? truncateContext(flags.context?.trim() ?? "") : "";
+	const promptHash = hashImageData(JSON.stringify([question, context]));
 
 	// Cache-first single-image default path.
 	if (!flags.joint && payloads.length === 1) {
 		const p = payloads[0]!;
 		const cropSig = p.crop ? cropSignature(p.crop) : undefined;
-		const cacheKey = buildToolCacheKey(
-			[p.hash],
-			cropSig,
-			hashImageData(question),
-			`${provider}/${modelId}`,
-		);
+		const cacheKey = buildToolCacheKey([p.hash], cropSig, promptHash, `${provider}/${modelId}`);
 		const cached = await cacheGet(cacheKey);
 		if (cached !== undefined) {
 			const description = cached;
@@ -176,6 +174,7 @@ export async function runAnalyze(
 			model: modelOutcome.model.model,
 			systemPrompt,
 			question,
+			context: context ? context : undefined,
 			maxOutputTokens: flags.maxOutputTokens,
 		});
 		const description = resp.text;
@@ -196,7 +195,7 @@ export async function runAnalyze(
 	const jointCacheKey = buildToolCacheKey(
 		allHashes,
 		flags.joint ? `joint:${cropSig}` : cropSig,
-		hashImageData(question),
+		promptHash,
 		`${provider}/${modelId}`,
 	);
 	const cachedJoint = await cacheGet(jointCacheKey);
@@ -221,6 +220,7 @@ export async function runAnalyze(
 		model: modelOutcome.model.model,
 		systemPrompt,
 		question,
+		context: context ? context : undefined,
 		maxOutputTokens: flags.maxOutputTokens,
 	});
 	const description = resp.text;

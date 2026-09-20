@@ -43,7 +43,7 @@ interface VisionConfig {
 | `modelId` | string | `claude-sonnet-4-5` | Model id for the selected provider. |
 | `mode` | string | `fallback` | When to route tool hooks: `fallback`, `always`, or `off`. |
 | `systemPrompt` | string | built-in | System prompt sent to the model. |
-| `includeContext` | boolean | `false` | Whether to include extra context in the prompt. |
+| `includeContext` | boolean | `true` | Whether to include extra context in the prompt. |
 | `tool` | string | `on` | Enable/disable the tool-mode proxy: `on` or `off`. |
 | `maxImagesPerCall` | number | `4` | Max images a single `vp analyze` call may receive. This is the canonical, single image limit. |
 | `maxBatch` | number | `4` | **Deprecated.** One-release alias for `maxImagesPerCall`. Set `maxImagesPerCall` instead. |
@@ -99,7 +99,7 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` |
 | `VP_MODEL` | `modelId` | `VP_MODEL=gpt-4o` |
 | `VP_MODE` | `mode` | `VP_MODE=always` |
-| `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=true` |
+| `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=false` disables sending the last-8 conversation slice (`--context`) to the vision provider. The current prompt (`--question`) is still sent. |
 | `VP_TOOL` | `tool` | `VP_TOOL=off` |
 | `VP_MAX_IMAGES_PER_CALL` | `maxImagesPerCall` | `VP_MAX_IMAGES_PER_CALL=2` |
 | `VP_MAX_BATCH` | `maxBatch` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL`. |

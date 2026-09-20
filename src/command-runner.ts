@@ -69,6 +69,7 @@ export const VALUE_FLAGS = new Set([
 	"max-output-tokens",
 	"question",
 	"q",
+	"context",
 	"api-key",
 	"apiKey",
 	"older",
@@ -176,6 +177,7 @@ analyze options:
   --json             machine-readable output
   --max-output-tokens <n>  cap response tokens
   --question <text>  text to analyze against the image
+  --context <text>   recent conversation context for the analysis
   --api-key <key>    explicit provider key
 
 config options:
@@ -242,6 +244,7 @@ Options:
   --json               emit machine-readable JSON to stdout
   --max-output-tokens <n>  cap the model response tokens
   --question <text>    text to analyze against the image (-q)
+  --context <text>     recent conversation context for the analysis
   --api-key <key>      explicit provider API key (-apiKey)
   -h, --help           show this help
 
@@ -643,6 +646,7 @@ export async function runCommand(
 					? Number(str(flags, "max-output-tokens"))
 					: undefined,
 				question: str(flags, "question") ?? str(flags, "q"),
+				context: str(flags, "context"),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

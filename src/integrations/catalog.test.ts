@@ -196,16 +196,16 @@ test("legacy artifact helpers gate on the version marker", () => {
 		const legacy = legacyArtifactPath(target);
 		assert.equal(legacy, join(dir, "vision-proxy.ts"));
 		assert.equal(legacyArtifactPresent(target), false);
-		removeLegacyArtifact(target); // no-op when absent
+		assert.deepEqual(removeLegacyArtifact(target), { state: "clean", removed: false }); // no-op when absent
 		// User-authored (unstamped) legacy file is never reported or removed.
 		writeFileSync(legacy, "console.log('mine');\n");
 		assert.equal(legacyArtifactPresent(target), false);
-		removeLegacyArtifact(target);
+		assert.deepEqual(removeLegacyArtifact(target), { state: "unknown", removed: false });
 		assert.equal(existsSync(legacy), true);
 		// Marker-stamped legacy file is reported and removed.
 		writeFileSync(legacy, `${renderVersionMarker()}\nconsole.log(1);\n`);
 		assert.equal(legacyArtifactPresent(target), true);
-		removeLegacyArtifact(target);
+		assert.deepEqual(removeLegacyArtifact(target), { state: "clean", removed: true });
 		assert.equal(existsSync(legacy), false);
 	} finally {
 		reset();

@@ -300,6 +300,39 @@ export function legacyArtifactPath(target: string): string {
 }
 
 /**
+ * Observable state of the legacy artifact next to `target`.
+ *
+ * - "survives": a marker-stamped generated legacy file is present
+ *   (cleanups failed or have not run yet).
+ * - "unknown": a legacy file is present but carries no version marker
+ *   (user-authored or unverifiable) - never reported or removed.
+ * - "clean": no legacy artifact to worry about.
+ *
+ * @tags integration, catalog
+ */
+export type LegacyArtifactState = "clean" | "unknown" | "survives";
+
+/**
+ * Probe the legacy artifact next to `target` without removing anything.
+ * Only marker-stamped files we generated count as "survives"; the marker
+ * gate is what protects user-authored files and the shared hook dirs
+ * (claude/codex).
+ *
+ * @tags integration, catalog
+ */
+export function getLegacyArtifactState(target: string): LegacyArtifactState {
+	const legacy = legacyArtifactPath(target);
+	if (!existsSync(legacy)) return "clean";
+	try {
+		return extractMarkerVersion(readFileSync(legacy, "utf8")) !== undefined
+			? "survives"
+			: "unknown";
+	} catch {
+		return "unknown";
+	}
+}
+
+/**
  * Whether a generated (marker-stamped) legacy artifact exists in the
  * directory containing `target`. Unstamped files are user-authored and are
  * never reported or removed.
@@ -307,13 +340,21 @@ export function legacyArtifactPath(target: string): string {
  * @tags integration, catalog
  */
 export function legacyArtifactPresent(target: string): boolean {
-	const legacy = legacyArtifactPath(target);
-	if (!existsSync(legacy)) return false;
-	try {
-		return extractMarkerVersion(readFileSync(legacy, "utf8")) !== undefined;
-	} catch {
-		return false;
-	}
+	return getLegacyArtifactState(target) === "survives";
+}
+
+/**
+ * Result of attempting to remove the legacy artifact next to `target`.
+ *
+ * @tags integration, catalog
+ */
+export interface LegacyCleanupResult {
+	/** "clean" when no stamped legacy was present or removal succeeded,
+	 *  "survives" when a stamped legacy file remains (removal failed),
+	 *  "unknown" when an unstamped legacy file was left untouched. */
+	state: LegacyArtifactState;
+	/** Whether a marker-stamped legacy artifact was removed in this call. */
+	removed: boolean;
 }
 
 /**
@@ -321,24 +362,23 @@ export function legacyArtifactPresent(target: string): boolean {
  * auto-load every file in their dirs, so a stale legacy file would double-load).
  * Only marker-stamped files we generated are ever removed; the marker gate is
  * what protects user-authored files and the shared hook dirs (claude/codex).
- * Returns whether a legacy artifact was removed.
  *
  * The silent catch is deliberate: rmSync failures (EACCES, locked files) are
- * swallowed here so install/uninstall never abort on cleanup. A caller that
- * must detect a surviving legacy file re-checks `legacyArtifactPresent(target)`
- * after the call - the return value only says "removed in this call", it does
- * not distinguish "no legacy" from "removal failed".
+ * swallowed here so install/uninstall never abort on cleanup; callers that
+ * must act on a surviving legacy file branch on `state === "survives"`
+ * directly instead of re-probing.
  *
  * @tags integration, catalog
  */
-export function removeLegacyArtifact(target: string): boolean {
-	if (!legacyArtifactPresent(target)) return false;
+export function removeLegacyArtifact(target: string): LegacyCleanupResult {
+	const state = getLegacyArtifactState(target);
+	if (state !== "survives") return { state, removed: false };
 	try {
 		rmSync(legacyArtifactPath(target));
-		return true;
+		return { state: "clean", removed: true };
 	} catch {
 		/* leave the stale legacy artifact if removal fails */
-		return false;
+		return { state: "survives", removed: false };
 	}
 }
 

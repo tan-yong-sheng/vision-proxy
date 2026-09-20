@@ -1740,6 +1740,35 @@ test("status reports a surviving legacy hook-agent script as inert, not out of d
 	reset();
 });
 
+test("status flags a legacy-only hook-agent registration for re-install, not inert", async () => {
+	const home = isolate();
+	const hooksDir = join(home, ".claude", "hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const legacyScript = join(hooksDir, "vision-proxy.ts");
+	writeFileSync(legacyScript, `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{ hooks: [{ type: "command", command: `npx tsx ${legacyScript}`, timeout: 30 }] },
+				],
+			},
+		}),
+	);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	// No _read artifact is installed, so the legacy file is the live registered
+	// hook - status must flag it for re-install, not call it inert (advising
+	// manual deletion would break the user's hooks).
+	assert.match(
+		r.message,
+		/! claude-code\s+legacy artifact at .+vision-proxy\.ts - re-run: vp integration install claude-code/,
+	);
+	assert.match(r.message, /out of date/);
+	reset();
+});
+
 test("reinstall claude-code migrates a legacy-named registration and script", async () => {
 	const home = isolate();
 	const hooksDir = join(home, ".claude", "hooks");

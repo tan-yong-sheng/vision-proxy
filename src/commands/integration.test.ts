@@ -1593,6 +1593,56 @@ test("uninstall of a legacy-only install removes the marker-stamped legacy artif
 	reset();
 });
 
+test("uninstall fails visibly when legacy cleanup cannot remove a stamped legacy file", async () => {
+	// POSIX only (CI runs ubuntu): a read-only install dir blocks rmSync on
+	// the stamped legacy file, simulating the cleanup-failure state. With no
+	// current target present, uninstall must fail instead of reporting
+	// success while the legacy file keeps auto-loading pi hooks.
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(piDir, 0o555);
+	try {
+		const r = await runIntegration("uninstall", "pi");
+		assert.equal(
+			r.ok,
+			false,
+			"uninstall must fail when a stamped legacy survives on an auto-loading host",
+		);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /legacy artifact at .+vision-proxy\.ts/);
+		assert.match(r.message, /delete it manually/);
+		assert.equal(existsSync(legacy), true, "unremovable legacy file is left in place");
+	} finally {
+		chmodSync(piDir, 0o755);
+		reset();
+	}
+});
+
+test("uninstall of a hook agent warns about a surviving legacy script instead of failing", async () => {
+	const home = isolate();
+	const hooksDir = join(home, ".claude", "hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const legacy = join(hooksDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(hooksDir, 0o555);
+	try {
+		const r = await runIntegration("uninstall", "claude-code");
+		// No config registration and no current target: the leftover legacy
+		// script is inert on hook agents, so uninstall stays successful
+		// with a warning.
+		assert.equal(r.ok, true);
+		assert.equal(r.code, 0);
+		assert.match(r.message, /was not installed/);
+		assert.match(r.message, /Warning: legacy artifact at .+vision-proxy\.ts/);
+	} finally {
+		chmodSync(hooksDir, 0o755);
+		reset();
+	}
+});
+
 test("install fails visibly when legacy cleanup cannot remove a stamped legacy file", async () => {
 	// POSIX only (CI runs ubuntu): a read-only install dir lets the install
 	// rewrite the pre-existing target file but blocks rmSync on the legacy
@@ -1649,6 +1699,44 @@ test("status marks an installed agent out of date when a legacy artifact survive
 		/! pi\s+legacy artifact at .+vision-proxy\.ts - re-run: vp integration install pi/,
 	);
 	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
+	reset();
+});
+
+test("status counts a legacy-and-stale agent as out of date only once", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	writeFileSync(join(piDir, "vision-proxy_read.ts"), `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(join(piDir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /! pi\s+legacy artifact at/);
+	assert.match(r.message, /! pi\s+0\.0\.9/);
+	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
+	reset();
+});
+
+test("status reports a surviving legacy hook-agent script as inert, not out of date", async () => {
+	const home = isolate();
+	const hooksDir = join(home, ".claude", "hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const fresh = join(hooksDir, "vision-proxy_read.ts");
+	writeFileSync(fresh, `__VP_VERSION__:${VERSION}\n`);
+	writeFileSync(join(hooksDir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(
+		join(home, ".claude", "settings.json"),
+		JSON.stringify({
+			hooks: {
+				UserPromptSubmit: [
+					{ hooks: [{ type: "command", command: `npx tsx ${fresh}`, timeout: 30 }] },
+				],
+			},
+		}),
+	);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /- claude-code\s+inert legacy artifact at .+vision-proxy\.ts/);
+	assert.match(r.message, /all 1 integration\(s\) up to date/);
 	reset();
 });
 

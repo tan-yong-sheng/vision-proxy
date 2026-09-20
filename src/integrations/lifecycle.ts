@@ -229,12 +229,19 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 		const spec = specFor(agent)!;
 		const installed = isAgentInstalled(spec, installDir);
 		if (!installed) {
-			lines.push(`✗ ${agent}  not installed`);
 			const target = spec.target({ installDir });
 			if (legacyArtifactPresent(target)) {
+				// Legacy-only integration: file-agent dirs auto-load every file
+				// in them, so a surviving stamped legacy artifact is an active
+				// pre-migration integration - count it as installed and out of
+				// date instead of reporting it "not installed".
 				lines.push(
 					`! ${agent}  legacy artifact at ${legacyArtifactPath(target)} - re-run: vp integration install ${agent}`,
 				);
+				installedCount++;
+				outdated++;
+			} else {
+				lines.push(`✗ ${agent}  not installed`);
 			}
 			continue;
 		}

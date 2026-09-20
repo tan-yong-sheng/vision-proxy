@@ -47,6 +47,11 @@ function reset() {
 	else process.env.HOME = ORIG_HOME;
 }
 
+// A read-only directory only blocks removal for a non-root POSIX user; root
+// bypasses directory permissions and chmod does not prevent deletion on
+// Windows. Permission-based tests skip where removal cannot be blocked.
+const CAN_BLOCK_REMOVAL = process.platform !== "win32" && (process.getuid?.() ?? 0) !== 0;
+
 function installDir(home: string): string {
 	return join(home, "ext");
 }
@@ -1593,7 +1598,9 @@ test("uninstall of a legacy-only install removes the marker-stamped legacy artif
 	reset();
 });
 
-test("uninstall fails visibly when legacy cleanup cannot remove a stamped legacy file", async () => {
+test("uninstall fails visibly when legacy cleanup cannot remove a stamped legacy file", {
+	skip: !CAN_BLOCK_REMOVAL,
+}, async () => {
 	// POSIX only (CI runs ubuntu): a read-only install dir blocks rmSync on
 	// the stamped legacy file, simulating the cleanup-failure state. With no
 	// current target present, uninstall must fail instead of reporting
@@ -1621,7 +1628,9 @@ test("uninstall fails visibly when legacy cleanup cannot remove a stamped legacy
 	}
 });
 
-test("uninstall of a hook agent warns about a surviving legacy script instead of failing", async () => {
+test("uninstall of a hook agent warns about a surviving legacy script instead of failing", {
+	skip: !CAN_BLOCK_REMOVAL,
+}, async () => {
 	const home = isolate();
 	const hooksDir = join(home, ".claude", "hooks");
 	mkdirSync(hooksDir, { recursive: true });
@@ -1643,7 +1652,9 @@ test("uninstall of a hook agent warns about a surviving legacy script instead of
 	}
 });
 
-test("install fails visibly when legacy cleanup cannot remove a stamped legacy file", async () => {
+test("install fails visibly when legacy cleanup cannot remove a stamped legacy file", {
+	skip: !CAN_BLOCK_REMOVAL,
+}, async () => {
 	// POSIX only (CI runs ubuntu): a read-only install dir lets the install
 	// rewrite the pre-existing target file but blocks rmSync on the legacy
 	// one, simulating the cleanup-failure state CodeRabbit flagged.
@@ -1683,6 +1694,9 @@ test("status hints at a stale legacy artifact until re-installed", async () => {
 		r.message,
 		/legacy artifact at .+vision-proxy\.ts - re-run: vp integration install pi/,
 	);
+	// A legacy-only file-agent install is active (the dir auto-loads it), so
+	// the summary must count it as installed and out of date, not as absent.
+	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
 	reset();
 });
 

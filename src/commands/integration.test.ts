@@ -1563,6 +1563,29 @@ test("uninstall also removes a marker-stamped legacy artifact", async () => {
 	reset();
 });
 
+test("uninstall of a legacy-only install removes the marker-stamped legacy artifact", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	// Only the pre-migration artifact exists (new target absent): uninstall
+	// must still clear it instead of early-returning "nothing to uninstall".
+	const r = await runIntegration("uninstall", "pi");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /uninstalled pi/);
+	assert.equal(existsSync(legacy), false);
+	// A user-authored legacy file is never removed or reported as uninstalled
+	// (the install dir may have been cleaned up by the uninstall above).
+	mkdirSync(piDir, { recursive: true });
+	writeFileSync(legacy, "console.log('user file');\n");
+	const r2 = await runIntegration("uninstall", "pi");
+	assert.equal(r2.ok, true);
+	assert.match(r2.message, /was not installed|nothing to uninstall/);
+	assert.equal(existsSync(legacy), true);
+	reset();
+});
+
 test("status hints at a stale legacy artifact until re-installed", async () => {
 	isolate();
 	const piDir = home_pi();

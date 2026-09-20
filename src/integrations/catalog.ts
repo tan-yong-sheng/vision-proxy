@@ -318,18 +318,21 @@ export function legacyArtifactPresent(target: string): boolean {
 
 /**
  * Remove the generated legacy artifact next to `target` (pi/opencode dirs
- * auto-load every file, so a stale legacy file would double-load). Only
- * marker-stamped files we generated are ever removed; user-authored files
- * and shared hook dirs are left untouched.
+ * auto-load every file in their dirs, so a stale legacy file would double-load).
+ * Only marker-stamped files we generated are ever removed; the marker gate is
+ * what protects user-authored files and the shared hook dirs (claude/codex).
+ * Returns whether a legacy artifact was removed.
  *
  * @tags integration, catalog
  */
-export function removeLegacyArtifact(target: string): void {
-	if (!legacyArtifactPresent(target)) return;
+export function removeLegacyArtifact(target: string): boolean {
+	if (!legacyArtifactPresent(target)) return false;
 	try {
 		rmSync(legacyArtifactPath(target));
+		return true;
 	} catch {
 		/* leave the stale legacy artifact if removal fails */
+		return false;
 	}
 }
 

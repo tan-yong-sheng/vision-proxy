@@ -260,7 +260,7 @@ export async function integrationUninstall(
 		const result = spec.remove(raw);
 		if (result.removed) writeFileSync(cfgPath, result.raw);
 		configRemoved = result.removed;
-	} else if (!existsSync(target)) {
+	} else if (!existsSync(target) && !legacyArtifactPresent(target)) {
 		return {
 			ok: true,
 			message: `nothing to uninstall (${target} absent)`,
@@ -287,9 +287,11 @@ export async function integrationUninstall(
 	// Remove the legacy Codex config.toml block defensively on uninstall too.
 	if (agent === "codex") removeLegacyCodexConfigToml();
 	// Uninstall also clears a legacy-named artifact from the same dir so an
-	// auto-loading host (pi/opencode) never resurrects our hooks.
-	removeLegacyArtifact(target);
-	const removed = configRemoved || fileDeleted;
+	// auto-loading host (pi/opencode) never resurrects our hooks. This also
+	// covers the legacy-only state (new target absent) that skipped the early
+	// return above, so uninstalling a pre-migration install cleans up fully.
+	const legacyRemoved = removeLegacyArtifact(target);
+	const removed = configRemoved || fileDeleted || legacyRemoved;
 	// If the install dir now holds only the artifact we just deleted, clean it
 	// up. Hook-agent script dirs (~/.claude/hooks, ~/.codex/hooks) are shared
 	// with the user's own hooks, so they are left alone.

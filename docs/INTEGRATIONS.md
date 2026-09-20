@@ -6,7 +6,7 @@ Install `vp` into an agent so it can see images in your prompts.
 
 Prerequisite: `tsx` must be installed for the `npx tsx` hook command to run (`npm install -g tsx`).
 
-Writes a `vision-proxy.ts` hook script to `~/.claude/hooks/` and registers two hooks in `~/.claude/settings.json`, both running it as a plain `npx tsx ~/.claude/hooks/vision-proxy.ts` command with only standard hook keys (no vision-proxy metadata in the config):
+Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers two hooks in `~/.claude/settings.json`, both running it as a plain `npx tsx ~/.claude/hooks/vision-proxy_read.ts` command with only standard hook keys (no vision-proxy metadata in the config):
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Pasted/attached images (rendered as `[Image #N]` refs) are resolved via Claude Code's `image-cache/<session>/<N>.<ext>` so each gets a reminder line too. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse Read` - the single analysis point: describes an image read via the `Read` tool (`file_path`).
@@ -26,7 +26,7 @@ vp integration uninstall claude-code
 
 Prerequisite: `tsx` must be installed for the `npx tsx` hook command to run (`npm install -g tsx`).
 
-Writes the same `vision-proxy.ts` hook script to `~/.codex/hooks/` and registers three hooks in `~/.codex/hooks.json` as plain `npx tsx ~/.codex/hooks/vision-proxy.ts` commands with only standard hook keys:
+Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and registers three hooks in `~/.codex/hooks.json` as plain `npx tsx ~/.codex/hooks/vision-proxy_read.ts` commands with only standard hook keys:
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse Read` - analyzes image reads requested through the `Read` tool (`file_path`).
@@ -49,7 +49,7 @@ vp integration uninstall codex
 
 ## Pi
 
-Installs the `vision-proxy.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
+Installs the `vision-proxy_read.ts` extension into `~/.pi/agent/extensions/`. The extension hooks into Pi's lifecycle events (no tool is registered, keeping system tokens low):
 
 - `input` — no-op. Returns immediately so the user's prompt is accepted the instant they press Enter.
 - `context` — appends a static reminder to read each image path referenced in the user text with the `read` tool. It never shells out to `vp analyze`, so sends stay fast. Image attachments are left untouched so the model sees them natively.
@@ -80,7 +80,7 @@ Configuration options (via environment variables):
 
 ## opencode (v1)
 
-Installs the `vision-proxy.ts` plugin into `~/.config/opencode/plugins/`.
+Installs the `vision-proxy_read.ts` plugin into `~/.config/opencode/plugins/`.
 
 The plugin registers hooks for **parity with claude-code/codex**:
 - `chat.message` hook - like `UserPromptSubmit`: extracts image paths from the user text and appends a static reminder to inspect each one with the `read` tool. It never shells out, so message handling stays fast. Attached image parts are left untouched so the model sees them natively.
@@ -135,7 +135,7 @@ node dist/cli.js integration install opencode --dev
 |---------|-----|
 | Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
 | Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. opencode: verify the plugin's `chat.message` and `tool.execute.before` hooks via `opencode plugin list`. |
-| Hook script not found (`npx tsx ...vision-proxy.ts` fails) | Re-run `vp integration install <agent>` to regenerate the script, ensure `npx`/`tsx` is available, and ensure `vp` is on PATH (or set `VP_BIN`). |
+| Hook script not found (`npx tsx ...vision-proxy_read.ts` fails) | Re-run `vp integration install <agent>` to regenerate the script, ensure `npx`/`tsx` is available, and ensure `vp` is on PATH (or set `VP_BIN`). |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |
 | Pi images not described | Check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |

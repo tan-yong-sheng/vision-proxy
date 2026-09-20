@@ -3,7 +3,7 @@
  *
  * Single home for the `.js`-through-node routing used by both the update
  * notifier (`src/commands/update.ts`) and the standalone hook runtime
- * (`src/hooks/runtime.ts`). When the entry is a `.js` file (e.g. the compiled
+ * (`src/integrations/runtime.ts`). When the entry is a `.js` file (e.g. the compiled
  * `dist/cli.js` shipped without the exec bit), spawning it directly fails
  * with EACCES — re-run it under the current Node executable, or under the
  * `node` launcher when the host runtime is Bun (as in OpenCode). For any

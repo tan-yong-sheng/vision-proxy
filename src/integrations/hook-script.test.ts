@@ -16,7 +16,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { HOOK_SCRIPT_SOURCE } from "../hook-script.ts";
+import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
 
 interface HookRun {
 	status: number | null;

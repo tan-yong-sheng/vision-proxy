@@ -2,7 +2,7 @@
  * Embedded opencode v1 plugin source.
  *
  * `vp integration install opencode` writes this exact TypeScript into
- * `~/.config/opencode/plugins/vision-proxy.ts`. opencode auto-loads local
+ * `~/.config/opencode/plugins/vision-proxy_read.ts`. opencode auto-loads local
  * plugins from that directory, so it must run as plain TypeScript with no
  * build step.
  *
@@ -34,7 +34,7 @@
  *
  * Composition: the shared analysis policy (path classification, env parsing,
  * reminder rendering, vp resolution) is inlined from the canonical runtime
- * (`src/hooks/runtime.ts`) at generate() time; the adapter below owns only
+ * (`src/integrations/runtime.ts`) at generate() time; the adapter below owns only
  * opencode lifecycle translation, the execFile executor, and the
  * throw-to-deny output shape. The emitted file stays standalone (no package
  * import).
@@ -44,7 +44,7 @@
  * The generated source must therefore never contain a backtick or a dollar
  * sign followed by an opening brace.
  */
-import { HOOK_RUNTIME_SOURCE } from "./hooks/runtime.ts";
+import { HOOK_RUNTIME_SOURCE } from "./runtime.ts";
 
 // biome-ignore lint/complexity/noUselessStringRaw: String.raw keeps every composed chunk under the same embedding discipline so a future escape cannot silently interpolate.
 const OPENCODE_PLUGIN_HEADER = String.raw`/**

@@ -57,7 +57,7 @@ export VP_BIN="$FAKE_VP"
 
 HOME="$TMP/home" node "$CLI" integration install claude-code >/dev/null
 
-SCRIPT="$HOME/.claude/hooks/vision-proxy.ts"
+SCRIPT="$HOME/.claude/hooks/vision-proxy_read.ts"
 if [[ ! -f "$SCRIPT" ]]; then
 	echo "hook script not found at $SCRIPT" >&2
 	exit 1

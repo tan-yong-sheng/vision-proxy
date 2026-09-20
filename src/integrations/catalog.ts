@@ -8,23 +8,28 @@
  * translation lives here; filesystem orchestration lives in `lifecycle.ts`;
  * the shared hooks-JSON shape lives in `hooks-config.ts`.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { HOOK_SCRIPT_SOURCE } from "../hook-script.ts";
-import { OPENCODE_PLUGIN_SOURCE } from "../opencode-plugin.ts";
-import { PI_EXTENSION_SOURCE } from "../pi-extension.ts";
+import { dirname, join } from "node:path";
 import { extractMarkerVersion, renderVersionMarker } from "../version.ts";
+import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
 import { applyHooks, hooksInstalled, removeHooks } from "./hooks-config.ts";
+import { OPENCODE_PLUGIN_SOURCE } from "./opencode-plugin.ts";
+import { PI_EXTENSION_SOURCE } from "./pi-extension.ts";
 import type { AgentSpec } from "./types.ts";
 
 /** Every agent `vp integration` knows how to install. */
 export const SUPPORTED = ["pi", "claude-code", "codex", "opencode"];
 
-const PI_EXTENSION_FILENAME = "vision-proxy.ts";
-const CLAUDE_HOOK_FILENAME = "vision-proxy.ts";
-const CODEX_HOOK_FILENAME = "vision-proxy.ts";
-const OPENCODE_PLUGIN_FILENAME = "vision-proxy.ts";
+/** Installed host artifact name (feature-suffix convention: the Read-time analyze hooks). */
+export const ARTIFACT_FILENAME = "vision-proxy_read.ts";
+const PI_EXTENSION_FILENAME = ARTIFACT_FILENAME;
+const CLAUDE_HOOK_FILENAME = ARTIFACT_FILENAME;
+const CODEX_HOOK_FILENAME = ARTIFACT_FILENAME;
+const OPENCODE_PLUGIN_FILENAME = ARTIFACT_FILENAME;
+
+/** Legacy artifact name used before the feature-suffix naming. */
+export const LEGACY_ARTIFACT_FILENAME = "vision-proxy.ts";
 
 /**
  * Returns the home directory, respecting process.env.HOME for test isolation.
@@ -288,6 +293,45 @@ const codex: AgentSpec = makeHookAgentSpec({
 	scriptPath: codexHookScriptPath,
 	configPath: codexConfigPath,
 });
+
+/** Path of the legacy-named artifact in the directory containing `target`. */
+export function legacyArtifactPath(target: string): string {
+	return join(dirname(target), LEGACY_ARTIFACT_FILENAME);
+}
+
+/**
+ * Whether a generated (marker-stamped) legacy artifact exists in the
+ * directory containing `target`. Unstamped files are user-authored and are
+ * never reported or removed.
+ *
+ * @tags integration, catalog
+ */
+export function legacyArtifactPresent(target: string): boolean {
+	const legacy = legacyArtifactPath(target);
+	if (!existsSync(legacy)) return false;
+	try {
+		return extractMarkerVersion(readFileSync(legacy, "utf8")) !== undefined;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Remove the generated legacy artifact next to `target` (pi/opencode dirs
+ * auto-load every file, so a stale legacy file would double-load). Only
+ * marker-stamped files we generated are ever removed; user-authored files
+ * and shared hook dirs are left untouched.
+ *
+ * @tags integration, catalog
+ */
+export function removeLegacyArtifact(target: string): void {
+	if (!legacyArtifactPresent(target)) return;
+	try {
+		rmSync(legacyArtifactPath(target));
+	} catch {
+		/* leave the stale legacy artifact if removal fails */
+	}
+}
 
 /**
  * Look up the install adapter for an agent id, or undefined when unknown.

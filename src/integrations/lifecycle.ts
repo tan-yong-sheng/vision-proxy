@@ -12,8 +12,12 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { dirname, resolve } from "node:path";
 import { VERSION } from "../version.ts";
 import {
+	ARTIFACT_FILENAME,
+	legacyArtifactPath,
+	legacyArtifactPresent,
 	legacyMarkerPath,
 	opencodePluginsDir,
+	removeLegacyArtifact,
 	removeLegacyCodexConfigToml,
 	SUPPORTED,
 	specFor,
@@ -99,6 +103,10 @@ export async function integrationInstall(
 	// Codex migrated from config.toml (legacy .mjs shim) to hooks.json; drop the
 	// stale TOML block so it can't shadow the new JSON registration.
 	if (agent === "codex") removeLegacyCodexConfigToml();
+	// Remove the pre-feature-suffix legacy artifact from the same install dir:
+	// pi/opencode auto-load every file in their dirs, so a stale legacy file
+	// would double-load our hooks on top of the new one.
+	removeLegacyArtifact(target);
 	return {
 		ok: true,
 		message: cfgPath
@@ -132,7 +140,7 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 		return {
 			ok: true,
 			message:
-				`opencode plugin: vision-proxy.ts\n\nInstall location: ${pluginPath}/\n\n` +
+				`opencode plugin: ${ARTIFACT_FILENAME}\n\nInstall location: ${pluginPath}/\n\n` +
 				`The plugin registers hooks for parity with claude-code/codex:\n` +
 				`- chat.message -> like UserPromptSubmit (appends a static reminder to read prompt image paths; attached image parts are left untouched)\n` +
 				`- tool.execute.before (read) -> like PreToolUse Read (intercepts reads on images)\n\n` +
@@ -197,6 +205,12 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 		const installed = isAgentInstalled(spec, installDir);
 		if (!installed) {
 			lines.push(`✗ ${agent}  not installed`);
+			const target = spec.target({ installDir });
+			if (legacyArtifactPresent(target)) {
+				lines.push(
+					`! ${agent}  legacy artifact at ${legacyArtifactPath(target)} - re-run: vp integration install ${agent}`,
+				);
+			}
 			continue;
 		}
 		installedCount++;
@@ -272,6 +286,9 @@ export async function integrationUninstall(
 	}
 	// Remove the legacy Codex config.toml block defensively on uninstall too.
 	if (agent === "codex") removeLegacyCodexConfigToml();
+	// Uninstall also clears a legacy-named artifact from the same dir so an
+	// auto-loading host (pi/opencode) never resurrects our hooks.
+	removeLegacyArtifact(target);
 	const removed = configRemoved || fileDeleted;
 	// If the install dir now holds only the artifact we just deleted, clean it
 	// up. Hook-agent script dirs (~/.claude/hooks, ~/.codex/hooks) are shared

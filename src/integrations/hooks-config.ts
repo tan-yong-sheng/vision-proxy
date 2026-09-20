@@ -53,8 +53,10 @@ export function isVisionProxyGroup(group: Record<string, unknown>): boolean {
 	return hooks.some((h) => {
 		if (typeof h.command !== "string") return false;
 		const cmd = h.command;
-		// The generated hook script installed by the current installer.
-		if (/vision-proxy\.ts\b/.test(cmd)) return true;
+		// The generated hook script installed by the current installer
+		// (feature-suffix naming) and the legacy-named file it superseded,
+		// so stale registrations are still recognized on reinstall/uninstall.
+		if (/vision-proxy(_read)?\.ts\b/.test(cmd)) return true;
 		// Old `.mjs` shims that shipped before the binary-as-hook rewrite,
 		// including the `-vision-proxy-` infix variants from earlier generations.
 		// (Only filenames observed in history are listed; a bare

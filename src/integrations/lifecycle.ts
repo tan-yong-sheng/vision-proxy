@@ -107,6 +107,29 @@ export async function integrationInstall(
 	// pi/opencode auto-load every file in their dirs, so a stale legacy file
 	// would double-load our hooks on top of the new one.
 	removeLegacyArtifact(target);
+	const legacyPath = legacyArtifactPath(target);
+	if (legacyArtifactPresent(target)) {
+		if (cfgPath) {
+			// Hook-agent configs already point at the freshly written script, so
+			// a surviving legacy file is inert; report it, don't fail the install.
+			return {
+				ok: true,
+				message:
+					`installed ${agent} integration -> ${cfgPath} (hook script: ${target})\n` +
+					`Prerequisite: tsx must be installed for the 'npx tsx' hook command to run (npm install -g tsx).\n` +
+					`Warning: legacy artifact at ${legacyPath} could not be removed; it is not executed (the config points at ${target}); delete it manually if desired.`,
+				code: 0,
+			};
+		}
+		// File agents (pi/opencode) auto-load every file in their dirs: a
+		// surviving legacy artifact would double-load our hooks next to the
+		// freshly installed one, so fail visibly instead of shipping both.
+		return {
+			ok: false,
+			message: `legacy artifact at ${legacyPath} could not be removed and would double-load ${agent} hooks; delete it manually, then re-run: vp integration install ${agent}`,
+			code: 1,
+		};
+	}
 	return {
 		ok: true,
 		message: cfgPath
@@ -214,6 +237,16 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 			continue;
 		}
 		installedCount++;
+		const target = spec.target({ installDir });
+		// A marker-stamped legacy file next to a current one (e.g. cleanup
+		// failed on install) would double-load pi/opencode hooks even though
+		// the current artifact is up to date.
+		if (legacyArtifactPresent(target)) {
+			lines.push(
+				`! ${agent}  legacy artifact at ${legacyArtifactPath(target)} - re-run: vp integration install ${agent}`,
+			);
+			outdated++;
+		}
 		const marker = spec.installedVersion({ installDir });
 		if (!marker) {
 			lines.push(`✓ ${agent}  installed (version unknown)`);

@@ -20,7 +20,14 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -1586,6 +1593,35 @@ test("uninstall of a legacy-only install removes the marker-stamped legacy artif
 	reset();
 });
 
+test("install fails visibly when legacy cleanup cannot remove a stamped legacy file", async () => {
+	// POSIX only (CI runs ubuntu): a read-only install dir lets the install
+	// rewrite the pre-existing target file but blocks rmSync on the legacy
+	// one, simulating the cleanup-failure state CodeRabbit flagged.
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const fresh = join(piDir, "vision-proxy_read.ts");
+	const legacy = join(piDir, "vision-proxy.ts");
+	writeFileSync(fresh, `__VP_VERSION__:${VERSION}\n`);
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(piDir, 0o555);
+	try {
+		const r = await runIntegration("install", "pi");
+		assert.equal(
+			r.ok,
+			false,
+			"install must fail when a stamped legacy survives on an auto-loading host",
+		);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /legacy artifact at .+vision-proxy\.ts/);
+		assert.match(r.message, /delete it manually/);
+		assert.equal(existsSync(legacy), true, "unremovable legacy file is left in place");
+	} finally {
+		chmodSync(piDir, 0o755);
+		reset();
+	}
+});
+
 test("status hints at a stale legacy artifact until re-installed", async () => {
 	isolate();
 	const piDir = home_pi();
@@ -1597,6 +1633,22 @@ test("status hints at a stale legacy artifact until re-installed", async () => {
 		r.message,
 		/legacy artifact at .+vision-proxy\.ts - re-run: vp integration install pi/,
 	);
+	reset();
+});
+
+test("status marks an installed agent out of date when a legacy artifact survives", async () => {
+	isolate();
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	writeFileSync(join(piDir, "vision-proxy_read.ts"), `__VP_VERSION__:${VERSION}\n`);
+	writeFileSync(join(piDir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(
+		r.message,
+		/! pi\s+legacy artifact at .+vision-proxy\.ts - re-run: vp integration install pi/,
+	);
+	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
 	reset();
 });
 

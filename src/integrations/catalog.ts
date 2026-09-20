@@ -323,6 +323,12 @@ export function legacyArtifactPresent(target: string): boolean {
  * what protects user-authored files and the shared hook dirs (claude/codex).
  * Returns whether a legacy artifact was removed.
  *
+ * The silent catch is deliberate: rmSync failures (EACCES, locked files) are
+ * swallowed here so install/uninstall never abort on cleanup. A caller that
+ * must detect a surviving legacy file re-checks `legacyArtifactPresent(target)`
+ * after the call - the return value only says "removed in this call", it does
+ * not distinguish "no legacy" from "removal failed".
+ *
  * @tags integration, catalog
  */
 export function removeLegacyArtifact(target: string): boolean {

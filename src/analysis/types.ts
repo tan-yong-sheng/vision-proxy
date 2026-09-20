@@ -18,6 +18,8 @@ export interface AnalyzeFlags {
 	json: boolean;
 	maxOutputTokens?: number;
 	question?: string;
+	/** Recent conversation context for the analysis (bounded, untrusted). */
+	context?: string;
 	apiKey?: string;
 	env?: NodeJS.ProcessEnv;
 	cwd?: string;

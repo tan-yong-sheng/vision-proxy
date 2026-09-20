@@ -21,6 +21,7 @@ describe("command-runner seam", () => {
 	it("exposes the value-flag grammar", () => {
 		assert.ok(VALUE_FLAGS.has("format"));
 		assert.ok(VALUE_FLAGS.has("question"));
+		assert.ok(VALUE_FLAGS.has("context"));
 		assert.ok(!VALUE_FLAGS.has("json"));
 		assert.ok(!VALUE_FLAGS.has("joint"));
 	});
@@ -46,6 +47,17 @@ describe("command-runner seam", () => {
 		const fence = parseFlags(["--no-fence", "image.png"]);
 		assert.deepEqual(fence.positionals, ["image.png"]);
 		assert.equal(fence.flags.fence, false);
+	});
+
+	it("parses --context as a value flag without swallowing positionals", () => {
+		const parsed = parseFlags(["--context", "User: hi", "image.png"]);
+		assert.deepEqual(parsed.positionals, ["image.png"]);
+		assert.equal(parsed.flags.context, "User: hi");
+		assert.equal(parseFlags(["--context"]).error, "missing value for --context");
+	});
+
+	it("advertises --context in analyze help", () => {
+		assert.match(renderHelp(["analyze"]), /--context <text>/);
 	});
 
 	it("renders help with parent fallback then top-level HELP", () => {

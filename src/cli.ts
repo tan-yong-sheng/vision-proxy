@@ -4,7 +4,7 @@
  *
  * Command tree:
  *   analyze <paths...> [--format] [--provider] [--model] [--joint] [--crop i:form]
- *                     [--no-fence] [--config] [--json] [--max-output-tokens] [--question] [--api-key]
+ *                     [--no-fence] [--config] [--json] [--max-output-tokens] [--question] [--context] [--api-key]
  *   config   init | get | set <k> <v> | validate
  *   provider list | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]

@@ -1463,7 +1463,12 @@ export function buildConversationContext(messages: readonly MessageLike[]): stri
 	return truncateContext(joined);
 }
 
-/** Cap conversation context while preserving its most recent characters. */
+/**
+ * Cap conversation context while preserving its most recent characters.
+ *
+ * @param result The conversation context to bound.
+ * @returns The bounded conversation context.
+ */
 export function truncateContext(result: string): string {
 	if (result.length <= CONTEXT_MAX_CHARS) return result;
 	return `…${result.slice(-CONTEXT_MAX_CHARS)}`;

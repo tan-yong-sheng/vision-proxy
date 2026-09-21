@@ -31,6 +31,40 @@ describe("analyzeImagesWithModel context block", () => {
 		assert.ok(seen.includes("what is this?"));
 	});
 
+	it("omits the user_message block without a question", async () => {
+		let seen = "";
+		await analyzeImagesWithModel(
+			payloadReq(
+				(opts: unknown) => {
+					const messages = (opts as { messages: Array<{ content: unknown }> }).messages;
+					const content = messages?.[0]?.content as Array<{ text?: string }>;
+					seen = content?.[0]?.text ?? "";
+					return Promise.resolve({ text: "ok" });
+				},
+				{ question: "" },
+			),
+		);
+		assert.ok(!seen.includes("user_message"), "empty question must omit the block");
+		assert.ok(!seen.includes("following message"), "empty question must omit the preamble");
+		assert.match(seen, /Describe the image.*in detail/);
+	});
+
+	it("omits the user_message block for a whitespace-only question", async () => {
+		let seen = "";
+		await analyzeImagesWithModel(
+			payloadReq(
+				(opts: unknown) => {
+					const messages = (opts as { messages: Array<{ content: unknown }> }).messages;
+					const content = messages?.[0]?.content as Array<{ text?: string }>;
+					seen = content?.[0]?.text ?? "";
+					return Promise.resolve({ text: "ok" });
+				},
+				{ question: "  \n\t" },
+			),
+		);
+		assert.ok(!seen.includes("user_message"));
+	});
+
 	it("prepends an escaped conversation block with context", async () => {
 		let seen = "";
 		await analyzeImagesWithModel(

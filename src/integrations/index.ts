@@ -24,6 +24,7 @@ export {
 	removeLegacyCodexConfigToml,
 	SUPPORTED,
 	specFor,
+	stampSubmitToolWord,
 } from "./catalog.ts";
 export {
 	applyHooks,

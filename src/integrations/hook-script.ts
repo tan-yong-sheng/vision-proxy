@@ -3,14 +3,17 @@
  *
  * `vp integration install claude-code` writes this exact TypeScript to
  * `~/.claude/hooks/vision-proxy_read.ts`, and `vp integration install codex`
- * writes it to `~/.codex/hooks/vision-proxy_read.ts`. Each host registers its
+ * writes it to `~/.codex/hooks/vision-proxy_read.ts` (stamped at generate()
+ * time to name view_image, the official Codex CLI image tool, in its
+ * submit-time reminder; the Claude Code copy names Read). Each host registers its
  * copy as a plain command (`npx tsx <path>`) in its hooks config, so the
  * config carries only standard keys (type, command, timeout, matcher) and
  * no vision-proxy metadata. The installed file carries a version marker
  * comment so `vp integration status` can report staleness.
  *
- * The script handles both hook events: UserPromptSubmit emits a static Read reminder for prompt image
- * paths plus pasted/attached image refs resolved via the image cache (never
+ * The script handles both hook events: UserPromptSubmit emits a static reminder for prompt image
+ * paths (naming the host's native image tool: Read for Claude Code, view_image for Codex)
+ * plus pasted/attached image refs resolved via the image cache (never
  * shells out, so prompt submission is never blocked), and PreToolUse Read or
  * view_image (image path reads) shells out to `vp analyze` and emits
  * hookSpecificOutput.additionalContext with a deny decision. Fail-open: on any
@@ -41,9 +44,11 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
  * run this file (e.g. npm install -g tsx).
  *
  * Handles UserPromptSubmit and PreToolUse events: UserPromptSubmit emits
- * a static Read reminder for prompt image paths and pasted or attached
+ * a static reminder for prompt image paths and pasted or attached
  * image refs resolved via the image cache (never shells out, so prompt
- * submission is never blocked), while PreToolUse analyzes Read-tool or
+ * submission is never blocked). The reminder names the host's native image
+ * tool (Read for Claude Code, view_image for Codex, stamped at generate()
+ * time), while PreToolUse analyzes Read-tool or
  * view_image image paths by shelling out to vp analyze, then emits
  * hookSpecificOutput.additionalContext with a deny decision for the agent.
  *
@@ -69,6 +74,12 @@ import { join, resolve } from "node:path";
 
 const HOOK_SCRIPT_ADAPTER = String.raw`
 var IMAGE_REF_RE = /\[Image #(\d+)\]/g;
+
+// Tool word named by the UserPromptSubmit reminder. generate() stamps this
+// per host (Read for Claude Code, view_image for Codex) so each artifact
+// tells the model to use its native image tool. The PreToolUse deny already
+// adapts to the intercepted tool, so only the submit reminder needs this.
+var SUBMIT_TOOL_WORD = "Read";
 
 function claudeConfigHome(): string {
   var override = process.env.VP_CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR;
@@ -294,7 +305,7 @@ function runHook(event: Record<string, any> | null): void {
     var refImages = resolveImageRefs(prompt, typeof sessionId === "string" ? sessionId : undefined);
     var allImages = images.concat(refImages);
     if (allImages.length === 0) return;
-    emit("UserPromptSubmit", readReminder(allImages, undefined, "prompt", "Read"));
+    emit("UserPromptSubmit", readReminder(allImages, undefined, "prompt", SUBMIT_TOOL_WORD));
     return;
   }
   if (eventName === "PreToolUse") {

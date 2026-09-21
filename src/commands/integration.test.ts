@@ -952,7 +952,8 @@ async function loadOpencodePlugin(source: string, home: string) {
 		"function",
 		"generated plugin must export a default factory function",
 	);
-	const hooks = (await (mod.default as (input: unknown) => Promise<Record<string, unknown>>)({
+	const factory = mod.default as (input: unknown) => Promise<Record<string, unknown>>;
+	const hooks = (await factory({
 		directory: dir,
 	})) as Record<string, (innerInput: any, innerOutput: any) => Promise<unknown>>;
 	assert.ok(typeof hooks["chat.message"] === "function", "must register chat.message hook");
@@ -960,7 +961,12 @@ async function loadOpencodePlugin(source: string, home: string) {
 		typeof hooks["tool.execute.before"] === "function",
 		"must register tool.execute.before hook",
 	);
-	return { hooks, dir, calls, setNextResult };
+	const hooksWithClient = async (client: unknown) =>
+		(await factory({
+			directory: dir,
+			client,
+		})) as Record<string, (innerInput: any, innerOutput: any) => Promise<unknown>>;
+	return { hooks, hooksWithClient, dir, calls, setNextResult };
 }
 
 test("install opencode writes the plugin file with valid source", async () => {
@@ -1103,11 +1109,49 @@ test("opencode tool.execute.before denies image reads and fails open", async (t)
 	await runIntegration("install", "opencode", dir);
 	const {
 		hooks,
+		hooksWithClient,
 		dir: testDir,
 		calls,
 		setNextResult,
 	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "photo.png");
+
+	// The session already carries the synthetic reminder part appended by
+	// chat.message; tool.execute.before must strip it before formatting
+	// context so boilerplate never echoes into the vision prompt.
+	const clientWithReminder = {
+		session: {
+			messages: async () => ({
+				data: [
+					{
+						info: { role: "user" },
+						parts: [
+							{
+								type: "text",
+								text: "[vision-proxy:read-reminder] The user message references the following image file(s):\n- /tmp/a.png\n\nUse the read tool on each image path to inspect it.",
+							},
+							{ type: "text", text: "what is this image about" },
+						],
+					},
+					{
+						info: { role: "assistant" },
+						parts: [{ type: "text", text: "reading it now" }],
+					},
+				],
+			}),
+		},
+	};
+	const clientHooks = await hooksWithClient(clientWithReminder);
+	setNextResult({ status: 0, stdout: "@@FENCE reminder-strip desc@@", stderr: "" });
+	const strippedThrown = await clientHooks["tool.execute.before"](
+		{ tool: "read", sessionID: "sess-1" },
+		{ args: { path: imagePath } },
+	).then(
+		() => null,
+		(err: unknown) => err,
+	);
+	assert.ok(strippedThrown instanceof Error, "read with a reminder-carrying session must deny");
+	assert.match((strippedThrown as Error).message, /@@FENCE reminder-strip desc@@/);
 
 	// Successful analysis: the read is denied by throwing, with the fenced
 	// description carried in the error message.

@@ -119,10 +119,19 @@ async function loadConversationContext(client, sessionID): Promise<string> {
   if (!result) return "";
   // The SDK lists messages chronologically (newest last). Map each entry's
   // info/parts to the plain { role, content } shape the formatter expects;
-  // parts that are not text blocks are ignored by it.
+  // parts that are not text blocks are ignored by it. Our own injected
+  // reminder parts are stripped first: chat.message appends them as
+  // persistent synthetic parts, and without this they would echo back
+  // into every later analyze call (~97% boilerplate per user turn) and
+  // feed a read-tool instruction to a vision model that has no tools.
   var msgs = (Array.isArray(result.data) ? result.data : [])
     .filter((m) => m && m.info && Array.isArray(m.parts))
-    .map((m) => ({ role: m.info.role, content: m.parts }));
+    .map((m) => ({
+      role: m.info.role,
+      content: m.parts.filter(function (p) {
+        return !(p && p.type === "text" && typeof p.text === "string" && p.text.indexOf(INJECTION_MARKER) === 0);
+      }),
+    }));
   return buildConversationContext(msgs);
 }
 

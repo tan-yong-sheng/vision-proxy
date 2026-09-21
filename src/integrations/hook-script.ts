@@ -155,9 +155,9 @@ function readToolFilePath(event: Record<string, any>): string | null {
 // How many transcript lines to parse when rendering --context. Only the
 // trailing lines can reach the formatter's last-N window, so bounding the
 // parse cost keeps long transcripts cheap; the formatter still trims to its
-// own message limit. 200 lines covers the 8-message window even with many
+// own message limit. 400 lines covers the 16-message window even with many
 // interleaved tool-result lines.
-var TRANSCRIPT_TAIL_LINES = 200;
+var TRANSCRIPT_TAIL_LINES = 400;
 // How many bytes of the transcript tail to read. 512 KB comfortably covers
 // the 200-line window even for large tool-result lines; the read is capped
 // so multi-GB transcripts stay cheap.

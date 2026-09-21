@@ -13,17 +13,21 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	ANALYZE_STDIN_MARKER,
+	ASSISTANT_TRUNCATE_CHARS,
 	buildAnalyzeArgs,
 	buildConversationContext,
+	CONTEXT_MAX_CHARS,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
 	hookTimeoutMs,
 	isImagePath,
 	maxOutputTokens,
 	parsePositiveInt,
+	RECENT_MESSAGE_COUNT,
 	readReminder,
 	resolveImagePath,
 	resolveVpBin,
+	truncateConversationContext,
 	vpEntryToSpawn,
 	withImageInstruction,
 } from "./runtime.ts";
@@ -245,6 +249,31 @@ test("buildConversationContext matches the canonical core.ts formatter", () => {
 		]),
 		"User: hi\nAssistant: hello",
 	);
+});
+
+test("context bounds hold the widened last-16 window", () => {
+	assert.equal(RECENT_MESSAGE_COUNT, 16);
+	assert.equal(ASSISTANT_TRUNCATE_CHARS, 3000);
+	assert.equal(CONTEXT_MAX_CHARS, 20000);
+	// 16 qualifying messages all survive the window (was 8).
+	const msgs = Array.from({ length: 20 }, (_, i) => ({
+		role: i % 2 === 0 ? "user" : "assistant",
+		content: `m${i}`,
+	}));
+	const lines = buildConversationContext(msgs).split("\n");
+	assert.equal(lines.length, 16, "window keeps the last 16 messages");
+	assert.ok(lines[0].includes("m4"), "window drops the oldest 4");
+	// Assistant text keeps up to 3000 chars (no more mid-sentence 500-cut).
+	const long = "x".repeat(4000);
+	const rendered = buildConversationContext([{ role: "assistant", content: long }]);
+	assert.equal(rendered.length, "Assistant: ".length + 3000);
+	// Total output stays under the 20000-char budget.
+	const huge = buildConversationContext(
+		Array.from({ length: 16 }, () => ({ role: "assistant", content: "y".repeat(3000) })),
+	);
+	assert.ok(huge.length <= 20001, `total budget holds, got ${huge.length}`);
+	assert.ok(huge.startsWith("…"), "over-budget output keeps the tail");
+	assert.equal(truncateConversationContext("z".repeat(25000)).length, 20001);
 });
 
 test("withImageInstruction keeps the historical deny wording", () => {

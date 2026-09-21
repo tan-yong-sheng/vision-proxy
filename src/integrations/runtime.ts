@@ -68,9 +68,9 @@ const DEFAULT_VP_BIN = "vp";
  * contributes, and the total context size. Values mirror the canonical
  * formatter in `src/core.ts` so the host artifacts and the CLI stay in sync.
  */
-const RECENT_MESSAGE_COUNT = 8;
-const ASSISTANT_TRUNCATE_CHARS = 500;
-const CONTEXT_MAX_CHARS = 3000;
+const RECENT_MESSAGE_COUNT = 16;
+const ASSISTANT_TRUNCATE_CHARS = 3000;
+const CONTEXT_MAX_CHARS = 20000;
 
 function parsePositiveInt(raw: unknown, fallback: number, min: number, max: number): number {
 	var n = parseInt(raw == null ? "" : String(raw), 10);
@@ -225,8 +225,11 @@ function truncateConversationContext(result: string): string {
 
 /**
  * Render the last N user/assistant messages as bounded plain text, or "" when
- * nothing qualifies. The result is attacker-controlled input to the vision
- * prompt, so `vp analyze` fences it (context is only sent when configured).
+ * nothing qualifies. Tool and system entries are excluded on purpose: tool
+ * outputs are the highest-volume, lowest-signal text for image grounding
+ * (and the widest untrusted-input surface). The result is
+ * attacker-controlled input to the vision prompt, so `vp analyze` fences it
+ * (context is only sent when configured).
  *
  * @param messages Host-agnostic message list; only user/assistant entries count.
  * @returns The bounded context text, or "" when nothing qualifies.
@@ -384,6 +387,7 @@ function readReminder(
 
 export {
 	ANALYZE_STDIN_MARKER,
+	ASSISTANT_TRUNCATE_CHARS,
 	buildAnalyzeArgs,
 	buildConversationContext,
 	CONTEXT_MAX_CHARS,

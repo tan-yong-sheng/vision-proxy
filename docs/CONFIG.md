@@ -99,7 +99,7 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` |
 | `VP_MODEL` | `modelId` | `VP_MODEL=gpt-4o` |
 | `VP_MODE` | `mode` | `VP_MODE=always` |
-| `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=false` disables sending the last-8 conversation slice (`--context`) to the vision provider. The current prompt (`--question`) is still sent. |
+| `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=false` disables sending the last-16 conversation slice (`--context`) to the vision provider. The current prompt (`--question`) is still sent. |
 | `VP_TOOL` | `tool` | `VP_TOOL=off` |
 | `VP_MAX_IMAGES_PER_CALL` | `maxImagesPerCall` | `VP_MAX_IMAGES_PER_CALL=2` |
 | `VP_MAX_BATCH` | `maxBatch` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL`. |

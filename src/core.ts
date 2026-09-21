@@ -323,9 +323,9 @@ export function parseCropArg(arg: string): CropEntry | string {
 	return parseCropForm(parsed.form, parsed.idx);
 }
 
-const RECENT_MESSAGE_COUNT = 8;
-const ASSISTANT_TRUNCATE_CHARS = 500;
-const CONTEXT_MAX_CHARS = 3000;
+const RECENT_MESSAGE_COUNT = 16;
+const ASSISTANT_TRUNCATE_CHARS = 3000;
+const CONTEXT_MAX_CHARS = 20000;
 const HASH_HEX_LEN = 32;
 const PROVIDER_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const MODEL_ID_PATTERN = /^[a-zA-Z0-9_./:-]+$/;
@@ -1448,6 +1448,9 @@ interface MessageLike {
 }
 
 export function buildConversationContext(messages: readonly MessageLike[]): string {
+	// Tool and system entries are excluded on purpose: tool outputs are the
+	// highest-volume, lowest-signal text for image grounding (and the widest
+	// untrusted-input surface), and system prompts never ground a question.
 	const recent = messages
 		.filter((e) => e.role === "user" || e.role === "assistant")
 		.slice(-RECENT_MESSAGE_COUNT);

@@ -129,14 +129,14 @@ async function loadConversationContext(client, sessionID): Promise<string> {
 /** Run vp analyze and return the fenced description, or null on failure.
  * Only the tool.execute.before (read) path calls this: chat.message emits a
  * static Read reminder instead so message handling never waits on a vision
- * call. Uses an async child process so image analysis never blocks the host
- * event loop. */
+ * call. Sensitive question/context travel on stdin, never argv. Uses an async
+ * child process so image analysis never blocks the host event loop. */
 async function runAnalyze(images: string[], extras): Promise<string | null> {
   if (images.length === 0) return null;
   var vp = resolveVpBin();
   var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
   var invocation = buildAnalyzeArgs(images, maxTokens, extras);
-  var result = await runVp(invocation.command, invocation.args);
+  var result = await runVp(invocation.command, invocation.args, invocation.stdin);
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === "ENOENT") {
       console.error("[vision-proxy] vp binary not found: " + vp);
@@ -152,24 +152,39 @@ async function runAnalyze(images: string[], extras): Promise<string | null> {
 
 /** Promise wrapper around execFile that returns a spawnSync-shaped result
  * ({ status, stdout, stderr, error }) so the rest of the plugin can treat
- * timeouts, ENOENT, and fail-open uniformly. */
+ * timeouts, ENOENT, and fail-open uniformly. The sensitive payload travels
+ * on stdin (CWE-214); stdinText is "" when there is nothing to send. */
 function runVp(
   command: string,
   args: string[],
+  stdinText: string,
 ): Promise<{ status: number; stdout: string; stderr: string; error?: NodeJS.ErrnoException }> {
   return new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
-      (error, stdout, stderr) => {
-        if (error) {
-          resolve({ status: 1, stdout: stdout ?? "", stderr: stderr ?? "", error: error as NodeJS.ErrnoException });
-        } else {
-          resolve({ status: 0, stdout: stdout ?? "", stderr: stderr ?? "", error: undefined });
-        }
-      },
-    );
+    var child;
+    try {
+      child = execFile(
+        command,
+        args,
+        { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
+        (error, stdout, stderr) => {
+          if (error) {
+            resolve({ status: 1, stdout: stdout ?? "", stderr: stderr ?? "", error: error as NodeJS.ErrnoException });
+          } else {
+            resolve({ status: 0, stdout: stdout ?? "", stderr: stderr ?? "", error: undefined });
+          }
+        },
+      );
+      // A child that exits before stdin drains raises EPIPE on the write;
+      // the callback above still settles the promise, so swallow it here.
+      var onPipeError = function () { /* callback settles */ };
+      child.stdin.on("error", onPipeError);
+      if (stdinText) {
+        try { child.stdin.write(stdinText); } catch { /* callback settles */ }
+      }
+      try { child.stdin.end(); } catch { /* callback settles */ }
+    } catch (err) {
+      resolve({ status: 1, stdout: "", stderr: "", error: err as NodeJS.ErrnoException });
+    }
   });
 }
 

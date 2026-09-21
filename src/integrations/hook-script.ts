@@ -158,11 +158,16 @@ function runAnalyze(images: string[], extras): string | null {
   var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
   var invocation = buildAnalyzeArgs(images, maxTokens, extras);
   var vp = resolveVpBin();
-  var result = spawnSync(invocation.command, invocation.args, {
+  // Sensitive question/context travel on stdin, never argv, so a local
+  // process listing cannot capture conversation content (CWE-214). Omit
+  // the input entirely when there is nothing sensitive to send.
+  var opts: Record<string, unknown> = {
     encoding: "utf8",
     timeout: timeout,
     maxBuffer: MAX_BUFFER_BYTES,
-  }) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown };
+  };
+  if (invocation.stdin) opts.input = invocation.stdin;
+  var result = spawnSync(invocation.command, invocation.args, opts) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown };
   if (result.error) {
     if (result.error.code === "ENOENT") {
       process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");

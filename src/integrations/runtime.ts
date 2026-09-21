@@ -101,24 +101,46 @@ function resolveVpBin(): string {
 	return DEFAULT_VP_BIN;
 }
 
-/**
- * Analyze-invocation options carried by host adapters.
+/** Analyze invocation extras: sensitive text delivered to the child via stdin.
  *
- * The optional question and context are only appended to the command line when
- * present and non-empty, so a call that omits them (every pre-existing call
- * site) produces a byte-identical invocation to the historical
- * "vp analyze <images> --max-output-tokens N" shape.
+ * question/context are never part of argv (see buildAnalyzeArgs): they travel
+ * inside the JSON payload on stdin so a local process listing cannot capture
+ * conversation content from the command line.
+ *
+ * @tags integrations, runtime
  */
 interface AnalyzeExtras {
 	question?: string;
 	context?: string;
 }
 
+/**
+ * Analyze-payload marker read by `vp analyze` on stdin. Host adapters never
+ * send this when there is nothing sensitive to transmit: a call with no
+ * question/context keeps the historical
+ * "vp analyze <images> --max-output-tokens N" argv byte-identical and writes
+ * no stdin at all, so every pre-existing call site is unchanged.
+ *
+ * @tags integrations, runtime
+ */
+var ANALYZE_STDIN_MARKER = "vp-analyze-payload-v1";
+
+/**
+ * Build the argv and stdin for one analyze invocation.
+ *
+ * Argv carries only non-sensitive routing (images, max-output-tokens): when
+ * extras hold a non-empty question/context the caller also writes the
+ * returned stdin payload to the child's stdin so conversation text never
+ * appears in the process listing (CWE-214). Returns an empty stdin string
+ * when there is nothing sensitive to send.
+ *
+ * @tags integrations, runtime
+ */
 function buildAnalyzeArgs(
 	images: string[],
 	maxTokens: number,
 	extras?: AnalyzeExtras,
-): { command: string; args: string[] } {
+): { command: string; args: string[]; stdin: string } {
 	var vp = resolveVpBin();
 	var prefix = vpEntryToSpawn(vp);
 	var args = prefix.args.concat(["analyze"], images, ["--max-output-tokens", String(maxTokens)]);
@@ -128,9 +150,18 @@ function buildAnalyzeArgs(
 		question = typeof extras.question === "string" ? extras.question.trim() : "";
 		context = typeof extras.context === "string" ? extras.context.trim() : "";
 	}
-	if (question) args.push("--question", question);
-	if (context) args.push("--context", context);
-	return { command: prefix.command, args: args };
+	// Sensitive text goes on stdin, never argv. The marker line lets the
+	// analyze parser distinguish a payload from the provider store-key key
+	// bytes (which never start with the marker).
+	var stdin = "";
+	if (question || context) {
+		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+		stdin = ANALYZE_STDIN_MARKER + "\n" + JSON.stringify({ question: question, context: context });
+	}
+	// Keep the historical question flag for backwards compatibility with
+	// older wrappers that still pass --question/--context on the command
+	// line; new callers (this repo's adapters) prefer the stdin payload.
+	return { command: prefix.command, args: args, stdin: stdin };
 }
 
 // ── Standalone conversation-context formatter ─────────────────────────────
@@ -142,12 +173,29 @@ function buildAnalyzeArgs(
 // host adapter maps its native message shape (Pi entries, opencode
 // info/parts, CC transcript lines, Codex rollout items) before calling.
 
+/**
+ * True when a content item is a plain text block (type "text" with string text).
+ *
+ * @param c The content item to test.
+ * @returns True for text blocks, false otherwise.
+ */
 function isTextBlock(c: unknown): boolean {
 	if (!c || typeof c !== "object") return false;
 	var block = c as { type?: unknown; text?: unknown };
 	return block.type === "text" && typeof block.text === "string";
 }
 
+/**
+ * Extract the plain text from a message content value.
+ *
+ * Strings pass through; block arrays contribute only their text blocks;
+ * anything else yields "".
+ *
+ * @param content The message content to read.
+ * @returns The concatenated text, or "" when none qualifies.
+ *
+ * @tags integrations, runtime
+ */
 function extractText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
@@ -158,7 +206,14 @@ function extractText(content: unknown): string {
 	return parts.join(" ");
 }
 
-/** Cap conversation context while preserving its most recent characters. */
+/**
+ * Cap conversation context while preserving its most recent characters.
+ *
+ * @param result The conversation context to bound.
+ * @returns The bounded conversation context.
+ *
+ * @tags integrations, runtime
+ */
 function truncateConversationContext(result: string): string {
 	if (result.length <= CONTEXT_MAX_CHARS) return result;
 	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
@@ -169,6 +224,11 @@ function truncateConversationContext(result: string): string {
  * Render the last N user/assistant messages as bounded plain text, or "" when
  * nothing qualifies. The result is attacker-controlled input to the vision
  * prompt, so `vp analyze` fences it (context is only sent when configured).
+ *
+ * @param messages Host-agnostic message list; only user/assistant entries count.
+ * @returns The bounded context text, or "" when nothing qualifies.
+ *
+ * @tags integrations, runtime
  */
 function buildConversationContext(messages: unknown): string {
 	if (!Array.isArray(messages)) return "";
@@ -320,6 +380,7 @@ function readReminder(
 }
 
 export {
+	ANALYZE_STDIN_MARKER,
 	buildAnalyzeArgs,
 	buildConversationContext,
 	CONTEXT_MAX_CHARS,
@@ -389,6 +450,7 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	constLine("MAX_MAX_OUTPUT_TOKENS", MAX_MAX_OUTPUT_TOKENS),
 	constLine("MAX_BUFFER_BYTES", MAX_BUFFER_BYTES),
 	constLine("DEFAULT_VP_BIN", "vp"),
+	constLine("ANALYZE_STDIN_MARKER", ANALYZE_STDIN_MARKER),
 	constLine("RECENT_MESSAGE_COUNT", RECENT_MESSAGE_COUNT),
 	constLine("ASSISTANT_TRUNCATE_CHARS", ASSISTANT_TRUNCATE_CHARS),
 	constLine("CONTEXT_MAX_CHARS", CONTEXT_MAX_CHARS),

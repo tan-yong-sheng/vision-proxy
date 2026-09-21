@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+	ANALYZE_STDIN_MARKER,
 	buildAnalyzeArgs,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
@@ -187,6 +188,43 @@ test("buildAnalyzeArgs shares one analyze contract for every executor", () => {
 			"--max-output-tokens",
 			"2000",
 		]);
+		assert.equal(invocation.stdin, "");
+	} finally {
+		if (prior === undefined) delete process.env.VP_BIN;
+		else process.env.VP_BIN = prior;
+	}
+});
+
+test("buildAnalyzeArgs keeps sensitive extras off argv and on stdin", () => {
+	const prior = process.env.VP_BIN;
+	try {
+		delete process.env.VP_BIN;
+		const question = "what is in this image?";
+		const context = "User: secret history\nAssistant: prior reply";
+		const invocation = buildAnalyzeArgs(["/tmp/a.png"], 2000, { question, context });
+		// CWE-214: conversation text must never appear in the process listing.
+		for (const arg of invocation.args) {
+			assert.ok(!arg.includes(question), "question must not leak into argv");
+			assert.ok(!arg.includes("secret history"), "context must not leak into argv");
+		}
+		assert.ok(!invocation.args.includes("--question"), "no --question flag on argv");
+		assert.ok(!invocation.args.includes("--context"), "no --context flag on argv");
+		// The payload arrives through stdin with the marker line first.
+		const nl = invocation.stdin.indexOf("\n");
+		assert.ok(nl !== -1, "stdin payload must carry a marker line");
+		assert.equal(invocation.stdin.slice(0, nl), ANALYZE_STDIN_MARKER);
+		assert.deepEqual(JSON.parse(invocation.stdin.slice(nl + 1)), { question, context });
+		// Question-only and context-only extras each produce a payload.
+		const qOnly = buildAnalyzeArgs(["/tmp/a.png"], 2000, { question });
+		assert.ok(qOnly.stdin.startsWith(`${ANALYZE_STDIN_MARKER}\n`));
+		const cOnly = buildAnalyzeArgs(["/tmp/a.png"], 2000, { context });
+		assert.ok(cOnly.stdin.startsWith(`${ANALYZE_STDIN_MARKER}\n`));
+		// Empty extras stay payload-free (historical invocation unchanged).
+		assert.equal(buildAnalyzeArgs(["/tmp/a.png"], 2000, {}).stdin, "");
+		assert.equal(
+			buildAnalyzeArgs(["/tmp/a.png"], 2000, { question: "  ", context: "\n" }).stdin,
+			"",
+		);
 	} finally {
 		if (prior === undefined) delete process.env.VP_BIN;
 		else process.env.VP_BIN = prior;

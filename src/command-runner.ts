@@ -26,6 +26,7 @@ import {
 import { runBackgroundCheck, runUpdate } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
+import { ANALYZE_STDIN_MARKER } from "./integrations/runtime.ts";
 import { isKnownProvider } from "./provider.ts";
 import { VERSION } from "./version.ts";
 
@@ -135,6 +136,67 @@ export function parseFlags(args: string[]): FlagParse {
 }
 
 type FlagMap = Record<string, string | boolean | string[]>;
+
+/**
+ * Sensitive analyze inputs carried on stdin instead of argv (CWE-214).
+ *
+ * `vp analyze` accepts its question/context through a JSON stdin payload so
+ * conversation text never appears in the process listing:
+ *
+ *   <marker line>\n{"question": "...", "context": "..."}
+ *
+ * The marker line distinguishes the payload from `provider store-key` key
+ * bytes. Only the analyze path reads stdin this way; every other command is
+ * unaffected. Malformed payloads fail closed to no question/context.
+ *
+ * @tags cli, runner
+ */
+export interface AnalyzeStdinPayload {
+	question?: string;
+	context?: string;
+}
+
+/**
+ * Decode one analyze stdin payload. Pure and total: empty, truncated, or
+ * malformed input yields {} so the caller treats it as "no sensitive
+ * input" rather than failing the analysis.
+ *
+ * @tags cli, runner
+ */
+export function parseAnalyzeStdin(raw: string): AnalyzeStdinPayload {
+	const text = raw ?? "";
+	const nl = text.indexOf("\n");
+	if (nl === -1) return {};
+	if (text.slice(0, nl).trim() !== ANALYZE_STDIN_MARKER) return {};
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text.slice(nl + 1));
+	} catch {
+		return {};
+	}
+	if (!parsed || typeof parsed !== "object") return {};
+	const rec = parsed as Record<string, unknown>;
+	const out: AnalyzeStdinPayload = {};
+	if (typeof rec.question === "string" && rec.question.trim()) out.question = rec.question;
+	if (typeof rec.context === "string" && rec.context.trim()) out.context = rec.context;
+	return out;
+}
+
+/**
+ * Default stdin reader for `vp analyze`. Skips TTYs so an interactive
+ * terminal never blocks waiting for a payload; callers pass an explicit
+ * reader in tests and adapters pass the payload through child stdio.
+ *
+ * @tags cli, runner
+ */
+export async function readAnalyzeStdin(): Promise<string> {
+	const { stdin } = process;
+	if (!stdin || stdin.isTTY) return "";
+	const chunks: Buffer[] = [];
+	for await (const chunk of stdin) chunks.push(chunk as Buffer);
+	return Buffer.concat(chunks).toString("utf8");
+}
+
 function str(flags: FlagMap, key: string): string | undefined {
 	const v = flags[key];
 	return typeof v === "string" ? v : undefined;
@@ -568,6 +630,10 @@ export interface CommandRunnerOptions {
 	env?: NodeJS.ProcessEnv;
 	/** Working directory for project config resolution. Defaults to `process.cwd()`. */
 	cwd?: string;
+	/** Stdin text override for `analyze` (tests inject the payload; the CLI reads process stdin). */
+	stdinText?: string;
+	/** Stdin reader override for `analyze` (defaults to reading process stdin). */
+	readStdin?: () => Promise<string>;
 }
 
 export interface CommandRunnerResult {
@@ -633,6 +699,9 @@ export async function runCommand(
 			const formatRaw = str(flags, "format");
 			const format =
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
+			const stdinText =
+				opts.stdinText ?? (opts.readStdin ? await opts.readStdin() : await readAnalyzeStdin());
+			const stdinPayload = parseAnalyzeStdin(stdinText);
 			const analyzeFlags: AnalyzeFlags = {
 				format,
 				provider: str(flags, "provider"),
@@ -645,8 +714,11 @@ export async function runCommand(
 				maxOutputTokens: str(flags, "max-output-tokens")
 					? Number(str(flags, "max-output-tokens"))
 					: undefined,
-				question: str(flags, "question") ?? str(flags, "q"),
-				context: str(flags, "context"),
+				// Stdin is authoritative when present: adapters now send
+				// sensitive text off-argv. Keep the argv flags as a fallback
+				// for older wrappers that still pass --question/--context.
+				question: stdinPayload.question ?? str(flags, "question") ?? str(flags, "q"),
+				context: stdinPayload.context ?? str(flags, "context"),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

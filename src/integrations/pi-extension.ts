@@ -84,8 +84,9 @@ const PI_EXTENSION_ADAPTER = String.raw`
 var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
 
 /** Run vp analyze (async) and return the fenced description, or null on failure.
- * The optional extras (question, context) are appended to the analyze call so
- * the description is grounded in the recent conversation. */
+ * The optional extras (question, context) travel on stdin, never argv, so the
+ * description is grounded in the recent conversation without exposing it in
+ * the process listing. */
 async function runAnalyze(images: string[], extras, signal?: unknown): Promise<string | null> {
   return new Promise((resolve) => {
     if (!images || images.length === 0) return resolve(null);
@@ -93,6 +94,9 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     var invocation = buildAnalyzeArgs(images, maxTokens, extras);
     var command = invocation.command;
     var args = invocation.args;
+    // Sensitive text travels on stdin (CWE-214), like the stdio hook and the
+    // opencode plugin. Nothing sensitive is appended to the command line.
+    var stdinText = invocation.stdin;
     var vp = resolveVpBin();
     let settled = false;
     let timer: unknown = null;
@@ -105,6 +109,12 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     let child;
     try {
       child = spawn(command, args);
+      // Write before wiring listeners so an EPIPE on a child that exits
+      // instantly still surfaces through the error/close handlers below.
+      if (stdinText) {
+        try { child.stdin.write(stdinText); } catch { /* error handler settles */ }
+      }
+      try { child.stdin.end(); } catch { /* error handler settles */ }
     } catch (err) {
       const msg = err && (err as Error).message ? (err as Error).message : String(err);
       process.stderr.write("[vision-proxy] failed to spawn vp: " + msg + "\n");

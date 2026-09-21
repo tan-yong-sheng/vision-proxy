@@ -14,6 +14,7 @@ import {
 	HELP,
 	parseAnalyzeStdin,
 	parseFlags,
+	readAnalyzeStdin,
 	renderHelp,
 	runCommand,
 	VALUE_FLAGS,
@@ -215,5 +216,93 @@ describe("command-runner seam", () => {
 		const r = await runCommand(["bogus"]);
 		assert.equal(r.code, 1);
 		assert.equal(process.exitCode, exitBefore);
+	});
+});
+
+describe("readAnalyzeStdin", () => {
+	// A minimal fake stdin: capture which events were registered and let the
+	// test drive data/end/error manually, plus record pause() calls.
+	function fakeStdin(overrides: Partial<{ isTTY: boolean; pausedCalls: number }> = {}) {
+		const handlers: Record<string, Array<(...a: unknown[]) => void>> = {};
+		const fake = {
+			isTTY: false,
+			pausedCalls: 0,
+			on(ev: string, cb: (...a: unknown[]) => void) {
+				if (!handlers[ev]) handlers[ev] = [];
+				handlers[ev].push(cb);
+				return fake;
+			},
+			removeListener(ev: string, cb: (...a: unknown[]) => void) {
+				if (handlers[ev]) handlers[ev] = handlers[ev].filter((f) => f !== cb);
+				return fake;
+			},
+			pause() {
+				fake.pausedCalls += 1;
+			},
+			...overrides,
+		};
+		const emit = (ev: string, ...args: unknown[]) => {
+			for (const cb of [...(handlers[ev] ?? [])]) cb(...args);
+		};
+		return { fake, handlers, emit };
+	}
+
+	async function withStdin(stdin: unknown, fn: () => Promise<void>): Promise<void> {
+		const original = process.stdin;
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		try {
+			await fn();
+		} finally {
+			Object.defineProperty(process, "stdin", { value: original, configurable: true });
+		}
+	}
+
+	it("skips a TTY stdin without reading", async () => {
+		const { fake } = fakeStdin({ isTTY: true });
+		await withStdin(fake, async () => {
+			assert.equal(await readAnalyzeStdin(50), "");
+		});
+	});
+
+	it("returns empty when stdin is absent", async () => {
+		await withStdin(null, async () => {
+			assert.equal(await readAnalyzeStdin(50), "");
+		});
+	});
+
+	it("resolves on end with the concatenated payload", async () => {
+		const { fake, emit } = fakeStdin();
+		await withStdin(fake, async () => {
+			const p = readAnalyzeStdin(2000);
+			// Let the promise attach its listeners before driving the stream.
+			await new Promise((r) => setImmediate(r));
+			emit("data", Buffer.from('vp-analyze-payload-v1\n{"question":"hi"}'));
+			emit("end");
+			assert.equal(await p, 'vp-analyze-payload-v1\n{"question":"hi"}');
+		});
+	});
+
+	it("degrades to empty on timeout and detaches listeners", async () => {
+		const { fake, handlers } = fakeStdin();
+		await withStdin(fake, async () => {
+			const p = readAnalyzeStdin(30); // never emitted -> timeout path
+			const val = await p;
+			assert.equal(val, "");
+			// Listeners must be removed on expiry so no background read lingers.
+			assert.equal((handlers.data ?? []).length, 0, "data listener detached");
+			assert.equal((handlers.end ?? []).length, 0, "end listener detached");
+			assert.equal((handlers.error ?? []).length, 0, "error listener detached");
+			assert.ok(fake.pausedCalls > 0, "stdin paused");
+		});
+	});
+
+	it("degrades to empty on a stream error", async () => {
+		const { fake, emit } = fakeStdin();
+		await withStdin(fake, async () => {
+			const p = readAnalyzeStdin(2000);
+			await new Promise((r) => setImmediate(r));
+			emit("error", new Error("EPIPE"));
+			assert.equal(await p, "");
+		});
 	});
 });

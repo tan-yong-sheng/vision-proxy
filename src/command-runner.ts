@@ -192,8 +192,8 @@ export function parseAnalyzeStdin(raw: string): AnalyzeStdinPayload {
  * The wait is bounded (default 50ms): `vp analyze` historically never
  * touched stdin, so an open pipe that never reaches EOF (CI/a wrapper
  * inheriting stdin without writing or closing it) degrades to "" instead
- * of hanging the command. Virginia callers are unaffected: adapters write
- * a small payload and close child stdin right after spawning, so the
+ * of hanging the command. Adapters are unaffected: they write a small
+ * payload and close child stdin right after spawning, so the
  * drain resolves on arrival, well before the timeout. Expiry detaches the
  * listeners and pauses stdin so no background read keeps the event loop
  * alive after the command finishes.
@@ -204,7 +204,12 @@ export function parseAnalyzeStdin(raw: string): AnalyzeStdinPayload {
  *
  * @tags cli, runner
  */
-export async function readAnalyzeStdin(timeoutMs = 50): Promise<string> {
+/** Bounded wait (ms) for the `vp analyze` process-stdin drain. */
+const DEFAULT_ANALYZE_STDIN_TIMEOUT_MS = 50;
+
+export async function readAnalyzeStdin(
+	timeoutMs = DEFAULT_ANALYZE_STDIN_TIMEOUT_MS,
+): Promise<string> {
 	try {
 		const { stdin } = process;
 		if (!stdin || stdin.isTTY) return "";
@@ -234,7 +239,7 @@ export async function readAnalyzeStdin(timeoutMs = 50): Promise<string> {
 			const onError = (): void => {
 				finish("");
 			};
-			const timer = setTimeout(() => finish(""), timeoutMs >= 0 ? timeoutMs : 50);
+			const timer = setTimeout(() => finish(""), timeoutMs);
 			stdin.on("data", onData);
 			stdin.on("end", onEnd);
 			stdin.on("error", onError);
@@ -255,7 +260,7 @@ export async function readAnalyzeStdin(timeoutMs = 50): Promise<string> {
  *
  * @tags cli, runner
  */
-async function drainAnalyzeStdin(flags: FlagMap, opts: CommandRunnerOptions): Promise<string> {
+async function drainAnalyzeStdin(opts: CommandRunnerOptions): Promise<string> {
 	if (opts.stdinText !== undefined) return opts.stdinText;
 	if (opts.readStdin) {
 		try {
@@ -264,9 +269,10 @@ async function drainAnalyzeStdin(flags: FlagMap, opts: CommandRunnerOptions): Pr
 			return "";
 		}
 	}
-	void flags;
 	const timeoutMs =
-		typeof opts.stdinTimeoutMs === "number" && opts.stdinTimeoutMs >= 0 ? opts.stdinTimeoutMs : 50;
+		typeof opts.stdinTimeoutMs === "number" && opts.stdinTimeoutMs >= 0
+			? opts.stdinTimeoutMs
+			: DEFAULT_ANALYZE_STDIN_TIMEOUT_MS;
 	try {
 		return await readAnalyzeStdin(timeoutMs);
 	} catch {
@@ -780,7 +786,7 @@ export async function runCommand(
 			const formatRaw = str(flags, "format");
 			const format =
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
-			const stdinText = await drainAnalyzeStdin(flags, opts);
+			const stdinText = await drainAnalyzeStdin(opts);
 			const stdinPayload = parseAnalyzeStdin(stdinText);
 			const analyzeFlags: AnalyzeFlags = {
 				format,

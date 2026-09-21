@@ -110,12 +110,12 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     try {
       child = spawn(command, args);
       // A child that exits before stdin drains raises EPIPE asynchronously
-      // on the stdin stream (not the process 'error' event below), which
-      // without a listener is an uncaught exception that can crash the host.
-      // Swallow it here; the error/close handlers settle the promise.
+      // on the stdin stream (the process 'error' event below does not cover
+      // it), which without a listener is an uncaught exception that can
+      // crash the host. Register the guard BEFORE write/end so every
+      // delivery path is covered; the process error/close handlers settle
+      // the promise either way.
       child.stdin.on("error", () => { /* error/close handlers settle */ });
-      // Write before wiring listeners so an EPIPE on a child that exits
-      // instantly still surfaces through the error/close handlers below.
       if (stdinText) {
         try { child.stdin.write(stdinText); } catch { /* error handler settles */ }
       }

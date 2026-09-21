@@ -167,7 +167,10 @@ function buildAnalyzeArgs(
 // ── Standalone conversation-context formatter ─────────────────────────────
 //
 // Mirrors buildConversationContext/truncateContext in src/core.ts so the
-// generated artifacts can render `--context` without importing the package.
+// generated artifacts can render the analyze payload without importing the
+// package. Parity notes: like the canonical formatter this copy drops only
+// empty text (if (!text)), keeping whitespace-only content; user text is
+// unbounded per-message in both (only the 3000-char total cap applies).
 // The input is host-agnostic: an array of { role, content } messages where
 // content is a string or an array of blocks; only text blocks count. Each
 // host adapter maps its native message shape (Pi entries, opencode
@@ -244,7 +247,7 @@ function buildConversationContext(messages: unknown): string {
 	var text = "";
 	for (const item of tail) {
 		text = extractText(item.content);
-		if (!text.trim()) continue;
+		if (!text) continue;
 		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
 		if (item.role === "user") lines.push("User: " + text);
 		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.

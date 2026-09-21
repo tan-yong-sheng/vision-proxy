@@ -14,6 +14,7 @@ import { test } from "node:test";
 import {
 	ANALYZE_STDIN_MARKER,
 	buildAnalyzeArgs,
+	buildConversationContext,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
 	hookTimeoutMs,
@@ -229,6 +230,21 @@ test("buildAnalyzeArgs keeps sensitive extras off argv and on stdin", () => {
 		if (prior === undefined) delete process.env.VP_BIN;
 		else process.env.VP_BIN = prior;
 	}
+});
+
+test("buildConversationContext matches the canonical core.ts formatter", () => {
+	// Parity pin: core.ts drops only empty text (if (!text)), keeping
+	// whitespace-only content as a "User:   " line. The standalone copy
+	// must agree, or host artifacts and the CLI render different context.
+	assert.equal(buildConversationContext([{ role: "user", content: "   " }]), "User:    ");
+	assert.equal(buildConversationContext([{ role: "user", content: "" }]), "");
+	assert.equal(
+		buildConversationContext([
+			{ role: "user", content: "hi" },
+			{ role: "assistant", content: "hello" },
+		]),
+		"User: hi\nAssistant: hello",
+	);
 });
 
 test("withImageInstruction keeps the historical deny wording", () => {

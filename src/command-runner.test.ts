@@ -97,6 +97,21 @@ describe("command-runner seam", () => {
 		assert.equal(parsed.context, "stdin-ctx");
 	});
 
+	it("degrades to no payload when the injected stdin reader fails", async () => {
+		// A stream error (EPIPE/EIO) must not reject runCommand: the analysis
+		// simply proceeds without the sensitive payload (and here fails only
+		// on the missing API key, proving the drain did not throw).
+		const r = await runCommand(["analyze", "img.png"], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			readStdin: async () => {
+				throw new Error("EPIPE");
+			},
+		});
+		assert.equal(r.code, 1);
+		assert.match(r.stderr ?? "", /analyze error|analyze failed/);
+	});
+
 	it("advertises --context in analyze help", () => {
 		assert.match(renderHelp(["analyze"]), /--context <text>/);
 	});

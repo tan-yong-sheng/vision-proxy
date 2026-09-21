@@ -187,14 +187,89 @@ export function parseAnalyzeStdin(raw: string): AnalyzeStdinPayload {
  * terminal never blocks waiting for a payload; callers pass an explicit
  * reader in tests and adapters pass the payload through child stdio.
  *
+ * The wait is bounded (default 50ms): `vp analyze` historically never
+ * touched stdin, so an open pipe that never reaches EOF (CI/a wrapper
+ * inheriting stdin without writing or closing it) degrades to "" instead
+ * of hanging the command. Virginia callers are unaffected: adapters write
+ * a small payload and close child stdin right after spawning, so the
+ * drain resolves on arrival, well before the timeout. Expiry detaches the
+ * listeners and pauses stdin so no background read keeps the event loop
+ * alive after the command finishes.
+ *
+ * Stream errors (EPIPE/EIO on a broken pipe) likewise degrade to "" so a
+ * stdin failure can never surface as a crash; the analysis simply runs
+ * without the sensitive payload.
+ *
  * @tags cli, runner
  */
-export async function readAnalyzeStdin(): Promise<string> {
-	const { stdin } = process;
-	if (!stdin || stdin.isTTY) return "";
-	const chunks: Buffer[] = [];
-	for await (const chunk of stdin) chunks.push(chunk as Buffer);
-	return Buffer.concat(chunks).toString("utf8");
+export async function readAnalyzeStdin(timeoutMs = 50): Promise<string> {
+	try {
+		const { stdin } = process;
+		if (!stdin || stdin.isTTY) return "";
+		return await new Promise<string>((resolve) => {
+			const chunks: Buffer[] = [];
+			let settled = false;
+			const onData = (c: Buffer): void => {
+				chunks.push(c);
+			};
+			const finish = (val: string): void => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				try {
+					stdin.pause();
+				} catch {
+					// ignore: stdin may already be torn down
+				}
+				stdin.removeListener("data", onData);
+				stdin.removeListener("end", onEnd);
+				stdin.removeListener("error", onError);
+				resolve(val);
+			};
+			const onEnd = (): void => {
+				finish(Buffer.concat(chunks).toString("utf8"));
+			};
+			const onError = (): void => {
+				finish("");
+			};
+			const timer = setTimeout(() => finish(""), timeoutMs >= 0 ? timeoutMs : 50);
+			stdin.on("data", onData);
+			stdin.on("end", onEnd);
+			stdin.on("error", onError);
+		});
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Resolve the analyze stdin text.
+ *
+ * An explicit `stdinText` override (tests) or `readStdin` (dependency-
+ * injected readers) wins immediately. Otherwise the bounded process-stdin
+ * drain runs: adapter payloads resolve on arrival; a pipe that never
+ * delivers degrades to "no payload" on timeout instead of hanging a
+ * command that historically never touched stdin.
+ *
+ * @tags cli, runner
+ */
+async function drainAnalyzeStdin(flags: FlagMap, opts: CommandRunnerOptions): Promise<string> {
+	if (opts.stdinText !== undefined) return opts.stdinText;
+	if (opts.readStdin) {
+		try {
+			return await opts.readStdin();
+		} catch {
+			return "";
+		}
+	}
+	void flags;
+	const timeoutMs =
+		typeof opts.stdinTimeoutMs === "number" && opts.stdinTimeoutMs >= 0 ? opts.stdinTimeoutMs : 50;
+	try {
+		return await readAnalyzeStdin(timeoutMs);
+	} catch {
+		return "";
+	}
 }
 
 function str(flags: FlagMap, key: string): string | undefined {
@@ -632,8 +707,10 @@ export interface CommandRunnerOptions {
 	cwd?: string;
 	/** Stdin text override for `analyze` (tests inject the payload; the CLI reads process stdin). */
 	stdinText?: string;
-	/** Stdin reader override for `analyze` (defaults to reading process stdin). */
+	/** Stdin reader override for `analyze` (defaults to the bounded process-stdin drain). */
 	readStdin?: () => Promise<string>;
+	/** Bound in ms for the `analyze` process-stdin drain (tests shorten it; default 50). */
+	stdinTimeoutMs?: number;
 }
 
 export interface CommandRunnerResult {
@@ -699,8 +776,7 @@ export async function runCommand(
 			const formatRaw = str(flags, "format");
 			const format =
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
-			const stdinText =
-				opts.stdinText ?? (opts.readStdin ? await opts.readStdin() : await readAnalyzeStdin());
+			const stdinText = await drainAnalyzeStdin(flags, opts);
 			const stdinPayload = parseAnalyzeStdin(stdinText);
 			const analyzeFlags: AnalyzeFlags = {
 				format,

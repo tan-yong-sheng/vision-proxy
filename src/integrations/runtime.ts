@@ -62,6 +62,16 @@ const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 /** Default analyzer command for generated artifacts. */
 const DEFAULT_VP_BIN = "vp";
 
+/**
+ * Shared bounds for the last-N conversation context passed to `vp analyze`
+ * via `--context`: how many messages are kept, how much assistant text each
+ * contributes, and the total context size. Values mirror the canonical
+ * formatter in `src/core.ts` so the host artifacts and the CLI stay in sync.
+ */
+const RECENT_MESSAGE_COUNT = 8;
+const ASSISTANT_TRUNCATE_CHARS = 500;
+const CONTEXT_MAX_CHARS = 3000;
+
 function parsePositiveInt(raw: unknown, fallback: number, min: number, max: number): number {
 	var n = parseInt(raw == null ? "" : String(raw), 10);
 	if (!Number.isFinite(n) || n < min || n > max) return fallback;
@@ -91,16 +101,96 @@ function resolveVpBin(): string {
 	return DEFAULT_VP_BIN;
 }
 
+/**
+ * Analyze-invocation options carried by host adapters.
+ *
+ * The optional question and context are only appended to the command line when
+ * present and non-empty, so a call that omits them (every pre-existing call
+ * site) produces a byte-identical invocation to the historical
+ * "vp analyze <images> --max-output-tokens N" shape.
+ */
+interface AnalyzeExtras {
+	question?: string;
+	context?: string;
+}
+
 function buildAnalyzeArgs(
 	images: string[],
 	maxTokens: number,
+	extras?: AnalyzeExtras,
 ): { command: string; args: string[] } {
 	var vp = resolveVpBin();
 	var prefix = vpEntryToSpawn(vp);
-	return {
-		command: prefix.command,
-		args: prefix.args.concat(["analyze"], images, ["--max-output-tokens", String(maxTokens)]),
-	};
+	var args = prefix.args.concat(["analyze"], images, ["--max-output-tokens", String(maxTokens)]);
+	var question = "";
+	var context = "";
+	if (extras) {
+		question = typeof extras.question === "string" ? extras.question.trim() : "";
+		context = typeof extras.context === "string" ? extras.context.trim() : "";
+	}
+	if (question) args.push("--question", question);
+	if (context) args.push("--context", context);
+	return { command: prefix.command, args: args };
+}
+
+// ── Standalone conversation-context formatter ─────────────────────────────
+//
+// Mirrors buildConversationContext/truncateContext in src/core.ts so the
+// generated artifacts can render `--context` without importing the package.
+// The input is host-agnostic: an array of { role, content } messages where
+// content is a string or an array of blocks; only text blocks count. Each
+// host adapter maps its native message shape (Pi entries, opencode
+// info/parts, CC transcript lines, Codex rollout items) before calling.
+
+function isTextBlock(c: unknown): boolean {
+	if (!c || typeof c !== "object") return false;
+	var block = c as { type?: unknown; text?: unknown };
+	return block.type === "text" && typeof block.text === "string";
+}
+
+function extractText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	var parts: string[] = [];
+	for (const c of content) {
+		if (isTextBlock(c)) parts.push((c as { text: string }).text);
+	}
+	return parts.join(" ");
+}
+
+/** Cap conversation context while preserving its most recent characters. */
+function truncateConversationContext(result: string): string {
+	if (result.length <= CONTEXT_MAX_CHARS) return result;
+	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+	return "…" + result.slice(-CONTEXT_MAX_CHARS);
+}
+
+/**
+ * Render the last N user/assistant messages as bounded plain text, or "" when
+ * nothing qualifies. The result is attacker-controlled input to the vision
+ * prompt, so `vp analyze` fences it (context is only sent when configured).
+ */
+function buildConversationContext(messages: unknown): string {
+	if (!Array.isArray(messages)) return "";
+	var msgs: Array<{ role?: unknown; content?: unknown }> = [];
+	var msg: { role?: unknown; content?: unknown };
+	for (const m of messages) {
+		if (!m || typeof m !== "object") continue;
+		msg = m as { role?: unknown; content?: unknown };
+		if (msg.role === "user" || msg.role === "assistant") msgs.push(msg);
+	}
+	var tail = msgs.slice(-RECENT_MESSAGE_COUNT);
+	var lines: string[] = [];
+	var text = "";
+	for (const item of tail) {
+		text = extractText(item.content);
+		if (!text.trim()) continue;
+		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+		if (item.role === "user") lines.push("User: " + text);
+		// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+		else lines.push("Assistant: " + text.slice(0, ASSISTANT_TRUNCATE_CHARS));
+	}
+	return truncateConversationContext(lines.join("\n"));
 }
 
 function isImagePath(p: unknown): boolean {
@@ -231,9 +321,12 @@ function readReminder(
 
 export {
 	buildAnalyzeArgs,
+	buildConversationContext,
+	CONTEXT_MAX_CHARS,
 	DEFAULT_HOOK_TIMEOUT_MS,
 	DEFAULT_MAX_OUTPUT_TOKENS,
 	extractImagePaths,
+	extractText,
 	hookTimeoutMs,
 	IMAGE_EXT,
 	isImagePath,
@@ -244,10 +337,12 @@ export {
 	MIN_MAX_OUTPUT_TOKENS,
 	maxOutputTokens,
 	parsePositiveInt,
+	RECENT_MESSAGE_COUNT,
 	REMINDER_MARKER,
 	readReminder,
 	resolveImagePath,
 	resolveVpBin,
+	truncateConversationContext,
 	vpEntryToSpawn,
 	withImageInstruction,
 };
@@ -294,12 +389,19 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	constLine("MAX_MAX_OUTPUT_TOKENS", MAX_MAX_OUTPUT_TOKENS),
 	constLine("MAX_BUFFER_BYTES", MAX_BUFFER_BYTES),
 	constLine("DEFAULT_VP_BIN", "vp"),
+	constLine("RECENT_MESSAGE_COUNT", RECENT_MESSAGE_COUNT),
+	constLine("ASSISTANT_TRUNCATE_CHARS", ASSISTANT_TRUNCATE_CHARS),
+	constLine("CONTEXT_MAX_CHARS", CONTEXT_MAX_CHARS),
 	parsePositiveInt.toString(),
 	hookTimeoutMs.toString(),
 	maxOutputTokens.toString(),
 	vpEntryToSpawn.toString(),
 	resolveVpBin.toString(),
 	buildAnalyzeArgs.toString(),
+	isTextBlock.toString(),
+	extractText.toString(),
+	truncateConversationContext.toString(),
+	buildConversationContext.toString(),
 	isImagePath.toString(),
 	resolveImagePath.toString(),
 	extractImagePaths.toString(),

@@ -95,6 +95,8 @@ export function parseFlags(args: string[]): FlagParse {
 				collectFlag(flags, a.slice(2, eq), a.slice(eq + 1));
 			} else if (a === "--no-fence") {
 				flags.fence = false;
+			} else if (a === "--no-context") {
+				flags["no-context"] = true;
 			} else {
 				const name = a.slice(2);
 				const next = args[i + 1];
@@ -315,6 +317,7 @@ analyze options:
   --max-output-tokens <n>  cap response tokens
   --question <text>  text to analyze against the image
   --context <text>   recent conversation context for the analysis
+  --no-context       drop conversation context for this call only
   --api-key <key>    explicit provider key
 
 config options:
@@ -382,6 +385,7 @@ Options:
   --max-output-tokens <n>  cap the model response tokens
   --question <text>    text to analyze against the image (-q)
   --context <text>     recent conversation context for the analysis
+  --no-context         drop conversation context for this call only
   --api-key <key>      explicit provider API key (-apiKey)
   -h, --help           show this help
 
@@ -793,8 +797,13 @@ export async function runCommand(
 				// Stdin is authoritative when present: adapters now send
 				// sensitive text off-argv. Keep the argv flags as a fallback
 				// for older wrappers that still pass --question/--context.
+				// --no-context drops context only (question is opt-in per
+				// call, so there is nothing to suppress): privacy/cost escape
+				// hatch for one invocation without touching config.
 				question: stdinPayload.question ?? str(flags, "question") ?? str(flags, "q"),
-				context: stdinPayload.context ?? str(flags, "context"),
+				context: bool(flags, "no-context", false)
+					? undefined
+					: (stdinPayload.context ?? str(flags, "context")),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

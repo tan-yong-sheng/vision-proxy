@@ -47,6 +47,11 @@ describe("analyzeImagesWithModel context block", () => {
 		assert.ok(!seen.includes("user_message"), "empty question must omit the block");
 		assert.ok(!seen.includes("following message"), "empty question must omit the preamble");
 		assert.match(seen, /Describe the image.*in detail/);
+		assert.match(
+			seen,
+			/same language as the conversation context/,
+			"no-question branch keeps a neutral language directive",
+		);
 	});
 
 	it("omits the user_message block for a whitespace-only question", async () => {

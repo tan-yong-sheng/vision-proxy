@@ -21,7 +21,7 @@ export interface AnalyzeRequest {
 	imagePayloads: ImagePayload[];
 	systemPrompt: string;
 	question: string;
-	/** Last-8 conversation slice. Rendered as a fenced untrusted block. */
+	/** Last-16 conversation slice. Rendered as a fenced untrusted block. */
 	context?: string;
 	model: LanguageModel;
 	/** Per-part provider options (e.g. OpenAI imageDetail). */
@@ -84,6 +84,7 @@ function buildPromptText(
 			`Describe the image${total > 1 ? "s" : ""} in detail per your system instructions. ` +
 			`Respond in the same language as the question. Be precise and factual.`
 		: `Describe the image${total > 1 ? "s" : ""} in detail per your system instructions. ` +
+			`Respond in the same language as the conversation context, or English when there is none. ` +
 			`Be precise and factual.`;
 	return intro + contextBlock + questionBlock;
 }

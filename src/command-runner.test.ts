@@ -296,6 +296,30 @@ describe("readAnalyzeStdin", () => {
 		});
 	});
 
+	it("warns on stderr when the timeout cuts off partial data", async () => {
+		const { fake, emit } = fakeStdin();
+		const errChunks: string[] = [];
+		const savedErr = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			errChunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+			return true;
+		}) as typeof process.stderr.write;
+		try {
+			await withStdin(fake, async () => {
+				const p = readAnalyzeStdin(30);
+				await new Promise((r) => setImmediate(r));
+				emit("data", Buffer.from('vp-analyze-payload-v1\n{"que'));
+				assert.equal(await p, "");
+			});
+		} finally {
+			process.stderr.write = savedErr;
+		}
+		assert.ok(
+			errChunks.join("").includes("stdin payload incomplete"),
+			"partial-data timeout must be diagnosable",
+		);
+	});
+
 	it("degrades to empty on a stream error", async () => {
 		const { fake, emit } = fakeStdin();
 		await withStdin(fake, async () => {

@@ -184,6 +184,9 @@ export function parseAnalyzeStdin(raw: string): AnalyzeStdinPayload {
 	return out;
 }
 
+/** Bounded wait (ms) for the `vp analyze` process-stdin drain. */
+const DEFAULT_ANALYZE_STDIN_TIMEOUT_MS = 50;
+
 /**
  * Default stdin reader for `vp analyze`. Skips TTYs so an interactive
  * terminal never blocks waiting for a payload; callers pass an explicit
@@ -198,15 +201,16 @@ export function parseAnalyzeStdin(raw: string): AnalyzeStdinPayload {
  * listeners and pauses stdin so no background read keeps the event loop
  * alive after the command finishes.
  *
+ * A timeout after partial data is diagnosed on stderr (stdout stays clean
+ * for `--json` consumers): without it a slow-arriving adapter payload
+ * would silently degrade to a context-free analysis.
+ *
  * Stream errors (EPIPE/EIO on a broken pipe) likewise degrade to "" so a
  * stdin failure can never surface as a crash; the analysis simply runs
  * without the sensitive payload.
  *
  * @tags cli, runner
  */
-/** Bounded wait (ms) for the `vp analyze` process-stdin drain. */
-const DEFAULT_ANALYZE_STDIN_TIMEOUT_MS = 50;
-
 export async function readAnalyzeStdin(
 	timeoutMs = DEFAULT_ANALYZE_STDIN_TIMEOUT_MS,
 ): Promise<string> {
@@ -239,7 +243,24 @@ export async function readAnalyzeStdin(
 			const onError = (): void => {
 				finish("");
 			};
-			const timer = setTimeout(() => finish(""), timeoutMs);
+			const onTimeout = (): void => {
+				// Timeouts are only silent when nothing arrived at all (the
+				// historical no-stdin case). Partial data means an adapter
+				// payload was cut off: say so on stderr so the context-free
+				// fallback is diagnosable, while stdout stays machine-clean.
+				if (chunks.length > 0) {
+					try {
+						process.stderr.write(
+							"[vision-proxy] analyze stdin payload incomplete after " +
+								`${timeoutMs}ms; continuing without question/context\n`,
+						);
+					} catch {
+						// ignore: stderr may be torn down in tests
+					}
+				}
+				finish("");
+			};
+			const timer = setTimeout(onTimeout, timeoutMs);
 			stdin.on("data", onData);
 			stdin.on("end", onEnd);
 			stdin.on("error", onError);

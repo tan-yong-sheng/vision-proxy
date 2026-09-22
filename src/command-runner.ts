@@ -14,7 +14,8 @@
 
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
-import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
+import { configGet, configInit, configSet, configShow, configValidate } from "./commands/config.ts";
+import { doctor } from "./commands/doctor.ts";
 import { runIntegration } from "./commands/integration.ts";
 import {
 	providerCheck,
@@ -22,6 +23,7 @@ import {
 	providerList,
 	providerListKeys,
 	providerStoreKey,
+	providerTest,
 } from "./commands/provider.ts";
 import { runBackgroundCheck, runUpdate } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
@@ -76,6 +78,8 @@ export const VALUE_FLAGS = new Set([
 	"older",
 	"crop",
 	"version",
+	"image",
+	"timeout",
 ]);
 
 /**
@@ -352,9 +356,10 @@ export const HELP = `vision-proxy (vp) ${VERSION}
 
 Usage:
   vp analyze <paths...> [options]
-  vp config <init|get|set|validate> ...
-  vp provider <list|check|store-key|delete-key|list-keys> ...
+  vp config <init|get|show|set|validate> ...
+  vp provider <list|check|test|store-key|delete-key|list-keys> ...
   vp cache <status|clear|prune> ...
+  vp doctor [--json]
   vp update [--check] [--version <tag>] [--force] [--beta]
 
 analyze options:
@@ -375,12 +380,14 @@ analyze options:
 config options:
   init                       scaffold .vision-proxy.json in cwd
   get [--config <path>]      print resolved config
+  show [provider]            print human-readable effective config
   set <key> <value>          set a key in .vision-proxy.json
-  validate [--config <path>] check config + provider reachability
+  validate [--config <path>] check config + provider key presence
 
 provider options:
   list                       list providers + key presence
   check [<name>]             verify auth
+  test [<name>]              live text + vision connectivity probe
   store-key <name>           read key from stdin, store in system keyring
   delete-key <name>          delete key from the system keyring
   list-keys                  list providers with keyring-stored keys
@@ -395,6 +402,9 @@ update options:
   --version <tag>            install a specific release tag (e.g. v0.1.0)
   --force, -f                reinstall even when already up to date
   --beta                     install the latest pre-release instead of stable
+
+doctor options:
+  --json                     machine-readable output
 
 integration options:
   install <agent>            install vision-proxy for pi | claude-code | codex | opencode
@@ -452,17 +462,19 @@ Manage the VisionConfig (.vision-proxy.json).
 Usage:
   vp config init [--config <path>]       scaffold a config in the cwd
   vp config get  [--config <path>]       print the resolved config
+  vp config show [provider]              print the human-readable effective config
   vp config set  <key> <value>           set a key in the project config
-  vp config validate [--config <path>]   check config + provider reachability
+  vp config validate [--config <path>]   check config + provider key presence
 
 Subcommands:
   init               scaffold .vision-proxy.json in the current directory
   get                print the resolved config with precedence notes
+  show [provider]    print the human-readable effective config
   set <key> <value>  set a key in the project config
-  validate           validate config + probe provider auth
+  validate           validate config + check provider key presence
 
 Options:
-  --config <path>    explicit config file path (get/set/validate)
+  --config <path>    explicit config file path (get/show/validate)
   -h, --help         show this help`,
 
 	"config init": `vp config init
@@ -486,6 +498,20 @@ Options:
   --config <path>    explicit config file path
   -h, --help         show this help`,
 
+	"config show": `vp config show [provider] [--config <path>]
+
+Print the human-readable effective config.
+
+Usage:
+  vp config show [provider] [--config <path>]
+
+Arguments:
+  [provider]         narrow to one provider (defaults to the active provider)
+
+Options:
+  --config <path>    explicit config file path
+  -h, --help         show this help`,
+
 	"config set": `vp config set <key> <value>
 
 Set a key in the project .vision-proxy.json.
@@ -502,7 +528,7 @@ Notes:
 
 	"config validate": `vp config validate [--config <path>]
 
-Validate config and probe provider reachability.
+Validate config and check provider key presence (no network I/O).
 
 Usage:
   vp config validate [--config <path>]
@@ -518,6 +544,7 @@ Manage the provider registry and credentials.
 Usage:
   vp provider list                       list providers + key presence
   vp provider check [<name>]             verify provider auth
+  vp provider test [<name>]              live text + vision connectivity probe
   vp provider store-key <name>           read key from stdin -> keyring
   vp provider delete-key <name>          delete key from keyring
   vp provider list-keys                  list keyring-stored keys
@@ -525,6 +552,7 @@ Usage:
 Subcommands:
   list                list configured providers and key presence
   check [<name>]      verify API key is configured (all if omitted)
+  test [<name>]       live text + vision probe (never writes cache)
   store-key <name>    read a key from stdin, store in the system keyring
   delete-key <name>   delete a provider's keyring-stored key
   list-keys           list providers with a keyring-stored key
@@ -556,6 +584,30 @@ Arguments:
   <name>              provider id to check (all providers if omitted)
 
 Exits non-zero if any checked provider is missing a key.`,
+
+	"provider test": `vp provider test [<name>] [--model <id>] [--api-key <key>] [--image <path>] [--timeout <ms>] [--config <path>] [--json]
+
+Run a live text + vision connectivity probe against a provider.
+
+Usage:
+  vp provider test [<name>] [options]
+
+Arguments:
+  [<name>]             provider id to probe (defaults to the configured provider)
+
+Options:
+  --model <id>         override the model id
+  --api-key <key>      explicit provider API key
+  --image <path>       probe with a real image file (default: embedded 1x1 PNG)
+  --timeout <ms>       per-probe timeout in ms (default 30000)
+  --config <path>      explicit config file path
+  --json               machine-readable output
+  -h, --help           show this help
+
+Notes:
+  The text probe runs first, then the vision probe. TEXT OK / VISION FAIL
+  means the endpoint is reachable but not vision-capable. Never writes
+  the description cache and never prints key material.`,
 
 	"provider store-key": `vp provider store-key <name>
 
@@ -712,6 +764,21 @@ Output:
   one line per supported agent with its install state and the version
   marker embedded in the installed artifact. Outdated integrations are
   flagged with a refresh hint.`,
+
+	doctor: `vp doctor [--json]
+
+Check that the local environment is sane (offline-only, no network I/O).
+
+Usage:
+  vp doctor [--json]
+
+Options:
+  --json             machine-readable output
+  -h, --help         show this help
+
+Notes:
+  Live model probing stays in \`vp provider test\`. WARN never fails the
+  command; any FAIL exits 1.`,
 
 	update: `vp update [--check] [--version <tag>] [--force] [--beta]
 
@@ -893,6 +960,15 @@ export async function runCommand(
 					}
 					return fromStatus(await configSet(key, value, cwd));
 				}
+				case "show":
+					return fromStatus(
+						await configShow({
+							provider: subRest[0],
+							configPath: str(flags, "config"),
+							cwd,
+							env,
+						}),
+					);
 				case "validate":
 					return fromStatus(
 						await configValidate({
@@ -902,7 +978,9 @@ export async function runCommand(
 						}),
 					);
 				default:
-					return err(`unknown config subcommand "${sub ?? ""}". Try: init, get, set, validate`);
+					return err(
+						`unknown config subcommand "${sub ?? ""}". Try: init, get, show, set, validate`,
+					);
 			}
 		}
 
@@ -919,6 +997,29 @@ export async function runCommand(
 				case "check": {
 					const { config } = await loadConfig({ cwd, env });
 					return fromStatus(providerCheck(subRest[0], env, config));
+				}
+				case "test": {
+					const timeoutRaw = str(flags, "timeout");
+					let timeoutMs: number | undefined;
+					if (timeoutRaw !== undefined) {
+						timeoutMs = Number(timeoutRaw);
+						if (!Number.isFinite(timeoutMs)) {
+							return err("--timeout must be a positive number of ms");
+						}
+					}
+					return fromStatus(
+						await providerTest({
+							provider: subRest[0],
+							model: str(flags, "model"),
+							apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
+							imagePath: str(flags, "image"),
+							timeoutMs,
+							json: bool(flags, "json", false),
+							configPath: str(flags, "config"),
+							env,
+							cwd,
+						}),
+					);
 				}
 				case "store-key": {
 					const name = subRest[0];
@@ -938,7 +1039,7 @@ export async function runCommand(
 					return fromStatus(providerListKeys());
 				default:
 					return err(
-						`unknown provider subcommand "${sub ?? ""}". Try: list, check, store-key, delete-key, list-keys`,
+						`unknown provider subcommand "${sub ?? ""}". Try: list, check, test, store-key, delete-key, list-keys`,
 					);
 			}
 		}
@@ -971,6 +1072,13 @@ export async function runCommand(
 			return fromStatus(
 				await runIntegration(sub ?? "", agent ?? "", undefined, bool(flags, "dev", false)),
 			);
+		}
+
+		case "doctor": {
+			if (wantsHelp(flags, rest)) {
+				return ok(renderHelp(["doctor"]));
+			}
+			return fromStatus(await doctor({ cwd, env, json: bool(flags, "json", false) }));
 		}
 
 		case "update": {

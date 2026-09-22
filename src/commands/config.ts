@@ -5,14 +5,15 @@
  *   init              scaffold a .vision-proxy.json in the cwd
  *   get               print the resolved config (with precedence notes)
  *   set <k> <v>       set a key in the project .vision-proxy.json
- *   validate          check the resolved config + provider reachability
+ *   validate          check the resolved config + provider key presence
  */
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { loadConfig, readJsonFile } from "../config.ts";
 import { DEFAULT_CONFIG, resolveConfig, type VisionConfig } from "../core.ts";
-import { listProviders, resolveModel } from "../provider.ts";
+import { getStoredProviderKey } from "../keyring.ts";
+import { type getProvider, listProviders, resolveModel } from "../provider.ts";
 
 export interface ConfigResult {
 	ok: boolean;
@@ -96,6 +97,65 @@ function coerceValue(key: string, value: string): unknown {
 	return value;
 }
 
+/**
+ * Human-readable view of the effective config. Shares `loadConfig()` with
+ * `configGet` (explicit > project > user > env > defaults); `get` stays the
+ * JSON/machine variant. Never prints key material.
+ */
+export async function configShow(opts: {
+	provider?: string;
+	configPath?: string;
+	cwd: string;
+	env?: NodeJS.ProcessEnv;
+}): Promise<ConfigResult> {
+	const env = opts.env ?? process.env;
+	const { config, resolvedFrom } = await loadConfig({
+		explicitConfigPath: opts.configPath,
+		cwd: opts.cwd,
+		env,
+	});
+	const sanitized = resolveConfig(env, config);
+	const providers = opts.provider
+		? listProviders().filter((p) => p.id === opts.provider)
+		: listProviders().filter((p) => p.id === sanitized.provider);
+	if (providers.length === 0) {
+		return {
+			ok: false,
+			message: `unknown provider "${opts.provider}". Known: ${listProviders()
+				.map((p) => p.id)
+				.join(", ")}`,
+			code: 1,
+		};
+	}
+	const lines = [`resolved from: ${resolvedFrom}`];
+	for (const spec of providers) {
+		const active = spec.id === sanitized.provider ? " (active)" : "";
+		const model = spec.id === sanitized.provider ? sanitized.modelId : spec.defaultModelId;
+		lines.push(`provider: ${spec.id}${active}`);
+		lines.push(`model: ${spec.id}/${model}`);
+		if (spec.id === sanitized.provider && sanitized.baseUrl) {
+			lines.push(`baseUrl: ${sanitized.baseUrl}`);
+		}
+		lines.push(`key: ${describeKeySource(spec, env, sanitized)}`);
+	}
+	if (!opts.provider) {
+		lines.push(`mode: ${sanitized.mode}`);
+		lines.push(`cacheSize: ${sanitized.cacheSize}`);
+	}
+	return { ok: true, message: lines.join("\n"), code: 0 };
+}
+
+function describeKeySource(
+	spec: NonNullable<ReturnType<typeof getProvider>>,
+	env: NodeJS.ProcessEnv,
+	config: VisionConfig,
+): string {
+	if (env[spec.apiKeyEnv]) return `env (${spec.apiKeyEnv})`;
+	if (config.provider === spec.id && config.apiKey.length > 0) return "config (apiKey)";
+	if (getStoredProviderKey(spec.id)) return "keyring";
+	return `missing (${spec.apiKeyEnv})`;
+}
+
 export async function configValidate(opts: {
 	configPath?: string;
 	cwd: string;
@@ -116,7 +176,7 @@ export async function configValidate(opts: {
 		problems.push("maxImagesPerCall must be >= 1");
 	}
 
-	// Reachability: does the provider have a key?
+	// Key presence only (no network I/O): does the provider have a key?
 	const probe = resolveModel(
 		sanitized.provider,
 		sanitized.modelId,
@@ -126,7 +186,7 @@ export async function configValidate(opts: {
 		sanitized.apiKey,
 	);
 	const authNote = probe.ok
-		? `provider "${sanitized.provider}" reachable (key present)`
+		? `provider "${sanitized.provider}" key present`
 		: `provider "${probe.provider}" missing key ${probe.apiKeyEnv}`;
 
 	if (problems.length > 0) {

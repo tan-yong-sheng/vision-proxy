@@ -170,6 +170,18 @@ describe("command-runner seam", () => {
 		assert.match(configHelp.stdout ?? "", /vp config <subcommand>/);
 		assert.ok(!/unknown config subcommand/.test(configHelp.stdout ?? ""));
 
+		const configShowHelp = await runCommand(["config", "show", "--help"]);
+		assert.match(configShowHelp.stdout ?? "", /vp config show \[provider\]/);
+		assert.equal(configShowHelp.code, 0);
+
+		const providerTestHelp = await runCommand(["provider", "test", "--help"]);
+		assert.match(providerTestHelp.stdout ?? "", /live text \+ vision connectivity probe/);
+		assert.equal(providerTestHelp.code, 0);
+
+		const doctorHelp = await runCommand(["doctor", "--help"]);
+		assert.match(doctorHelp.stdout ?? "", /vp doctor/);
+		assert.equal(doctorHelp.code, 0);
+
 		const update = await runCommand(["update", "--help"]);
 		assert.match(update.stdout ?? "", /vp update \[/);
 		assert.equal(update.code, 0);
@@ -198,6 +210,7 @@ describe("command-runner seam", () => {
 		const badConfig = await runCommand(["config", "bogus"]);
 		assert.equal(badConfig.code, 1);
 		assert.match(badConfig.stderr ?? "", /unknown config subcommand/);
+		assert.match(badConfig.stderr ?? "", /init, get, show, set, validate/);
 
 		const setUsage = await runCommand(["config", "set", "provider"]);
 		assert.equal(setUsage.code, 1);
@@ -207,9 +220,46 @@ describe("command-runner seam", () => {
 		assert.equal(storeUsage.code, 1);
 		assert.match(storeUsage.stderr ?? "", /usage: vp provider store-key/);
 
+		const badProvider = await runCommand(["provider", "bogus"]);
+		assert.equal(badProvider.code, 1);
+		assert.match(badProvider.stderr ?? "", /unknown provider subcommand/);
+		assert.match(badProvider.stderr ?? "", /list, check, test/);
+
 		const badCache = await runCommand(["cache", "bogus"]);
 		assert.equal(badCache.code, 1);
 		assert.match(badCache.stderr ?? "", /unknown cache subcommand/);
+	});
+
+	it("dispatches config show through the runner", async () => {
+		const prevHome = process.env.HOME;
+		process.env.HOME = "/";
+		try {
+			const r = await runCommand(["config", "show"], {
+				env: { ANTHROPIC_API_KEY: "sk-test" } as NodeJS.ProcessEnv,
+				cwd: "/",
+			});
+			assert.equal(r.code, 0);
+			assert.match(r.stdout ?? "", /provider: anthropic/);
+		} finally {
+			if (prevHome === undefined) delete process.env.HOME;
+			else process.env.HOME = prevHome;
+		}
+
+		const bad = await runCommand(["config", "show", "bogus"], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+		});
+		assert.equal(bad.code, 1);
+		assert.match(bad.stderr ?? "", /unknown provider/);
+	});
+
+	it("rejects a non-numeric provider test timeout before any network call", async () => {
+		const r = await runCommand(["provider", "test", "openai", "--timeout", "abc"], {
+			env: { OPENAI_API_KEY: "sk-test" } as NodeJS.ProcessEnv,
+			cwd: "/",
+		});
+		assert.equal(r.code, 1);
+		assert.match(r.stderr ?? "", /--timeout/);
 	});
 
 	it("never touches process streams or exitCode", async () => {

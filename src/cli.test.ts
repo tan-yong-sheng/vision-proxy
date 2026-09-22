@@ -97,7 +97,7 @@ describe("cli help", () => {
 	it("prints help for config subcommands", async () => {
 		const parent = await run(["config", "--help"]);
 		assert.match(parent, /vp config <subcommand> \[options\]/);
-		assert.match(parent, /init/);
+		assert.match(parent, /show \[provider\]/);
 
 		const setHelp = await run(["config", "set", "--help"]);
 		assert.match(setHelp, /vp config set <key> <value>/);
@@ -109,8 +109,11 @@ describe("cli help", () => {
 		const getHelp = await run(["config", "get", "-h"]);
 		assert.match(getHelp, /Print the resolved config/);
 
+		const showHelp = await run(["config", "show", "--help"]);
+		assert.match(showHelp, /vp config show \[provider\]/);
+
 		const validateHelp = await run(["config", "validate", "--help"]);
-		assert.match(validateHelp, /Validate config and probe provider reachability/);
+		assert.match(validateHelp, /Validate config and check provider key presence/);
 	});
 
 	it("prints help for provider subcommands", async () => {
@@ -131,6 +134,9 @@ describe("cli help", () => {
 
 		const checkHelp = await run(["provider", "check", "--help"]);
 		assert.match(checkHelp, /Verify that an API key is configured/);
+
+		const testHelp = await run(["provider", "test", "--help"]);
+		assert.match(testHelp, /live text \+ vision connectivity probe/);
 	});
 
 	it("prints help for cache subcommands", async () => {

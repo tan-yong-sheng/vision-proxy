@@ -10,7 +10,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { configGet, configInit, configSet, configValidate } from "./config.ts";
+import { configGet, configInit, configSet, configShow, configValidate } from "./config.ts";
 
 let cwd: string;
 let prevHome: string | undefined;
@@ -120,18 +120,53 @@ describe("configValidate", () => {
 		assert.match(r.message, /missing key/);
 	});
 
-	it("reports reachable when the key is present", async () => {
+	it("reports key present when the key is present", async () => {
 		const env = { ANTHROPIC_API_KEY: "sk-test", OPENAI_API_KEY: "x" } as NodeJS.ProcessEnv;
 		const r = await configValidate({ cwd, env });
 		assert.equal(r.ok, true);
-		assert.match(r.message, /reachable/);
+		assert.match(r.message, /key present/);
 	});
 
-	it("reports reachable when only config.apiKey is set", async () => {
+	it("reports key present when only config.apiKey is set", async () => {
 		await configSet("provider", "openai", cwd);
 		await configSet("apiKey", "cfg-secret-key", cwd);
 		const r = await configValidate({ cwd, env: {} as NodeJS.ProcessEnv });
 		assert.equal(r.ok, true);
-		assert.match(r.message, /reachable/);
+		assert.match(r.message, /key present/);
+	});
+});
+
+describe("configShow", () => {
+	it("prints the active provider, model, key source, and cache settings", async () => {
+		const r = await configShow({
+			cwd,
+			env: { ANTHROPIC_API_KEY: "sk-test" } as NodeJS.ProcessEnv,
+		});
+		assert.equal(r.ok, true);
+		assert.match(r.message, /resolved from:/);
+		assert.match(r.message, /provider: anthropic \(active\)/);
+		assert.match(r.message, /model: anthropic\//);
+		assert.match(r.message, /key: env \(ANTHROPIC_API_KEY\)/);
+		assert.match(r.message, /mode: /);
+		assert.doesNotMatch(r.message, /sk-test/);
+	});
+
+	it("narrows to one provider when [provider] is given", async () => {
+		const r = await configShow({
+			provider: "openai",
+			cwd,
+			env: {} as NodeJS.ProcessEnv,
+		});
+		assert.equal(r.ok, true);
+		assert.match(r.message, /provider: openai/);
+		assert.match(r.message, /key: missing \(OPENAI_API_KEY\)/);
+		assert.ok(!/mode: /.test(r.message));
+	});
+
+	it("rejects an unknown provider", async () => {
+		const r = await configShow({ provider: "bogus", cwd, env: {} as NodeJS.ProcessEnv });
+		assert.equal(r.ok, false);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /unknown provider "bogus"/);
 	});
 });

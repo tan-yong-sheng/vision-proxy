@@ -7,7 +7,7 @@
  * beforeEach.
  */
 import { strict as assert } from "node:assert";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -15,11 +15,13 @@ import type { KeyringBackend } from "../keyring.ts";
 import { setKeyringBackend } from "../keyring.ts";
 import { resolveModel } from "../provider.ts";
 import {
+	classifyProbeError,
 	providerCheck,
 	providerDeleteKey,
 	providerList,
 	providerListKeys,
 	providerStoreKey,
+	providerTest,
 } from "./provider.ts";
 
 let home: string;
@@ -267,5 +269,210 @@ describe("resolveModel keyring fallback", () => {
 		);
 		assert.equal(r.ok, true);
 		if (r.ok) assert.equal(r.model.baseURL, "http://explicit/v1");
+	});
+});
+
+describe("providerTest", () => {
+	let cwd: string;
+	let prevHome: string | undefined;
+
+	beforeEach(async () => {
+		cwd = await mkdtemp(path.join(os.tmpdir(), "vp-provider-test-"));
+		// Isolate user config: loadConfig() reads ~/.vision-proxy/config.json
+		// via os.homedir(), so point HOME at the empty temp dir.
+		prevHome = process.env.HOME;
+		process.env.HOME = cwd;
+	});
+
+	afterEach(async () => {
+		await rm(cwd, { recursive: true, force: true });
+		if (prevHome === undefined) delete process.env.HOME;
+		else process.env.HOME = prevHome;
+	});
+
+	function envWithKey(): NodeJS.ProcessEnv {
+		return { OPENAI_API_KEY: "sk-test" } as NodeJS.ProcessEnv;
+	}
+
+	it("reports TEXT OK / VISION OK when both probes succeed", async () => {
+		const calls: unknown[] = [];
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			generateTextImpl: async (opts) => {
+				calls.push(opts);
+				return { text: "OK" };
+			},
+		});
+		assert.equal(r.ok, true);
+		assert.equal(r.code, 0);
+		assert.match(r.message, /Source: env \(OPENAI_API_KEY\)/);
+		assert.match(r.message, /Model: openai\//);
+		assert.match(r.message, /Text: OK/);
+		assert.match(r.message, /Vision: OK/);
+		assert.match(r.message, /Connection test successful/);
+		assert.equal(calls.length, 2);
+		assert.doesNotMatch(r.message, /sk-test/);
+	});
+
+	it("distinguishes TEXT OK / VISION FAIL for a text-only endpoint", async () => {
+		let n = 0;
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			generateTextImpl: async () => {
+				n += 1;
+				if (n === 1) return { text: "OK" };
+				throw new Error("400 image not supported by this model");
+			},
+		});
+		assert.equal(r.ok, false);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /Text: OK/);
+		assert.match(r.message, /Vision: FAIL/);
+		assert.match(r.message, /does not accept images/);
+	});
+
+	it("fails closed with an actionable 401 message", async () => {
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			generateTextImpl: async () => {
+				throw new Error("401 Unauthorized: incorrect API key");
+			},
+		});
+		assert.equal(r.ok, false);
+		assert.match(r.message, /Text: FAIL/);
+		assert.match(r.message, /authentication failed \(401\)/);
+		assert.doesNotMatch(r.message, /sk-test/);
+	});
+
+	it("times out with an actionable message", async () => {
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			generateTextImpl: async () => {
+				throw new Error("timed out after 30000ms");
+			},
+		});
+		assert.equal(r.ok, false);
+		assert.match(r.message, /timed out/);
+	});
+
+	it("emits --json with separate text/vision statuses", async () => {
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			json: true,
+			generateTextImpl: async () => ({ text: "OK" }),
+		});
+		assert.equal(r.ok, true);
+		const parsed = JSON.parse(r.message) as {
+			provider: string;
+			text: { status: string };
+			vision: { status: string };
+		};
+		assert.equal(parsed.provider, "openai");
+		assert.equal(parsed.text.status, "OK");
+		assert.equal(parsed.vision.status, "OK");
+		assert.doesNotMatch(r.message, /sk-test/);
+	});
+
+	it("rejects an unknown provider without calling the model", async () => {
+		let called = false;
+		const r = await providerTest({
+			provider: "bogus",
+			env: envWithKey(),
+			cwd,
+			generateTextImpl: async () => {
+				called = true;
+				return { text: "OK" };
+			},
+		});
+		assert.equal(r.ok, false);
+		assert.match(r.message, /unknown provider "bogus"/);
+		assert.equal(called, false);
+	});
+
+	it("requires a key and never prints it", async () => {
+		let called = false;
+		const r = await providerTest({
+			provider: "openai",
+			env: {} as NodeJS.ProcessEnv,
+			cwd,
+			generateTextImpl: async () => {
+				called = true;
+				return { text: "OK" };
+			},
+		});
+		assert.equal(r.ok, false);
+		assert.match(r.message, /no API key/);
+		assert.equal(called, false);
+	});
+
+	it("reads --image through the injected reader", async () => {
+		const img = path.join(cwd, "probe.png");
+		await writeFile(img, "fake");
+		let seenPath = "";
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			imagePath: img,
+			generateTextImpl: async () => ({ text: "OK" }),
+			readImage: async (p) => {
+				seenPath = p;
+				return { data: Buffer.from("x").toString("base64"), mimeType: "image/png" };
+			},
+		});
+		assert.equal(r.ok, true);
+		assert.equal(seenPath, img);
+	});
+
+	it("fails when --image is unreadable", async () => {
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			imagePath: path.join(cwd, "missing.png"),
+			generateTextImpl: async () => ({ text: "OK" }),
+			readImage: async () => ({ error: "not found" }),
+		});
+		assert.equal(r.ok, false);
+		assert.match(r.message, /could not read --image/);
+	});
+
+	it("rejects a non-positive --timeout", async () => {
+		const r = await providerTest({
+			provider: "openai",
+			env: envWithKey(),
+			cwd,
+			timeoutMs: 0,
+			generateTextImpl: async () => ({ text: "OK" }),
+		});
+		assert.equal(r.ok, false);
+		assert.match(r.message, /--timeout/);
+	});
+});
+
+describe("classifyProbeError", () => {
+	it("labels 404 as a model problem", () => {
+		assert.match(classifyProbeError(new Error("404 model not found")), /model not found \(404\)/);
+	});
+
+	it("labels image-unsupported 400s as vision-incapable", () => {
+		assert.match(
+			classifyProbeError(new Error("400 image not supported by this model")),
+			/vision-capable/,
+		);
+	});
+
+	it("passes unknown errors through verbatim", () => {
+		assert.equal(classifyProbeError(new Error("weird")), "weird");
 	});
 });

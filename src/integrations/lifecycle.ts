@@ -216,7 +216,8 @@ export async function integrationShow(agent: string): Promise<IntegrationResult>
 				`opencode plugin: ${ARTIFACT_FILENAME}\n\nInstall location: ${pluginPath}/\n\n` +
 				`The plugin registers hooks for parity with claude-code/codex:\n` +
 				`- chat.message -> like UserPromptSubmit (appends a static reminder to read prompt image paths; attached image parts are left untouched)\n` +
-				`- tool.execute.before (read) -> like PreToolUse Read (intercepts reads on images)\n\n` +
+				`- tool.execute.before (read) -> like PreToolUse Read (intercepts reads on images)\n` +
+				`- tool.execute.before (bash) -> rewrites model-invoked vp analyze with --context-file\n\n` +
 				`Configuration via environment variables:\n` +
 				`- VP_MAX_OUTPUT_TOKENS (default: 2000)\n` +
 				`- VP_BIN (default: vp on PATH)\n` +

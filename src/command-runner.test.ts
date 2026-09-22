@@ -12,6 +12,8 @@ import { describe, it } from "node:test";
 import * as cli from "./cli.ts";
 import {
 	HELP,
+	hookContextFileDir,
+	isHookContextFile,
 	MAX_ANALYZE_STDIN_BYTES,
 	parseAnalyzeStdin,
 	parseFlags,
@@ -151,33 +153,64 @@ describe("command-runner seam", () => {
 		assert.match(renderHelp(["analyze"]), /--context-file <path>/);
 	});
 
+	it("rejects non-handoff --context-file paths without reading or deleting", () => {
+		let reads = 0;
+		const reader = (_p: string): string | null => {
+			reads++;
+			return "should never be read";
+		};
+		assert.equal(readAnalyzeContextFile("/tmp/vp-ctx.txt", reader), undefined);
+		assert.equal(readAnalyzeContextFile("/etc/passwd", reader), undefined);
+		assert.equal(readAnalyzeContextFile("~/.some-file", reader), undefined);
+		assert.equal(reads, 0, "non-handoff paths must never reach the reader");
+		assert.equal(isHookContextFile("/tmp/vp-ctx.txt"), false);
+		assert.equal(isHookContextFile(undefined), false);
+	});
+
+	it("measures the context-file cap in UTF-8 bytes, not UTF-16 units", () => {
+		// U+1F600 encodes as 4 UTF-8 bytes but 2 UTF-16 units: a payload of
+		// (cap/4)+1 emoji exceeds the byte cap while staying under a
+		// length-based check.
+		const emoji = "\uD83D\uDE00".repeat(MAX_ANALYZE_STDIN_BYTES / 4 + 1);
+		const dir = hookContextFileDir();
+		assert.equal(
+			readAnalyzeContextFile(`${dir}/vp-context-abc.txt`, () => emoji),
+			undefined,
+		);
+	});
+
 	it("reads --context-file content as analyze context", async () => {
-		const r = await runCommand(["analyze", "--context-file", "/tmp/vp-ctx.txt", "img.png"], {
+		const dir = hookContextFileDir();
+		const handoff = `${dir}/vp-context-test1.txt`;
+		const r = await runCommand(["analyze", "--context-file", handoff, "img.png"], {
 			env: {} as NodeJS.ProcessEnv,
 			cwd: "/",
 			stdinText: "",
-			readContextFile: (p) => (p === "/tmp/vp-ctx.txt" ? "User: file history" : null),
+			readContextFile: (p) => (p === handoff ? "User: file history" : null),
 		});
 		// No API key: fails at provider resolution, proving the file read
 		// threaded through without throwing.
 		assert.equal(r.code, 1);
 		assert.equal(
-			readAnalyzeContextFile("/tmp/vp-ctx.txt", () => "User: file history"),
+			readAnalyzeContextFile(handoff, () => "User: file history"),
 			"User: file history",
 		);
+		assert.equal(isHookContextFile(handoff), true);
 	});
 
 	it("prefers stdin over --context-file, and --context-file over argv --context", () => {
-		const file = (p: string) => (p === "/tmp/vp-ctx.txt" ? "file-ctx" : null);
-		assert.equal(readAnalyzeContextFile("/tmp/vp-ctx.txt", file), "file-ctx");
+		const dir = hookContextFileDir();
+		const handoff = `${dir}/vp-context-test2.txt`;
+		const file = (p: string) => (p === handoff ? "file-ctx" : null);
+		assert.equal(readAnalyzeContextFile(handoff, file), "file-ctx");
 		assert.equal(readAnalyzeContextFile(undefined, file), undefined);
 		assert.equal(readAnalyzeContextFile("", file), undefined);
 		assert.equal(
-			readAnalyzeContextFile("/tmp/vp-ctx.txt", () => null),
+			readAnalyzeContextFile(handoff, () => null),
 			undefined,
 		);
 		assert.equal(
-			readAnalyzeContextFile("/tmp/vp-ctx.txt", () => "   "),
+			readAnalyzeContextFile(handoff, () => "   "),
 			undefined,
 		);
 	});
@@ -190,8 +223,11 @@ describe("command-runner seam", () => {
 			return true;
 		}) as typeof process.stderr.write;
 		try {
+			const dir = hookContextFileDir();
 			assert.equal(
-				readAnalyzeContextFile("/tmp/vp-ctx.txt", () => "x".repeat(MAX_ANALYZE_STDIN_BYTES + 1)),
+				readAnalyzeContextFile(`${dir}/vp-context-big.txt`, () =>
+					"x".repeat(MAX_ANALYZE_STDIN_BYTES + 1),
+				),
 				undefined,
 			);
 		} finally {
@@ -201,18 +237,17 @@ describe("command-runner seam", () => {
 	});
 
 	it("drops --context-file content under --no-context", async () => {
-		const parsed = parseFlags(["--no-context", "--context-file", "/tmp/vp-ctx.txt", "img.png"]);
+		const dir = hookContextFileDir();
+		const handoff = `${dir}/vp-context-test3.txt`;
+		const parsed = parseFlags(["--no-context", "--context-file", handoff, "img.png"]);
 		assert.equal(parsed.flags["no-context"], true);
-		assert.equal(parsed.flags["context-file"], "/tmp/vp-ctx.txt");
-		const r = await runCommand(
-			["analyze", "--no-context", "--context-file", "/tmp/vp-ctx.txt", "img.png"],
-			{
-				env: {} as NodeJS.ProcessEnv,
-				cwd: "/",
-				stdinText: "",
-				readContextFile: () => "User: file history",
-			},
-		);
+		assert.equal(parsed.flags["context-file"], handoff);
+		const r = await runCommand(["analyze", "--no-context", "--context-file", handoff, "img.png"], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: () => "User: file history",
+		});
 		assert.equal(r.code, 1);
 	});
 

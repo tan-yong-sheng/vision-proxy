@@ -12,7 +12,9 @@
  * tests can pin routing without capturing process streams.
  */
 
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, sep } from "node:path";
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
 import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
@@ -310,13 +312,50 @@ export async function readAnalyzeStdin(
  * @tags cli, runner
  */
 /**
+ * Directory hooks write `--context-file` handoff files to. Mirrors the
+ * adapter-side `contextFileDir()` so the CLI only consumes files from the
+ * location its own hooks use. Exported for tests to build valid handoff
+ * paths without hardcoding the temp layout.
+ *
+ * @tags cli, runner
+ */
+export function hookContextFileDir(): string {
+	const env = process.env;
+	const override = env.TMPDIR || env.TMP || env.TEMP;
+	// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps empty-string TMPDIR falling through to tmpdir().
+	const base = (override && override.trim()) || tmpdir() || "/tmp";
+	return join(base, "vision-proxy-context");
+}
+
+/** Basename shape of hook-created handoff files (`vp-context-<rand>.txt`). */
+const CONTEXT_FILE_BASENAME_RE = /^vp-context-[A-Za-z0-9][A-Za-z0-9.-]*\.txt$/;
+
+/**
+ * True when `path` is a hook-created `--context-file` handoff file: inside
+ * the hook context directory with a hook-created basename. Anything else
+ * is never consumed or deleted, so a crafted `--context-file` pointing at
+ * an arbitrary readable file fails open without touching it.
+ *
+ * @tags cli, runner
+ */
+export function isHookContextFile(path: string | undefined): boolean {
+	// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps whitespace-only paths rejected.
+	if (!path || !path.trim()) return false;
+	const dir = hookContextFileDir();
+	if (path !== dir && !path.startsWith(dir + sep)) return false;
+	return CONTEXT_FILE_BASENAME_RE.test(basename(path));
+}
+
+/**
  * Read one `--context-file` payload for `vp analyze` (U1).
  *
  * Hooks persist last-16 conversation context to a `0600` tempfile and
  * rewrite the model's own command to reference it; the CLI consumes the
- * file here and deletes it after reading. Every failure degrades to null
- * (fail open to no context) and never throws: a missing, unreadable, or
- * oversize file means the analysis runs without context and exits 0.
+ * file here and deletes it on every outcome (used, oversize, or empty).
+ * Only hook-created handoff files are consumed: anything else fails open
+ * without being read or deleted, so a crafted path can neither exfiltrate
+ * nor delete an arbitrary file. Every failure degrades to undefined
+ * (fail open to no context) and never throws.
  *
  * @tags cli, runner
  */
@@ -324,15 +363,26 @@ export function readAnalyzeContextFile(
 	filePath: string | undefined,
 	readFile: (path: string) => string | null = defaultReadContextFile,
 ): string | undefined {
+	// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps whitespace-only flags rejected.
 	if (!filePath || !filePath.trim()) return undefined;
+	if (!isHookContextFile(filePath)) return undefined;
 	let content: string | null;
 	try {
 		content = readFile(filePath);
 	} catch {
 		return undefined;
+	} finally {
+		// Delete on every outcome so a consumed, oversize, or empty
+		// handoff never lingers; only validated handoff paths reach here,
+		// so cleanup cannot touch user files.
+		try {
+			rmSync(filePath);
+		} catch {
+			// ignore: best-effort cleanup
+		}
 	}
 	if (content === null || content === undefined) return undefined;
-	if (content.length > MAX_ANALYZE_STDIN_BYTES) {
+	if (Buffer.byteLength(content, "utf8") > MAX_ANALYZE_STDIN_BYTES) {
 		try {
 			process.stderr.write(
 				"[vision-proxy] analyze context file exceeds " +
@@ -348,14 +398,27 @@ export function readAnalyzeContextFile(
 }
 
 function defaultReadContextFile(path: string): string | null {
+	// Bounded pre-read: stat first so a huge file is rejected before an
+	// unbounded allocation. A stat/read race is acceptable: the byte check
+	// above still caps what is processed.
 	try {
-		const content = readFileSync(path, "utf8");
-		try {
-			rmSync(path);
-		} catch {
-			// ignore: deletion is best-effort; the content was already read
+		const size = statSync(path).size;
+		if (!Number.isFinite(size) || size > MAX_ANALYZE_STDIN_BYTES) {
+			try {
+				process.stderr.write(
+					"[vision-proxy] analyze context file exceeds " +
+						`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
+				);
+			} catch {
+				// ignore: stderr may be torn down in tests
+			}
+			return "";
 		}
-		return content;
+	} catch {
+		return null;
+	}
+	try {
+		return readFileSync(path, "utf8");
 	} catch {
 		return null;
 	}
@@ -895,6 +958,15 @@ export async function runCommand(
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
 			const stdinText = await drainAnalyzeStdin(opts);
 			const stdinPayload = parseAnalyzeStdin(stdinText);
+			// Consume the handoff file unconditionally: deletion lives in
+			// the read, so skipping it on the stdin/--no-context paths
+			// would strand the sensitive file on disk. Precedence still
+			// applies to the value: stdin first, then the file, then
+			// argv; --no-context drops whatever was read.
+			const contextFile = readAnalyzeContextFile(
+				str(flags, "context-file") ?? str(flags, "contextFile"),
+				opts.readContextFile,
+			);
 			const analyzeFlags: AnalyzeFlags = {
 				format,
 				provider: str(flags, "provider"),
@@ -919,12 +991,7 @@ export async function runCommand(
 				question: stdinPayload.question ?? str(flags, "question") ?? str(flags, "q"),
 				context: bool(flags, "no-context", false)
 					? undefined
-					: (stdinPayload.context ??
-						readAnalyzeContextFile(
-							str(flags, "context-file") ?? str(flags, "contextFile"),
-							opts.readContextFile,
-						) ??
-						str(flags, "context")),
+					: (stdinPayload.context ?? contextFile ?? str(flags, "context")),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

@@ -12,7 +12,7 @@
  * tests can pin routing without capturing process streams.
  */
 
-import { readFileSync, rmSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
@@ -403,8 +403,12 @@ export function readAnalyzeContextFile(
 function defaultReadContextFile(path: string): string | null {
 	// Bounded pre-read: stat first so a huge file is rejected before an
 	// unbounded allocation. A stat/read race is acceptable: the byte check
-	// above still caps what is processed.
+	// above still caps what is processed. The lstat gate rejects symlinks
+	// and non-regular files so a linked handoff path cannot disclose an
+	// arbitrary target's contents (readFileSync follows symlinks).
 	try {
+		const lst = lstatSync(path);
+		if (lst.isSymbolicLink() || !lst.isFile()) return null;
 		const size = statSync(path).size;
 		if (!Number.isFinite(size) || size > MAX_ANALYZE_STDIN_BYTES) {
 			try {

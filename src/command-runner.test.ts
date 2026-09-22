@@ -8,6 +8,7 @@
  * routing is pinned without stream capture.
  */
 import { strict as assert } from "node:assert";
+import { readFileSync, rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import * as cli from "./cli.ts";
 import {
@@ -180,6 +181,33 @@ describe("command-runner seam", () => {
 		);
 		assert.equal(isHookContextFile(traversal), false);
 		assert.equal(reads, 0, "traversal paths must never reach the reader");
+	});
+
+	it("rejects symlinked handoff paths without reading the target", async () => {
+		// POSIX-only: symlink creation and lstat semantics differ on Windows.
+		if (process.platform === "win32") return;
+		const { mkdtempSync, symlinkSync, writeFileSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const sandbox = mkdtempSync(join(tmpdir(), "vp-symlink-cli-"));
+		const target = join(sandbox, "secret.txt");
+		writeFileSync(target, "top secret");
+		const link = join(hookContextFileDir(), "vp-context-link.txt");
+		try {
+			symlinkSync(target, link);
+		} catch {
+			return;
+		}
+		try {
+			// Shape check passes (direct child + valid basename), so the
+			// lstat gate in the default reader must refuse the target.
+			assert.equal(isHookContextFile(link), true);
+			assert.equal(readAnalyzeContextFile(link), undefined);
+			assert.equal(readFileSync(target, "utf8"), "top secret");
+		} finally {
+			rmSync(link, { force: true });
+			rmSync(sandbox, { recursive: true, force: true });
+		}
 	});
 
 	it("measures the context-file cap in UTF-8 bytes, not UTF-16 units", () => {

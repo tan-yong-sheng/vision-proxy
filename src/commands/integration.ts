@@ -10,6 +10,7 @@
 
 export type { IntegrationInstallOptions, IntegrationResult } from "../integrations/index.ts";
 export {
+	installedVpBin,
 	integrationInstall,
 	integrationList,
 	integrationShow,

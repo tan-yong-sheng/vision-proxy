@@ -12,11 +12,19 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
+import { ANALYZE_STDIN_MARKER } from "./runtime.ts";
 
 interface HookRun {
 	status: number | null;
@@ -41,6 +49,51 @@ function fakeVp(): string {
 	);
 	chmodSync(file, 0o755);
 	return file;
+}
+
+/** Fake `vp` that records argv (NUL-delimited, one arg per record) to
+ * `<recordDir>/vp-args` and stdin bytes to `<recordDir>/vp-stdin`, so tests
+ * can assert what the hook passed, while emitting a success description. */
+function recordingVp(recordDir: string): string {
+	const dir = mkdtempSync(join(tmpdir(), "vp-fake-bin-"));
+	const file = join(dir, "vp");
+	const argsFile = join(recordDir, "vp-args");
+	const stdinFile = join(recordDir, "vp-stdin");
+	// NUL-delimit recorded args so multi-line values stay intact if any leak
+	// onto argv; stdin is captured verbatim so the payload is asserted there.
+	writeFileSync(
+		file,
+		'#!/bin/sh\nfor a in "$@"; do printf \'%s\\0\' "$a" >> ' +
+			JSON.stringify(argsFile) +
+			"; done\ncat > " +
+			JSON.stringify(stdinFile) +
+			"\nprintf '%s\\n' '<vision_proxy_description>A red square on white.</vision_proxy_description>'\n",
+	);
+	chmodSync(file, 0o755);
+	return file;
+}
+
+function readVpArgs(recordDir: string): string[] {
+	const raw = readFileSync(join(recordDir, "vp-args"), "utf8");
+	return raw.split("\0").filter(Boolean);
+}
+
+function readVpStdinPayload(recordingDir: string): Record<string, unknown> | null {
+	// The recording vp writes argv to vp-args and stdin bytes to vp-stdin.
+	const stdinFile = join(recordingDir, "vp-stdin");
+	if (!existsSync(stdinFile)) return null;
+	const raw = readFileSync(stdinFile, "utf8");
+	const nl = raw.indexOf("\n");
+	if (nl === -1) return null;
+	return JSON.parse(raw.slice(nl + 1)) as Record<string, unknown>;
+}
+
+function readVpStdinMarker(recordingDir: string): string | null {
+	const stdinFile = join(recordingDir, "vp-stdin");
+	if (!existsSync(stdinFile)) return null;
+	const raw = readFileSync(stdinFile, "utf8");
+	const nl = raw.indexOf("\n");
+	return nl === -1 ? null : raw.slice(0, nl);
 }
 
 function runHook(
@@ -258,4 +311,150 @@ test("malformed stdin fails open with exit 0 and no stdout", () => {
 	assert.equal(result.status, 0);
 	assert.equal(String(result.stdout ?? "").trim(), "");
 	assert.ok(existsSync(script), "script file must exist for the check");
+});
+
+function writeTranscript(lines: Array<Record<string, unknown>>): string {
+	const dir = mkdtempSync(join(tmpdir(), "vp-transcript-"));
+	const file = join(dir, "transcript.jsonl");
+	const body = `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`;
+	writeFileSync(file, body);
+	return file;
+}
+
+test("PreToolUse passes --context built from a Claude Code transcript", () => {
+	const script = writeScript();
+	const recordDir = mkdtempSync(join(tmpdir(), "vp-record-"));
+	const transcript = writeTranscript([
+		// CC JSONL: type + message.{role,content}; tool-result user lines
+		// carry no text blocks and contribute nothing.
+		{
+			type: "user",
+			message: { role: "user", content: "Fix the bug in main.ts" },
+		},
+		{
+			type: "assistant",
+			message: { role: "assistant", content: [{ type: "text", text: "I changed the loop." }] },
+		},
+		{
+			type: "user",
+			message: { role: "user", content: [{ type: "tool_result", content: "ignored" }] },
+		},
+		{
+			type: "assistant",
+			message: { role: "assistant", content: [{ type: "text", text: "I added a test." }] },
+		},
+	]);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: recordingVp(recordDir) },
+	);
+	assert.equal(run.status, 0);
+	const args = readVpArgs(recordDir);
+	// CWE-214: conversation text travels on stdin, never argv.
+	assert.equal(args.indexOf("--context"), -1, "context must not appear on argv");
+	for (const arg of args) {
+		assert.ok(!arg.includes("Fix the bug"), "transcript text must not leak into argv");
+	}
+	assert.equal(readVpStdinMarker(recordDir), ANALYZE_STDIN_MARKER);
+	const expected =
+		"User: Fix the bug in main.ts\n" +
+		"Assistant: I changed the loop.\n" +
+		"Assistant: I added a test.";
+	assert.deepEqual(readVpStdinPayload(recordDir), { question: "", context: expected });
+	assert.ok(args.includes("analyze"), "core invocation intact");
+});
+
+test("PreToolUse passes --context built from a Codex rollout transcript", () => {
+	const script = writeScript();
+	const recordDir = mkdtempSync(join(tmpdir(), "vp-record-"));
+	const transcript = writeTranscript([
+		// Codex rollout: response_item lines with input_text/output_text blocks.
+		{
+			type: "response_item",
+			payload: {
+				type: "message",
+				role: "user",
+				content: [{ type: "input_text", text: "Inspect this diagram" }],
+			},
+		},
+		{
+			type: "response_item",
+			payload: {
+				type: "message",
+				role: "assistant",
+				content: [{ type: "output_text", text: "It is a flowchart." }],
+			},
+		},
+	]);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: recordingVp(recordDir) },
+	);
+	assert.equal(run.status, 0);
+	const args = readVpArgs(recordDir);
+	assert.equal(args.indexOf("--context"), -1, "context must not appear on argv");
+	assert.equal(readVpStdinMarker(recordDir), ANALYZE_STDIN_MARKER);
+	assert.deepEqual(readVpStdinPayload(recordDir), {
+		question: "",
+		context: "User: Inspect this diagram\nAssistant: It is a flowchart.",
+	});
+});
+
+test("PreToolUse omits --context when there is no transcript (historical shape)", () => {
+	const script = writeScript();
+	const recordDir = mkdtempSync(join(tmpdir(), "vp-record-"));
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/diagram.png" },
+			// no transcript_path: the invocation must stay byte-identical to
+			// the historical "vp analyze <img> --max-output-tokens N" shape.
+		},
+		{ VP_BIN: recordingVp(recordDir) },
+	);
+	assert.equal(run.status, 0);
+	const args = readVpArgs(recordDir);
+	assert.equal(args.indexOf("--context"), -1, "no transcript must mean no --context flag");
+	assert.ok(
+		args.includes("analyze") && args.includes("/tmp/diagram.png"),
+		"core invocation intact",
+	);
+	// No sensitive input means no stdin payload either (historical shape).
+	assert.equal(readVpStdinMarker(recordDir), null);
+});
+
+test("PreToolUse fails open to no context when the transcript is unreadable", () => {
+	const script = writeScript();
+	const recordDir = mkdtempSync(join(tmpdir(), "vp-record-"));
+	const missing = join(tmpdir(), "vp-transcript-definitely-absent.jsonl");
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/diagram.png" },
+			transcript_path: missing,
+		},
+		{ VP_BIN: recordingVp(recordDir) },
+	);
+	assert.equal(run.status, 0, "an unreadable transcript must not fail the read");
+	const out = parseOutput(run);
+	assert.ok(out, "the read must still be analyzed without context");
+	const args = readVpArgs(recordDir);
+	assert.equal(args.indexOf("--context"), -1, "unreadable transcript must yield no --context");
+	assert.equal(readVpStdinMarker(recordDir), null);
 });

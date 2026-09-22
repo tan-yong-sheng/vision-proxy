@@ -16,6 +16,10 @@
  * - `tool.execute.before`: the single analysis point. Intercepts `read` tool
  *   calls on image files, runs `vp analyze`, and denies the read by throwing
  *   an error whose message carries the description (like PreToolUse Read).
+ *   The session's last user/assistant messages are fetched through the
+ *   plugin's SDK client (`client.session.messages`) and formatted into
+ *   `vp analyze --context` so the description is grounded in the recent
+ *   conversation; the lookup fails open to no context on any error.
  *
  * Image reads are unconditional by design (like the claude-code/codex hooks):
  * installing the plugin is the user's explicit opt-in to route every image
@@ -90,17 +94,58 @@ var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
 // if the same message is ever processed again, so context is never duplicated.
 var INJECTION_MARKER = REMINDER_MARKER;
 
+/** Fetch the session's messages through the plugin's SDK client and render
+ * the last user/assistant turns as the analyze --context value. Fails open:
+ * a missing client, a failed request, or an unrecognized shape yields "". */
+async function loadConversationContext(client, sessionID): Promise<string> {
+  if (!client || !sessionID || !client.session || !client.session.messages) return "";
+  // Bound the request so a wedged server can never hold up the read hook. The
+  // race timer is cleared on completion; a losing timer alone keeps the
+  // event loop alive for at most 5s, which is harmless in-process.
+  var result = await new Promise((resolve) => {
+    var settled = false;
+    var timer = setTimeout(function () {
+      if (!settled) { settled = true; resolve(null); }
+    }, 5000);
+    Promise.resolve(client.session.messages({ path: { id: sessionID } })).then(
+      (r) => {
+        if (!settled) { settled = true; clearTimeout(timer); resolve(r); }
+      },
+      () => {
+        if (!settled) { settled = true; clearTimeout(timer); resolve(null); }
+      },
+    );
+  });
+  if (!result) return "";
+  // The SDK lists messages chronologically (newest last). Map each entry's
+  // info/parts to the plain { role, content } shape the formatter expects;
+  // parts that are not text blocks are ignored by it. Our own injected
+  // reminder parts are stripped first: chat.message appends them as
+  // persistent synthetic parts, and without this they would echo back
+  // into every later analyze call (~97% boilerplate per user turn) and
+  // feed a read-tool instruction to a vision model that has no tools.
+  var msgs = (Array.isArray(result.data) ? result.data : [])
+    .filter((m) => m && m.info && Array.isArray(m.parts))
+    .map((m) => ({
+      role: m.info.role,
+      content: m.parts.filter(function (p) {
+        return !(p && p.type === "text" && typeof p.text === "string" && p.text.indexOf(INJECTION_MARKER) === 0);
+      }),
+    }));
+  return buildConversationContext(msgs);
+}
+
 /** Run vp analyze and return the fenced description, or null on failure.
  * Only the tool.execute.before (read) path calls this: chat.message emits a
  * static Read reminder instead so message handling never waits on a vision
- * call. Uses an async child process so image analysis never blocks the host
- * event loop. */
-async function runAnalyze(images: string[]): Promise<string | null> {
+ * call. Sensitive question/context travel on stdin, never argv. Uses an async
+ * child process so image analysis never blocks the host event loop. */
+async function runAnalyze(images: string[], extras): Promise<string | null> {
   if (images.length === 0) return null;
   var vp = resolveVpBin();
   var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
-  var invocation = buildAnalyzeArgs(images, maxTokens);
-  var result = await runVp(invocation.command, invocation.args);
+  var invocation = buildAnalyzeArgs(images, maxTokens, extras);
+  var result = await runVp(invocation.command, invocation.args, invocation.stdin);
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === "ENOENT") {
       console.error("[vision-proxy] vp binary not found: " + vp);
@@ -116,24 +161,39 @@ async function runAnalyze(images: string[]): Promise<string | null> {
 
 /** Promise wrapper around execFile that returns a spawnSync-shaped result
  * ({ status, stdout, stderr, error }) so the rest of the plugin can treat
- * timeouts, ENOENT, and fail-open uniformly. */
+ * timeouts, ENOENT, and fail-open uniformly. The sensitive payload travels
+ * on stdin (CWE-214); stdinText is "" when there is nothing to send. */
 function runVp(
   command: string,
   args: string[],
+  stdinText: string,
 ): Promise<{ status: number; stdout: string; stderr: string; error?: NodeJS.ErrnoException }> {
   return new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
-      (error, stdout, stderr) => {
-        if (error) {
-          resolve({ status: 1, stdout: stdout ?? "", stderr: stderr ?? "", error: error as NodeJS.ErrnoException });
-        } else {
-          resolve({ status: 0, stdout: stdout ?? "", stderr: stderr ?? "", error: undefined });
-        }
-      },
-    );
+    var child;
+    try {
+      child = execFile(
+        command,
+        args,
+        { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
+        (error, stdout, stderr) => {
+          if (error) {
+            resolve({ status: 1, stdout: stdout ?? "", stderr: stderr ?? "", error: error as NodeJS.ErrnoException });
+          } else {
+            resolve({ status: 0, stdout: stdout ?? "", stderr: stderr ?? "", error: undefined });
+          }
+        },
+      );
+      // A child that exits before stdin drains raises EPIPE on the write;
+      // the callback above still settles the promise, so swallow it here.
+      var onPipeError = function () { /* callback settles */ };
+      child.stdin.on("error", onPipeError);
+      if (stdinText) {
+        try { child.stdin.write(stdinText); } catch { /* callback settles */ }
+      }
+      try { child.stdin.end(); } catch { /* callback settles */ }
+    } catch (err) {
+      resolve({ status: 1, stdout: "", stderr: "", error: err as NodeJS.ErrnoException });
+    }
   });
 }
 
@@ -188,9 +248,10 @@ async function handleChatMessage(
 }
 
 async function handleToolExecuteBefore(
-  input: { tool: string },
+  input: { tool: string; sessionID?: string },
   output: { args: any },
   cwd: string,
+  client?: unknown,
 ): Promise<void> {
   if (input.tool !== "read") return;
   const argPath =
@@ -202,7 +263,14 @@ async function handleToolExecuteBefore(
   if (!isImagePath(argPath)) return;
   const filePath = resolveImagePath(argPath, cwd);
   if (!filePath || !existsSync(filePath)) return;
-  const description = await runAnalyze([filePath]);
+  // Ground the description in the recent conversation: fetch the session's
+  // last user/assistant messages through the SDK client. Fail open: any
+  // lookup failure simply means the analyze call runs without context.
+  let context = "";
+  try {
+    context = await loadConversationContext(client, input.sessionID);
+  } catch { /* fail open: no context */ }
+  const description = await runAnalyze([filePath], context ? { context } : undefined);
   // Fail-open: when analysis is unavailable, allow the original read.
   if (!description) return;
   // Denying by throw surfaces this message to the model as the tool result,
@@ -212,14 +280,19 @@ async function handleToolExecuteBefore(
 
 export default async function visionProxyPlugin(input: {
   directory?: string;
+  client?: unknown;
 }): Promise<Hooks> {
   const pluginCwd = typeof input?.directory === "string" && input.directory ? input.directory : process.cwd();
+  // The SDK client is what lets the read hook fetch the session's messages as
+  // the analyze --context value; an install without it (or with a broken
+  // client) degrades to context-free analysis rather than failing the read.
+  const client = input?.client;
   return {
     "chat.message": async (innerInput, innerOutput) => {
       await handleChatMessage(innerInput as any, innerOutput as any, pluginCwd);
     },
     "tool.execute.before": async (innerInput, innerOutput) => {
-      await handleToolExecuteBefore(innerInput as any, innerOutput as any, pluginCwd);
+      await handleToolExecuteBefore(innerInput as any, innerOutput as any, pluginCwd, client);
     },
   };
 }

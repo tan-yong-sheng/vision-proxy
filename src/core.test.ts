@@ -9,6 +9,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {
+	buildConversationContext,
 	buildDescriptionFence,
 	buildJointDescriptionFence,
 	buildToolCacheKey,
@@ -28,6 +29,7 @@ import {
 	resolveConfig,
 	resolveCropEntry,
 	resolveRegion,
+	truncateContext,
 } from "./core.ts";
 
 describe("hashImageData", () => {
@@ -306,6 +308,30 @@ describe("fence builders", () => {
 		const f = buildJointDescriptionFence([{ hash: "h1" }, { hash: "h2" }], "desc");
 		assert.ok(f.includes('images="2"'));
 		assert.ok(f.startsWith("<vision_proxy_joint_description"));
+	});
+});
+
+describe("conversation context bounds", () => {
+	it("keeps the last 16 text messages (widened window)", () => {
+		const msgs = Array.from({ length: 20 }, (_, i) => ({
+			role: i % 2 === 0 ? "user" : "assistant",
+			content: `m${i}`,
+		}));
+		const lines = buildConversationContext(msgs).split("\n");
+		assert.equal(lines.length, 16);
+		assert.ok(lines[0]!.includes("m4"));
+	});
+
+	it("keeps up to 3000 chars of assistant text", () => {
+		const out = buildConversationContext([{ role: "assistant", content: "x".repeat(4000) }]);
+		assert.equal(out.length, "Assistant: ".length + 3000);
+	});
+
+	it("caps total output at 20000 chars, keeping the tail", () => {
+		const out = truncateContext("z".repeat(25000));
+		assert.equal(out.length, 20001);
+		assert.ok(out.startsWith("…"));
+		assert.equal(truncateContext("short"), "short");
 	});
 });
 

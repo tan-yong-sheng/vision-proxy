@@ -111,6 +111,7 @@ async function loadGeneratedSource(
 			"  const result = nextResult;",
 			"  let stdoutHandler = null;",
 			"  const proc = {",
+			"    stdin: { on: () => {}, write: () => true, end: () => {} },",
 			"    stdout: { on: (_ev, cb) => { stdoutHandler = cb; } },",
 			"    stderr: { on: () => {} },",
 			"    on: (ev, cb) => {",
@@ -129,6 +130,7 @@ async function loadGeneratedSource(
 			"}",
 			"export function execFile(command, args, options, callback) {",
 			"  calls.push([command, args]);",
+			"  if (typeof options === 'function') { callback = options; }",
 			"  const result = nextResult;",
 			"  setImmediate(() => {",
 			'    if (!result) { callback(null, "", ""); return; }',
@@ -141,6 +143,7 @@ async function loadGeneratedSource(
 			"    }",
 			'    callback(null, result.stdout ?? "", result.stderr ?? "");',
 			"  });",
+			"  return { stdin: { on: () => {}, write: () => true, end: () => {} } };",
 			"}",
 			"",
 		].join("\n"),
@@ -661,6 +664,67 @@ test("pi extension leaves attachments untouched and reminds the referenced path"
 	reset();
 });
 
+test("pi tool_result strips own reminder blocks from analyze context", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "pic.png");
+	setNextResult({ status: 0, stdout: "@@FENCE pi strip desc@@", stderr: "" });
+	// The session branch already carries the synthetic reminder persisted by
+	// the context handler; tool_result must strip it before formatting so
+	// boilerplate never echoes into the vision prompt. The ctx stub exposes
+	// sessionManager.getBranch() exactly as the extension reads it.
+	const branch = [
+		{
+			type: "message",
+			message: {
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: "[vision-proxy:read-reminder] The user message references the following image file(s):\n- /tmp/a.png",
+					},
+					{ type: "text", text: "what is this image about" },
+				],
+			},
+		},
+		{
+			type: "message",
+			message: { role: "assistant", content: [{ type: "text", text: "reading it now" }] },
+		},
+	];
+	const before = calls.filter(([, args]) => args[0] === "analyze").length;
+	const out = (await events.tool_result[0](
+		{
+			type: "tool_result",
+			toolName: "read",
+			input: { path: imagePath },
+			content: [{ type: "text", text: "raw" }],
+			isError: false,
+		},
+		{ sessionManager: { getBranch: () => branch }, signal: undefined },
+	)) as any;
+	assert.ok(out, "read with a reminder-carrying branch must produce a description");
+	assert.match(out.content[0].text, /@@FENCE pi strip desc@@/);
+	assert.equal(
+		calls.filter(([, args]) => args[0] === "analyze").length,
+		before + 1,
+		"must analyze once",
+	);
+	reset();
+});
+
 test("pi extension analyzes a rewritten file fresh on every tool_result read", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;
@@ -949,7 +1013,8 @@ async function loadOpencodePlugin(source: string, home: string) {
 		"function",
 		"generated plugin must export a default factory function",
 	);
-	const hooks = (await (mod.default as (input: unknown) => Promise<Record<string, unknown>>)({
+	const factory = mod.default as (input: unknown) => Promise<Record<string, unknown>>;
+	const hooks = (await factory({
 		directory: dir,
 	})) as Record<string, (innerInput: any, innerOutput: any) => Promise<unknown>>;
 	assert.ok(typeof hooks["chat.message"] === "function", "must register chat.message hook");
@@ -957,7 +1022,12 @@ async function loadOpencodePlugin(source: string, home: string) {
 		typeof hooks["tool.execute.before"] === "function",
 		"must register tool.execute.before hook",
 	);
-	return { hooks, dir, calls, setNextResult };
+	const hooksWithClient = async (client: unknown) =>
+		(await factory({
+			directory: dir,
+			client,
+		})) as Record<string, (innerInput: any, innerOutput: any) => Promise<unknown>>;
+	return { hooks, hooksWithClient, dir, calls, setNextResult };
 }
 
 test("install opencode writes the plugin file with valid source", async () => {
@@ -1100,11 +1170,49 @@ test("opencode tool.execute.before denies image reads and fails open", async (t)
 	await runIntegration("install", "opencode", dir);
 	const {
 		hooks,
+		hooksWithClient,
 		dir: testDir,
 		calls,
 		setNextResult,
 	} = await loadOpencodePlugin(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "photo.png");
+
+	// The session already carries the synthetic reminder part appended by
+	// chat.message; tool.execute.before must strip it before formatting
+	// context so boilerplate never echoes into the vision prompt.
+	const clientWithReminder = {
+		session: {
+			messages: async () => ({
+				data: [
+					{
+						info: { role: "user" },
+						parts: [
+							{
+								type: "text",
+								text: "[vision-proxy:read-reminder] The user message references the following image file(s):\n- /tmp/a.png\n\nUse the read tool on each image path to inspect it.",
+							},
+							{ type: "text", text: "what is this image about" },
+						],
+					},
+					{
+						info: { role: "assistant" },
+						parts: [{ type: "text", text: "reading it now" }],
+					},
+				],
+			}),
+		},
+	};
+	const clientHooks = await hooksWithClient(clientWithReminder);
+	setNextResult({ status: 0, stdout: "@@FENCE reminder-strip desc@@", stderr: "" });
+	const strippedThrown = await clientHooks["tool.execute.before"](
+		{ tool: "read", sessionID: "sess-1" },
+		{ args: { path: imagePath } },
+	).then(
+		() => null,
+		(err: unknown) => err,
+	);
+	assert.ok(strippedThrown instanceof Error, "read with a reminder-carrying session must deny");
+	assert.match((strippedThrown as Error).message, /@@FENCE reminder-strip desc@@/);
 
 	// Successful analysis: the read is denied by throwing, with the fenced
 	// description carried in the error message.
@@ -1486,6 +1594,61 @@ test("status reports installed version markers and up-to-date summary", async ()
 	assert.equal(r.ok, true);
 	assert.match(r.message, new RegExp(`✓ pi\\s+${VERSION.replace(/\./g, "\\.")}`));
 	assert.match(r.message, /all \d+ integration\(s\) up to date/);
+	reset();
+});
+
+test("status surfaces a dev-stamped binary and hides prod installs", async () => {
+	isolate();
+	await runIntegration("install", "pi");
+	const ext = join(home_pi(), "vision-proxy_read.ts");
+	// A --dev install stamps the local CLI entry point: status must say so.
+	writeFileSync(
+		ext,
+		readFileSync(ext, "utf8").replace(
+			'var DEFAULT_VP_BIN = "vp";',
+			'var DEFAULT_VP_BIN = "/work/vision-proxy/dist/cli.js";',
+		),
+	);
+	const dev = await runIntegration("status", "");
+	assert.equal(dev.ok, true);
+	assert.match(
+		dev.message,
+		/✓ pi\s+\S+ \(dev: \/work\/vision-proxy\/dist\/cli\.js\)/,
+		"dev wiring must be visible in status",
+	);
+	// A crafted artifact with control characters in the stamped path must
+	// not inject status lines: the dev suffix is dropped, fail-open. The
+	// stamp line is built by concatenating a backslash-n escape at runtime
+	// (a literal backslash-n in source would decode too early and never
+	// exercise the control-char reject). Note: the previous block replaced
+	// the prod marker with the dev path, so match the current file content.
+	const backslashN = String.fromCharCode(92, 110);
+	writeFileSync(
+		ext,
+		readFileSync(ext, "utf8").replace(
+			'var DEFAULT_VP_BIN = "/work/vision-proxy/dist/cli.js";',
+			`var DEFAULT_VP_BIN = "/tmp/evil${backslashN}✓ forged status";`,
+		),
+	);
+	const forged = await runIntegration("status", "");
+	assert.ok(
+		forged.message.split("\n").some((l) => /^✓ pi\s+\S+$/.test(l)),
+		"control-char stamped paths degrade to the bare marker line",
+	);
+	assert.ok(!forged.message.includes("forged status"), "injected lines must not render");
+	// A plain PATH install renders exactly as before (no suffix).
+	writeFileSync(
+		ext,
+		readFileSync(ext, "utf8").replace(
+			'var DEFAULT_VP_BIN = "/work/vision-proxy/dist/cli.js";',
+			'var DEFAULT_VP_BIN = "vp";',
+		),
+	);
+	const prod = await runIntegration("status", "");
+	assert.ok(
+		prod.message.split("\n").some((l) => /^✓ pi\s+\S+$/.test(l)),
+		"prod installs keep the bare marker line",
+	);
 	reset();
 });
 

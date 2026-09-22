@@ -127,10 +127,34 @@ export function makeTsHookCommand(scriptPath: string, platform: string = process
 /**
  * Render the hook script source with the current version marker embedded.
  *
+ * Codex names view_image (its official image tool) in the submit-time
+ * reminder; Claude Code and every other caller keep Read.
+ *
  * @tags integration, catalog
  */
-export function generateHookScript(defaultVpBin?: string): string {
-	return renderGeneratedSource(HOOK_SCRIPT_SOURCE, defaultVpBin);
+export function generateHookScript(defaultVpBin?: string, submitToolWord = "Read"): string {
+	return renderGeneratedSource(
+		stampSubmitToolWord(HOOK_SCRIPT_SOURCE, submitToolWord),
+		defaultVpBin,
+	);
+}
+
+/**
+ * Stamp the submit-time tool word into a hook script source.
+ *
+ * The UserPromptSubmit reminder names the host's native image tool so the
+ * model reaches for the tool PreToolUse actually intercepts. Only "Read"
+ * and "view_image" are honored; anything else falls back to "Read" so a
+ * bad caller cannot inject arbitrary reminder text into the artifact.
+ *
+ * @tags integration, catalog
+ */
+export function stampSubmitToolWord(source: string, toolWord: string): string {
+	const word = toolWord === "view_image" ? "view_image" : "Read";
+	return source.replace(
+		'var SUBMIT_TOOL_WORD = "Read";',
+		`var SUBMIT_TOOL_WORD = ${JSON.stringify(word)};`,
+	);
 }
 
 /**
@@ -224,12 +248,14 @@ function makeHookAgentSpec(opts: {
 	id: string;
 	scriptPath: () => string;
 	configPath: () => string;
+	/** Tool word named by the UserPromptSubmit reminder (defaults to Read). */
+	submitToolWord?: string;
 }): AgentSpec {
 	return {
 		id: opts.id,
 		target: () => opts.scriptPath(),
 		locationLabel: () => opts.scriptPath(),
-		generate: generateHookScript,
+		generate: (defaultVpBin?: string) => generateHookScript(defaultVpBin, opts.submitToolWord),
 		readConfig() {
 			const p = opts.configPath();
 			const raw = existsSync(p) ? readFileSync(p, "utf8") : "{}";
@@ -292,6 +318,7 @@ const codex: AgentSpec = makeHookAgentSpec({
 	id: "codex",
 	scriptPath: codexHookScriptPath,
 	configPath: codexConfigPath,
+	submitToolWord: "view_image",
 });
 
 /** Path of the legacy-named artifact in the directory containing `target`. */

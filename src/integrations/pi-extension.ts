@@ -20,6 +20,9 @@
  *   - `tool_result`: the single analysis point. Intercepts `read` tool results
  *     on image files and replaces the tool result content with the fenced
  *     UNTRUSTED description from `vp analyze` so no image bytes reach the model.
+ *     The last user/assistant messages of the session branch are formatted
+ *     into `vp analyze --context` (via `ctx.sessionManager.getBranch()`) so the
+ *     description is grounded in the recent conversation.
  *
  * Pi fires the `input` event for every `session.prompt()` submission, including
  * ones that arrive while the agent is streaming and are queued via the
@@ -80,14 +83,20 @@ import { homedir } from "node:os";
 const PI_EXTENSION_ADAPTER = String.raw`
 var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
 
-/** Run vp analyze (async) and return the fenced description, or null on failure. */
-async function runAnalyze(images: string[], signal?: unknown): Promise<string | null> {
+/** Run vp analyze (async) and return the fenced description, or null on failure.
+ * The optional extras (question, context) travel on stdin, never argv, so the
+ * description is grounded in the recent conversation without exposing it in
+ * the process listing. */
+async function runAnalyze(images: string[], extras, signal?: unknown): Promise<string | null> {
   return new Promise((resolve) => {
     if (!images || images.length === 0) return resolve(null);
     var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
-    var invocation = buildAnalyzeArgs(images, maxTokens);
+    var invocation = buildAnalyzeArgs(images, maxTokens, extras);
     var command = invocation.command;
     var args = invocation.args;
+    // Sensitive text travels on stdin (CWE-214), like the stdio hook and the
+    // opencode plugin. Nothing sensitive is appended to the command line.
+    var stdinText = invocation.stdin;
     var vp = resolveVpBin();
     let settled = false;
     let timer: unknown = null;
@@ -100,6 +109,17 @@ async function runAnalyze(images: string[], signal?: unknown): Promise<string | 
     let child;
     try {
       child = spawn(command, args);
+      // A child that exits before stdin drains raises EPIPE asynchronously
+      // on the stdin stream (the process 'error' event below does not cover
+      // it), which without a listener is an uncaught exception that can
+      // crash the host. Register the guard BEFORE write/end so every
+      // delivery path is covered; the process error/close handlers settle
+      // the promise either way.
+      child.stdin.on("error", () => { /* error/close handlers settle */ });
+      if (stdinText) {
+        try { child.stdin.write(stdinText); } catch { /* error handler settles */ }
+      }
+      try { child.stdin.end(); } catch { /* error handler settles */ }
     } catch (err) {
       const msg = err && (err as Error).message ? (err as Error).message : String(err);
       process.stderr.write("[vision-proxy] failed to spawn vp: " + msg + "\n");
@@ -205,7 +225,10 @@ export default function setup(pi: ExtensionAPI): void {
       const content = (msg as any).content as Array<any>;
       // Idempotency guard: strip reminders injected by a previous run of this
       // handler before collecting paths, so re-delivery (Pi re-fires context
-      // for every model call) never stacks duplicate reminder text.
+      // for every model call) never stacks duplicate reminder text. Matching
+      // is by marker prefix: user text starting with our internal marker is
+      // treated as ours (the marker is never user-facing; typing it verbatim
+      // is the only false positive, and is accepted as user error).
       const fresh = content.filter(
         (c) => !(c && c.type === "text" && typeof c.text === "string" && c.text.indexOf(REMINDER_MARKER) === 0),
       );
@@ -257,8 +280,34 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
+    // Ground the description in the recent conversation: format the last
+    // user/assistant messages of the session branch. getBranch() returns
+    // SessionEntry[]; only the message entries carry the LLM message, and its
+    // { role, content } lives one level down in entry.message. Map those to
+    // the plain { role, content } shape the formatter expects (chronological),
+    // and fail open on any shape the formatter does not recognize. Our own
+    // injected reminder blocks are stripped first (same as the opencode
+    // plugin): the context handler persists them on user turns, and without
+    // this they would echo a read-tool instruction into the vision prompt.
+    var context = "";
+    try {
+      var branch = ctx && (ctx as any).sessionManager ? (ctx as any).sessionManager.getBranch() : null;
+      var msgs = (Array.isArray(branch) ? branch : [])
+        .filter((e) => e && e.type === "message" && e.message)
+        .map((e) => {
+          var c = e.message.content;
+          if (Array.isArray(c)) {
+            c = c.filter(function (b) {
+              return !(b && b.type === "text" && typeof b.text === "string" && b.text.indexOf(REMINDER_MARKER) === 0);
+            });
+          }
+          return { role: e.message.role, content: c };
+        });
+      context = buildConversationContext(msgs);
+    } catch { /* fail open: no context */ }
     const description = await runAnalyze(
       [filePath],
+      context ? { context } : undefined,
       ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
     );
     if (!description) return undefined; // fail-open

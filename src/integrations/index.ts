@@ -24,6 +24,7 @@ export {
 	removeLegacyCodexConfigToml,
 	SUPPORTED,
 	specFor,
+	stampSubmitToolWord,
 } from "./catalog.ts";
 export {
 	applyHooks,
@@ -37,6 +38,7 @@ export {
 	stripHookGroups,
 } from "./hooks-config.ts";
 export {
+	installedVpBin,
 	integrationInstall,
 	integrationList,
 	integrationShow,

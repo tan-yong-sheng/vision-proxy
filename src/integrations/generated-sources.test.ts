@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderVersionMarker } from "../version.ts";
+import { generateHookScript, stampSubmitToolWord } from "./catalog.ts";
 import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
 import { OPENCODE_PLUGIN_SOURCE } from "./opencode-plugin.ts";
 import { PI_EXTENSION_SOURCE } from "./pi-extension.ts";
@@ -108,11 +109,31 @@ test("opencode plugin keeps its factory adapter: throw-to-deny, synthetic parts,
 test("generated artifacts preserve the historical reminder and deny wording", () => {
 	// Submit-time wording differs deliberately per host; deny wording is shared.
 	// The hook script composes its reminder via readReminder(..., "prompt",
-	// "Read") — the full sentence is pinned by the runtime unit test — so the
-	// golden test pins the composition parameters instead of a literal.
+	// SUBMIT_TOOL_WORD) — stamped to "Read" for Claude Code and "view_image"
+	// for Codex at generate() time — so the golden test pins the composition
+	// parameters (pinned per stamped artifact below) instead of a literal.
 	assert.ok(
-		HOOK_SCRIPT_SOURCE.includes('readReminder(allImages, undefined, "prompt", "Read")'),
-		"hook script keeps its prompt/Read reminder parameters",
+		HOOK_SCRIPT_SOURCE.includes('readReminder(allImages, undefined, "prompt", SUBMIT_TOOL_WORD)'),
+		"hook script composes its reminder from the stamped SUBMIT_TOOL_WORD",
+	);
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes('var SUBMIT_TOOL_WORD = "Read";'),
+		"unstamped hook source defaults the tool word to Read",
+	);
+	assert.ok(
+		generateHookScript().includes('var SUBMIT_TOOL_WORD = "Read";'),
+		"claude-code artifact keeps the Read reminder",
+	);
+	assert.ok(
+		generateHookScript(undefined, "view_image").includes('var SUBMIT_TOOL_WORD = "view_image";'),
+		"codex artifact names view_image in its reminder",
+	);
+	assert.equal(
+		stampSubmitToolWord(HOOK_SCRIPT_SOURCE, "bogus" as "Read").includes(
+			'var SUBMIT_TOOL_WORD = "Read";',
+		),
+		true,
+		"unknown tool words fall back to Read",
 	);
 	assert.ok(
 		PI_EXTENSION_SOURCE.includes('readReminder(paths, REMINDER_MARKER, "message", "read")'),

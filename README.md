@@ -144,7 +144,7 @@ See [`docs/SETUP.md`](docs/SETUP.md) for setup guides and [`docs/CONFIG.md`](doc
 - Output originates from external vision models and must be treated as UNTRUSTED by downstream agents.
 - Image cropping, hashing, and URL downloads are handled locally before upload.
 - Images are sent to the configured provider API (Anthropic, OpenAI, or Google); review your provider's data retention and privacy policies before sending sensitive images.
-- The current prompt (`--question`) and recent conversation slice (`--context`, last 8 messages, max 3000 chars) are sent alongside the image so the vision model has intent and history. Set `VP_INCLUDE_CONTEXT=false` to stop sending conversation history.
+- The current prompt (`--question`) and recent conversation slice (`--context`, last 16 messages, max 20000 chars) are sent alongside the image so the vision model has intent and history. Set `VP_INCLUDE_CONTEXT=false` to stop sending conversation history.
 - URL downloads enforce SSRF restrictions against internal, loopback, and private network addresses.
 - File paths must resolve to local filesystem paths (network shares are restricted by default).
 

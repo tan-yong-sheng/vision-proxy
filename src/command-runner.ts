@@ -26,6 +26,7 @@ import {
 import { runBackgroundCheck, runUpdate } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
+import { ANALYZE_STDIN_MARKER } from "./integrations/runtime.ts";
 import { isKnownProvider } from "./provider.ts";
 import { VERSION } from "./version.ts";
 
@@ -94,6 +95,8 @@ export function parseFlags(args: string[]): FlagParse {
 				collectFlag(flags, a.slice(2, eq), a.slice(eq + 1));
 			} else if (a === "--no-fence") {
 				flags.fence = false;
+			} else if (a === "--no-context") {
+				flags["no-context"] = true;
 			} else {
 				const name = a.slice(2);
 				const next = args[i + 1];
@@ -135,6 +138,194 @@ export function parseFlags(args: string[]): FlagParse {
 }
 
 type FlagMap = Record<string, string | boolean | string[]>;
+
+/**
+ * Sensitive analyze inputs carried on stdin instead of argv (CWE-214).
+ *
+ * `vp analyze` accepts its question/context through a JSON stdin payload so
+ * conversation text never appears in the process listing:
+ *
+ *   <marker line>\n{"question": "...", "context": "..."}
+ *
+ * The marker line distinguishes the payload from `provider store-key` key
+ * bytes. Only the analyze path reads stdin this way; every other command is
+ * unaffected. Malformed payloads fail closed to no question/context.
+ *
+ * @tags cli, runner
+ */
+export interface AnalyzeStdinPayload {
+	question?: string;
+	context?: string;
+}
+
+/**
+ * Decode one analyze stdin payload. Pure and total: empty, truncated, or
+ * malformed input yields {} so the caller treats it as "no sensitive
+ * input" rather than failing the analysis.
+ *
+ * @tags cli, runner
+ */
+export function parseAnalyzeStdin(raw: string): AnalyzeStdinPayload {
+	const text = raw ?? "";
+	const nl = text.indexOf("\n");
+	if (nl === -1) return {};
+	if (text.slice(0, nl).trim() !== ANALYZE_STDIN_MARKER) return {};
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text.slice(nl + 1));
+	} catch {
+		return {};
+	}
+	if (!parsed || typeof parsed !== "object") return {};
+	const rec = parsed as Record<string, unknown>;
+	const out: AnalyzeStdinPayload = {};
+	if (typeof rec.question === "string" && rec.question.trim()) out.question = rec.question;
+	if (typeof rec.context === "string" && rec.context.trim()) out.context = rec.context;
+	return out;
+}
+
+/** Bounded wait (ms) for the `vp analyze` process-stdin drain. */
+const DEFAULT_ANALYZE_STDIN_TIMEOUT_MS = 50;
+
+/**
+ * Default stdin reader for `vp analyze`. Skips TTYs so an interactive
+ * terminal never blocks waiting for a payload; callers pass an explicit
+ * reader in tests and adapters pass the payload through child stdio.
+ *
+ * The wait is bounded (default 50ms): `vp analyze` historically never
+ * touched stdin, so an open pipe that never reaches EOF (CI/a wrapper
+ * inheriting stdin without writing or closing it) degrades to "" instead
+ * of hanging the command. Adapters are unaffected: they write a small
+ * payload and close child stdin right after spawning, so the
+ * drain resolves on arrival, well before the timeout. Expiry detaches the
+ * listeners and pauses stdin so no background read keeps the event loop
+ * alive after the command finishes.
+ *
+ * A timeout after partial data is diagnosed on stderr (stdout stays clean
+ * for `--json` consumers): without it a slow-arriving adapter payload
+ * would silently degrade to a context-free analysis.
+ *
+ * Stream errors (EPIPE/EIO on a broken pipe) likewise degrade to "" so a
+ * stdin failure can never surface as a crash; the analysis simply runs
+ * without the sensitive payload.
+ *
+ * @tags cli, runner
+ */
+/**
+ * Hard cap (bytes) on the `vp analyze` stdin drain. Our own adapters send
+ * at most ~20KB; anything larger is either a runaway pipe or hostile
+ * input, and is dropped before it can bloat memory or reach JSON.parse.
+ *
+ * @tags cli, runner
+ */
+export const MAX_ANALYZE_STDIN_BYTES = 256 * 1024;
+
+export async function readAnalyzeStdin(
+	timeoutMs = DEFAULT_ANALYZE_STDIN_TIMEOUT_MS,
+): Promise<string> {
+	try {
+		const { stdin } = process;
+		if (!stdin || stdin.isTTY) return "";
+		return await new Promise<string>((resolve) => {
+			const chunks: Buffer[] = [];
+			let settled = false;
+			let receivedBytes = 0;
+			const onData = (c: Buffer): void => {
+				// Fail closed on oversize input: stop listening and degrade
+				// to no payload rather than retaining unbounded data.
+				if (receivedBytes + c.length > MAX_ANALYZE_STDIN_BYTES) {
+					try {
+						process.stderr.write(
+							"[vision-proxy] analyze stdin payload exceeds " +
+								`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring stdin\n`,
+						);
+					} catch {
+						// ignore: stderr may be torn down in tests
+					}
+					finish("");
+					return;
+				}
+				receivedBytes += c.length;
+				chunks.push(c);
+			};
+			const finish = (val: string): void => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				try {
+					stdin.pause();
+				} catch {
+					// ignore: stdin may already be torn down
+				}
+				stdin.removeListener("data", onData);
+				stdin.removeListener("end", onEnd);
+				stdin.removeListener("error", onError);
+				resolve(val);
+			};
+			const onEnd = (): void => {
+				finish(Buffer.concat(chunks).toString("utf8"));
+			};
+			const onError = (): void => {
+				finish("");
+			};
+			const onTimeout = (): void => {
+				// Timeouts are only silent when nothing arrived at all (the
+				// historical no-stdin case). Partial data means an adapter
+				// payload was cut off: say so on stderr so the context-free
+				// fallback is diagnosable, while stdout stays machine-clean.
+				if (chunks.length > 0) {
+					try {
+						process.stderr.write(
+							"[vision-proxy] analyze stdin payload incomplete after " +
+								`${timeoutMs}ms; continuing without question/context\n`,
+						);
+					} catch {
+						// ignore: stderr may be torn down in tests
+					}
+				}
+				finish("");
+			};
+			const timer = setTimeout(onTimeout, timeoutMs);
+			stdin.on("data", onData);
+			stdin.on("end", onEnd);
+			stdin.on("error", onError);
+		});
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Resolve the analyze stdin text.
+ *
+ * An explicit `stdinText` override (tests) or `readStdin` (dependency-
+ * injected readers) wins immediately. Otherwise the bounded process-stdin
+ * drain runs: adapter payloads resolve on arrival; a pipe that never
+ * delivers degrades to "no payload" on timeout instead of hanging a
+ * command that historically never touched stdin.
+ *
+ * @tags cli, runner
+ */
+async function drainAnalyzeStdin(opts: CommandRunnerOptions): Promise<string> {
+	if (opts.stdinText !== undefined) return opts.stdinText;
+	if (opts.readStdin) {
+		try {
+			return await opts.readStdin();
+		} catch {
+			return "";
+		}
+	}
+	const timeoutMs =
+		typeof opts.stdinTimeoutMs === "number" && opts.stdinTimeoutMs >= 0
+			? opts.stdinTimeoutMs
+			: DEFAULT_ANALYZE_STDIN_TIMEOUT_MS;
+	try {
+		return await readAnalyzeStdin(timeoutMs);
+	} catch {
+		return "";
+	}
+}
+
 function str(flags: FlagMap, key: string): string | undefined {
 	const v = flags[key];
 	return typeof v === "string" ? v : undefined;
@@ -178,6 +369,7 @@ analyze options:
   --max-output-tokens <n>  cap response tokens
   --question <text>  text to analyze against the image
   --context <text>   recent conversation context for the analysis
+  --no-context       drop conversation context for this call only
   --api-key <key>    explicit provider key
 
 config options:
@@ -245,6 +437,7 @@ Options:
   --max-output-tokens <n>  cap the model response tokens
   --question <text>    text to analyze against the image (-q)
   --context <text>     recent conversation context for the analysis
+  --no-context         drop conversation context for this call only
   --api-key <key>      explicit provider API key (-apiKey)
   -h, --help           show this help
 
@@ -568,6 +761,12 @@ export interface CommandRunnerOptions {
 	env?: NodeJS.ProcessEnv;
 	/** Working directory for project config resolution. Defaults to `process.cwd()`. */
 	cwd?: string;
+	/** Stdin text override for `analyze` (tests inject the payload; the CLI reads process stdin). */
+	stdinText?: string;
+	/** Stdin reader override for `analyze` (defaults to the bounded process-stdin drain). */
+	readStdin?: () => Promise<string>;
+	/** Bound in ms for the `analyze` process-stdin drain (tests shorten it; default 50). */
+	stdinTimeoutMs?: number;
 }
 
 export interface CommandRunnerResult {
@@ -633,6 +832,8 @@ export async function runCommand(
 			const formatRaw = str(flags, "format");
 			const format =
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
+			const stdinText = await drainAnalyzeStdin(opts);
+			const stdinPayload = parseAnalyzeStdin(stdinText);
 			const analyzeFlags: AnalyzeFlags = {
 				format,
 				provider: str(flags, "provider"),
@@ -645,8 +846,16 @@ export async function runCommand(
 				maxOutputTokens: str(flags, "max-output-tokens")
 					? Number(str(flags, "max-output-tokens"))
 					: undefined,
-				question: str(flags, "question") ?? str(flags, "q"),
-				context: str(flags, "context"),
+				// Stdin is authoritative when present: adapters now send
+				// sensitive text off-argv. Keep the argv flags as a fallback
+				// for older wrappers that still pass --question/--context.
+				// --no-context drops context only (question is opt-in per
+				// call, so there is nothing to suppress): privacy/cost escape
+				// hatch for one invocation without touching config.
+				question: stdinPayload.question ?? str(flags, "question") ?? str(flags, "q"),
+				context: bool(flags, "no-context", false)
+					? undefined
+					: (stdinPayload.context ?? str(flags, "context")),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

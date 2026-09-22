@@ -3,14 +3,17 @@
  *
  * `vp integration install claude-code` writes this exact TypeScript to
  * `~/.claude/hooks/vision-proxy_read.ts`, and `vp integration install codex`
- * writes it to `~/.codex/hooks/vision-proxy_read.ts`. Each host registers its
+ * writes it to `~/.codex/hooks/vision-proxy_read.ts` (stamped at generate()
+ * time to name view_image, the official Codex CLI image tool, in its
+ * submit-time reminder; the Claude Code copy names Read). Each host registers its
  * copy as a plain command (`npx tsx <path>`) in its hooks config, so the
  * config carries only standard keys (type, command, timeout, matcher) and
  * no vision-proxy metadata. The installed file carries a version marker
  * comment so `vp integration status` can report staleness.
  *
- * The script handles both hook events: UserPromptSubmit emits a static Read reminder for prompt image
- * paths plus pasted/attached image refs resolved via the image cache (never
+ * The script handles both hook events: UserPromptSubmit emits a static reminder for prompt image
+ * paths (naming the host's native image tool: Read for Claude Code, view_image for Codex)
+ * plus pasted/attached image refs resolved via the image cache (never
  * shells out, so prompt submission is never blocked), and PreToolUse Read or
  * view_image (image path reads) shells out to `vp analyze` and emits
  * hookSpecificOutput.additionalContext with a deny decision. Fail-open: on any
@@ -41,11 +44,19 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
  * run this file (e.g. npm install -g tsx).
  *
  * Handles UserPromptSubmit and PreToolUse events: UserPromptSubmit emits
- * a static Read reminder for prompt image paths and pasted or attached
+ * a static reminder for prompt image paths and pasted or attached
  * image refs resolved via the image cache (never shells out, so prompt
- * submission is never blocked), while PreToolUse analyzes Read-tool or
+ * submission is never blocked). The reminder names the host's native image
+ * tool (Read for Claude Code, view_image for Codex, stamped at generate()
+ * time), while PreToolUse analyzes Read-tool or
  * view_image image paths by shelling out to vp analyze, then emits
  * hookSpecificOutput.additionalContext with a deny decision for the agent.
+ *
+ * The PreToolUse analysis is grounded in the recent conversation: the host
+ * hands the hook a transcript_path on stdin (CC JSONL, Codex rollout) whose
+ * last user/assistant turns are read from disk and formatted into
+ * vp analyze --context. The read is bounded and fails open, so a missing or
+ * unreadable transcript simply means the analyze call runs without context.
  *
  * Fail-open: on any error it exits 0 with no stdout, so the agent proceeds
  * unchanged. Image-derived text is attacker-controlled, so the analyzer
@@ -55,7 +66,7 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
 // __VP_VERSION__PLACEHOLDER__
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -63,6 +74,12 @@ import { join, resolve } from "node:path";
 
 const HOOK_SCRIPT_ADAPTER = String.raw`
 var IMAGE_REF_RE = /\[Image #(\d+)\]/g;
+
+// Tool word named by the UserPromptSubmit reminder. generate() stamps this
+// per host (Read for Claude Code, view_image for Codex) so each artifact
+// tells the model to use its native image tool. The PreToolUse deny already
+// adapts to the intercepted tool, so only the submit reminder needs this.
+var SUBMIT_TOOL_WORD = "Read";
 
 function claudeConfigHome(): string {
   var override = process.env.VP_CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR;
@@ -135,17 +152,33 @@ function readToolFilePath(event: Record<string, any>): string | null {
   return resolveImagePath(file, cwd);
 }
 
-function runAnalyze(images: string[]): string | null {
+// How many transcript lines to parse when rendering --context. Only the
+// trailing lines can reach the formatter's last-N window, so bounding the
+// parse cost keeps long transcripts cheap; the formatter still trims to its
+// own message limit. 400 lines covers the 16-message window even with many
+// interleaved tool-result lines.
+var TRANSCRIPT_TAIL_LINES = 400;
+// How many bytes of the transcript tail to read. 512 KB comfortably covers
+// the 400-line window even for large tool-result lines; the read is capped
+// so multi-GB transcripts stay cheap.
+var TRANSCRIPT_TAIL_BYTES = 512 * 1024;
+
+function runAnalyze(images: string[], extras): string | null {
   if (!images || images.length === 0) return null;
   var timeout = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
   var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
-  var invocation = buildAnalyzeArgs(images, maxTokens);
+  var invocation = buildAnalyzeArgs(images, maxTokens, extras);
   var vp = resolveVpBin();
-  var result = spawnSync(invocation.command, invocation.args, {
+  // Sensitive question/context travel on stdin, never argv, so a local
+  // process listing cannot capture conversation content (CWE-214). Omit
+  // the input entirely when there is nothing sensitive to send.
+  var opts: Record<string, unknown> = {
     encoding: "utf8",
     timeout: timeout,
     maxBuffer: MAX_BUFFER_BYTES,
-  }) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown };
+  };
+  if (invocation.stdin) opts.input = invocation.stdin;
+  var result = spawnSync(invocation.command, invocation.args, opts) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown };
   if (result.error) {
     if (result.error.code === "ENOENT") {
       process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
@@ -160,6 +193,93 @@ function runAnalyze(images: string[]): string | null {
     return null;
   }
   return out;
+}
+
+// Read the host's on-disk transcript (CC JSONL or Codex rollout) and render
+// its last user/assistant turns into the analyze --context value.
+//
+// CC lines: { type: "user" | "assistant", message: { role, content } } where
+// content is a string or block array. Tool-result user lines carry no text
+// blocks, so they contribute nothing.
+//
+// Codex lines: { type: "response_item", payload: { type: "message", role,
+// content: [{ type: "input_text" | "output_text", text }] } }.
+//
+// Both map to the plain { role, content } shape the formatter expects;
+// unrecognized lines are skipped. Only the tail is read so long transcripts
+// stay cheap, and any error fails open to "".
+function readTranscriptContext(transcriptPath: string | undefined): string {
+  if (!transcriptPath || !existsSync(transcriptPath)) return "";
+  var size: number;
+  try {
+    size = statSync(transcriptPath).size;
+  } catch {
+    return "";
+  }
+  if (size === 0) return "";
+  var start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES);
+  var buf = Buffer.alloc(size - start);
+  var fd: number;
+  try {
+    fd = openSync(transcriptPath, "r");
+  } catch {
+    return "";
+  }
+  var bytesRead: number;
+  try {
+    bytesRead = readSync(fd, buf, 0, size - start, start);
+  } finally {
+    closeSync(fd);
+  }
+  // readSync may return fewer bytes than requested (POSIX short read, and a
+  // live transcript can shrink between statSync and the read); decode only
+  // the bytes actually read so the alloc's zero-fill never reaches the parser.
+  var raw = buf.subarray(0, bytesRead).toString("utf8");
+  // When reading from mid-file, discard the first (partial) line.
+  var lines: string[];
+  if (start > 0) {
+    var firstNewline = raw.indexOf("\n");
+    if (firstNewline === -1) return "";
+    lines = raw.slice(firstNewline + 1).split("\n");
+  } else {
+    lines = raw.split("\n");
+  }
+  var tail = lines.slice(-TRANSCRIPT_TAIL_LINES).map(function (l) { return l.trim(); }).filter(Boolean);
+  var msgs: Array<{ role?: unknown; content?: unknown }> = [];
+  for (const line of tail) {
+    var rec: any;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!rec || typeof rec !== "object") continue;
+    var role: unknown;
+    var content: unknown;
+    if (rec.type === "user" || rec.type === "assistant") {
+      // CC transcript line.
+      var message = rec.message;
+      if (!message || typeof message !== "object") continue;
+      role = message.role;
+      content = message.content;
+    } else if (rec.type === "response_item" && rec.payload && rec.payload.type === "message") {
+      // Codex rollout line.
+      role = rec.payload.role;
+      // Normalize Codex input_text/output_text blocks to plain text blocks so
+      // the shared formatter counts only text.
+      var blocks = Array.isArray(rec.payload.content) ? rec.payload.content : [];
+      content = blocks.map(function (b) {
+        if (b && (b.type === "input_text" || b.type === "output_text")) {
+          return { type: "text", text: b.text };
+        }
+        return b;
+      });
+    } else {
+      continue;
+    }
+    if (role === "user" || role === "assistant") msgs.push({ role: role, content: content });
+  }
+  return buildConversationContext(msgs);
 }
 
 function emit(eventName: string, description: string, permissionDecision?: string): void {
@@ -184,13 +304,25 @@ function runHook(event: Record<string, any> | null): void {
     var refImages = resolveImageRefs(prompt, typeof sessionId === "string" ? sessionId : undefined);
     var allImages = images.concat(refImages);
     if (allImages.length === 0) return;
-    emit("UserPromptSubmit", readReminder(allImages, undefined, "prompt", "Read"));
+    emit("UserPromptSubmit", readReminder(allImages, undefined, "prompt", SUBMIT_TOOL_WORD));
     return;
   }
   if (eventName === "PreToolUse") {
     var file = readToolFilePath(event);
     if (!file) return;
-    var desc = runAnalyze([file]);
+    // Ground the description in the recent conversation by reading the host
+    // transcript the hook was handed (CC JSONL or Codex rollout). Fail open:
+    // an unreadable or unrecognized transcript means analyze runs without
+    // context rather than the read being blocked.
+    var context = "";
+    try {
+      context = readTranscriptContext(
+        event.transcript_path != null ? event.transcript_path : event.transcriptPath,
+      );
+    } catch {
+      context = "";
+    }
+    var desc = runAnalyze([file], context ? { context } : undefined);
     if (!desc) return;
     var toolName = event.tool_name != null ? event.tool_name : event.toolName;
     emit("PreToolUse", withImageInstruction(desc, undefined, toolName === "view_image" ? "view_image" : "Read"), "deny");

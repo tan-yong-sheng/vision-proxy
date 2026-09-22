@@ -72,44 +72,57 @@ export interface ProviderTestOptions {
 	readImage?: (path: string) => Promise<{ data: string; mimeType: string } | { error: string }>;
 }
 
+/** Redact credential-like fragments and cap length before surfacing a provider error. */
+function sanitizeProbeError(raw: string): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips C0 controls before surfacing provider error
+	let s = raw.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+	s = s.replace(/:\/\/[^/\s]*:[^/\s@]*@/g, "://***@");
+	s = s.replace(/([?&=](?:api[_-]?key|token|key|secret|password)=)[^&\s]+/gi, "$1***");
+	s = s.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer ***");
+	s = s.replace(/sk-[A-Za-z0-9._-]+/g, "***");
+	if (s.length > 500) s = `${s.slice(0, 500)}…`;
+	return s;
+}
+
 /**
  * Classify a probe failure into an actionable one-liner. Never includes key
  * material; the caller renders the string verbatim.
  */
 export function classifyProbeError(err: unknown): string {
 	const raw = err instanceof Error ? err.message : String(err);
+	const safe = sanitizeProbeError(raw);
 	const msg = raw.toLowerCase();
 	if (/\b401\b/.test(msg) || /unauthorized|invalid[^\n]*api[^\n]*key|incorrect api key/.test(msg)) {
-		return `authentication failed (401): check the API key. ${raw}`;
+		return `authentication failed (401): check the API key. ${safe}`;
 	}
 	if (/\b404\b/.test(msg) || /model[^\n]*not found|not_found/.test(msg)) {
-		return `model not found (404): check --model and the provider base URL. ${raw}`;
+		return `model not found (404): check --model and the provider base URL. ${safe}`;
 	}
 	if (/(image|vision)[^\n]*(not supported|unsupported)/.test(msg)) {
-		return `model does not accept images: pick a vision-capable model. ${raw}`;
+		return `model does not accept images: pick a vision-capable model. ${safe}`;
 	}
 	if (/\b400\b/.test(msg)) {
-		return `request rejected (400): check --model and the prompt payload. ${raw}`;
+		return `request rejected (400): check --model and the prompt payload. ${safe}`;
 	}
 	if (/\b402\b/.test(msg) || /payment|quota|billing/.test(msg)) {
-		return `quota or billing issue (402): check the provider account. ${raw}`;
+		return `quota or billing issue (402): check the provider account. ${safe}`;
 	}
 	if (/\b408\b/.test(msg) || /\b504\b/.test(msg) || /timed out|timeout|deadline/.test(msg)) {
-		return `request timed out: the endpoint may be slow or unreachable. ${raw}`;
+		return `request timed out: the endpoint may be slow or unreachable. ${safe}`;
 	}
 	if (/\b429\b/.test(msg) || /rate[^\n]*limit/.test(msg)) {
-		return `rate limited (429): wait and retry. ${raw}`;
+		return `rate limited (429): wait and retry. ${safe}`;
 	}
 	if (
 		/\b5\d\d\b/.test(msg) ||
 		/internal server|bad gateway|service unavailable|overloaded/.test(msg)
 	) {
-		return `provider error: the model endpoint failed. ${raw}`;
+		return `provider error: the model endpoint failed. ${safe}`;
 	}
 	if (/enotfound|econnrefused|econnreset|eai_again|network|fetch failed|socket/.test(msg)) {
-		return `network error: check the base URL and connectivity. ${raw}`;
+		return `network error: check the base URL and connectivity. ${safe}`;
 	}
-	return raw;
+	return safe;
 }
 
 async function defaultReadImage(
@@ -268,7 +281,8 @@ export async function providerTest(opts: ProviderTestOptions = {}): Promise<Prov
 		env,
 		modelId,
 		explicitApiKey: opts.apiKey,
-		explicitBaseURL: config.baseUrl || undefined,
+		explicitBaseURL:
+			opts.provider && opts.provider !== config.provider ? undefined : config.baseUrl || undefined,
 		configApiKey: config.apiKey,
 		configProvider: config.provider,
 	});

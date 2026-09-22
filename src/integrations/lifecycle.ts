@@ -8,7 +8,7 @@
  * from `hooks-config.ts`. The only host-specific display branch is opencode's
  * plugin summary; the Codex TOML cleanup is catalog-owned.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { VERSION } from "../version.ts";
 import {
@@ -26,6 +26,32 @@ import {
 import type { AgentSpec, IntegrationInstallOptions, IntegrationResult } from "./types.ts";
 
 export type { AgentSpec, IntegrationInstallOptions, IntegrationResult };
+
+/**
+ * The vp binary an installed artifact shells out to, when it is not the
+ * default PATH lookup (`"vp"`). A `--dev` install stamps the local CLI
+ * entry point here; `integration status` surfaces it so a dev wiring
+ * never masquerades as a production install.
+ *
+ * @tags integration, lifecycle
+ */
+export function installedVpBin(target: string): string | undefined {
+	let raw: string;
+	try {
+		raw = readFileSync(target, "utf8");
+	} catch {
+		return undefined;
+	}
+	const m = raw.match(/var DEFAULT_VP_BIN = ("(?:[^"\\]|\\.)*");/);
+	if (!m) return undefined;
+	try {
+		const bin = JSON.parse(m[1]!) as unknown;
+		if (typeof bin !== "string" || !bin || bin === "vp") return undefined;
+		return bin;
+	} catch {
+		return undefined;
+	}
+}
 
 /**
  * Whether an agent counts as installed: hook agents need their config block
@@ -281,7 +307,8 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 			);
 			agentOutdated = true;
 		} else {
-			lines.push(`✓ ${agent}  ${marker}`);
+			const devBin = installedVpBin(target);
+			lines.push(`✓ ${agent}  ${marker}${devBin ? ` (dev: ${devBin})` : ""}`);
 		}
 		if (agentOutdated) outdated++;
 	}

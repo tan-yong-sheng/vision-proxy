@@ -1597,6 +1597,41 @@ test("status reports installed version markers and up-to-date summary", async ()
 	reset();
 });
 
+test("status surfaces a dev-stamped binary and hides prod installs", async () => {
+	isolate();
+	await runIntegration("install", "pi");
+	const ext = join(home_pi(), "vision-proxy_read.ts");
+	// A --dev install stamps the local CLI entry point: status must say so.
+	writeFileSync(
+		ext,
+		readFileSync(ext, "utf8").replace(
+			'var DEFAULT_VP_BIN = "vp";',
+			'var DEFAULT_VP_BIN = "/work/vision-proxy/dist/cli.js";',
+		),
+	);
+	const dev = await runIntegration("status", "");
+	assert.equal(dev.ok, true);
+	assert.match(
+		dev.message,
+		/✓ pi\s+\S+ \(dev: \/work\/vision-proxy\/dist\/cli\.js\)/,
+		"dev wiring must be visible in status",
+	);
+	// A plain PATH install renders exactly as before (no suffix).
+	writeFileSync(
+		ext,
+		readFileSync(ext, "utf8").replace(
+			'var DEFAULT_VP_BIN = "/work/vision-proxy/dist/cli.js";',
+			'var DEFAULT_VP_BIN = "vp";',
+		),
+	);
+	const prod = await runIntegration("status", "");
+	assert.ok(
+		prod.message.split("\n").some((l) => /^✓ pi\s+\S+$/.test(l)),
+		"prod installs keep the bare marker line",
+	);
+	reset();
+});
+
 test("status flags an integration whose embedded version marker is stale", async () => {
 	isolate();
 	await runIntegration("install", "pi");

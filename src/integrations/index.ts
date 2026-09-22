@@ -38,6 +38,7 @@ export {
 	stripHookGroups,
 } from "./hooks-config.ts";
 export {
+	installedVpBin,
 	integrationInstall,
 	integrationList,
 	integrationShow,

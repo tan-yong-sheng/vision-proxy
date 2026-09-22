@@ -12,6 +12,7 @@
  * tests can pin routing without capturing process streams.
  */
 
+import { readFileSync, rmSync } from "node:fs";
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
 import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
@@ -71,6 +72,8 @@ export const VALUE_FLAGS = new Set([
 	"question",
 	"q",
 	"context",
+	"context-file",
+	"contextFile",
 	"api-key",
 	"apiKey",
 	"older",
@@ -306,6 +309,58 @@ export async function readAnalyzeStdin(
  *
  * @tags cli, runner
  */
+/**
+ * Read one `--context-file` payload for `vp analyze` (U1).
+ *
+ * Hooks persist last-16 conversation context to a `0600` tempfile and
+ * rewrite the model's own command to reference it; the CLI consumes the
+ * file here and deletes it after reading. Every failure degrades to null
+ * (fail open to no context) and never throws: a missing, unreadable, or
+ * oversize file means the analysis runs without context and exits 0.
+ *
+ * @tags cli, runner
+ */
+export function readAnalyzeContextFile(
+	filePath: string | undefined,
+	readFile: (path: string) => string | null = defaultReadContextFile,
+): string | undefined {
+	if (!filePath || !filePath.trim()) return undefined;
+	let content: string | null;
+	try {
+		content = readFile(filePath);
+	} catch {
+		return undefined;
+	}
+	if (content === null || content === undefined) return undefined;
+	if (content.length > MAX_ANALYZE_STDIN_BYTES) {
+		try {
+			process.stderr.write(
+				"[vision-proxy] analyze context file exceeds " +
+					`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
+			);
+		} catch {
+			// ignore: stderr may be torn down in tests
+		}
+		return undefined;
+	}
+	const trimmed = content.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+function defaultReadContextFile(path: string): string | null {
+	try {
+		const content = readFileSync(path, "utf8");
+		try {
+			rmSync(path);
+		} catch {
+			// ignore: deletion is best-effort; the content was already read
+		}
+		return content;
+	} catch {
+		return null;
+	}
+}
+
 async function drainAnalyzeStdin(opts: CommandRunnerOptions): Promise<string> {
 	if (opts.stdinText !== undefined) return opts.stdinText;
 	if (opts.readStdin) {
@@ -369,6 +424,7 @@ analyze options:
   --max-output-tokens <n>  cap response tokens
   --question <text>  text to analyze against the image
   --context <text>   recent conversation context for the analysis
+  --context-file <path>  read context from a file (consumed + deleted)
   --no-context       drop conversation context for this call only
   --api-key <key>    explicit provider key
 
@@ -437,6 +493,9 @@ Options:
   --max-output-tokens <n>  cap the model response tokens
   --question <text>    text to analyze against the image (-q)
   --context <text>     recent conversation context for the analysis
+  --context-file <path>  read context from a file; the file is consumed
+                       and deleted after reading (hook handoff for
+                       model-invoked analyze calls)
   --no-context         drop conversation context for this call only
   --api-key <key>      explicit provider API key (-apiKey)
   -h, --help           show this help
@@ -767,6 +826,8 @@ export interface CommandRunnerOptions {
 	readStdin?: () => Promise<string>;
 	/** Bound in ms for the `analyze` process-stdin drain (tests shorten it; default 50). */
 	stdinTimeoutMs?: number;
+	/** Filesystem used to read `--context-file` (tests inject an in-memory map; defaults to node:fs). */
+	readContextFile?: (path: string) => string | null;
 }
 
 export interface CommandRunnerResult {
@@ -849,13 +910,21 @@ export async function runCommand(
 				// Stdin is authoritative when present: adapters now send
 				// sensitive text off-argv. Keep the argv flags as a fallback
 				// for older wrappers that still pass --question/--context.
-				// --no-context drops context only (question is opt-in per
-				// call, so there is nothing to suppress): privacy/cost escape
-				// hatch for one invocation without touching config.
+				// --context-file (written by hooks for model-invoked calls)
+				// sits between them: stdin first, then the consumed file,
+				// then argv. --no-context drops context only (question is
+				// opt-in per call, so there is nothing to suppress):
+				// privacy/cost escape hatch for one invocation without
+				// touching config.
 				question: stdinPayload.question ?? str(flags, "question") ?? str(flags, "q"),
 				context: bool(flags, "no-context", false)
 					? undefined
-					: (stdinPayload.context ?? str(flags, "context")),
+					: (stdinPayload.context ??
+						readAnalyzeContextFile(
+							str(flags, "context-file") ?? str(flags, "contextFile"),
+							opts.readContextFile,
+						) ??
+						str(flags, "context")),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

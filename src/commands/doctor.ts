@@ -103,6 +103,8 @@ async function defaultCacheWritable(dir: string): Promise<{ writable: boolean; d
  *
  * Checks are ordered runtime → config → cache → keyring → integrations →
  * build so the first FAIL usually explains later ones.
+ *
+ * @tags doctor, diagnostics
  */
 export async function doctor(opts: DoctorOptions = {}): Promise<DoctorResult> {
 	const env = opts.env ?? process.env;
@@ -291,7 +293,13 @@ async function readEnginesRequirement(): Promise<string> {
 	return parsed.engines?.node ?? ">=22.6.0";
 }
 
-/** Cache dir used by the writable check (the parent of the cache file). */
+/**
+ * Cache dir used by the writable check (the parent of the cache file).
+ *
+ * @tags doctor, cache
+ */
 export function cacheDirFor(env: NodeJS.ProcessEnv = process.env): string {
-	return env.VP_CACHE_DIR ?? path.join(os.homedir(), ".vision-proxy");
+	return (
+		env.VP_CACHE_DIR ?? path.join(env.HOME ?? env.USERPROFILE ?? os.homedir(), ".vision-proxy")
+	);
 }

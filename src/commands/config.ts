@@ -101,6 +101,8 @@ function coerceValue(key: string, value: string): unknown {
  * Human-readable view of the effective config. Shares `loadConfig()` with
  * `configGet` (explicit > project > user > env > defaults); `get` stays the
  * JSON/machine variant. Never prints key material.
+ *
+ * @tags config, display
  */
 export async function configShow(opts: {
 	provider?: string;
@@ -159,7 +161,9 @@ function redactBaseUrl(url: string): string {
 		}
 		return u.toString();
 	} catch {
-		return url.replace(/:\/\/[^/\s]*:[^/\s@]*@/g, "://***@");
+		let out = url.replace(/:\/\/[^/\s]*:[^/\s@]*@/g, "://***@");
+		out = out.replace(/([?&=](?:api[_-]?key|token|key|secret|password)=)[^&\s]+/gi, "$1***");
+		return out;
 	}
 }
 
@@ -169,8 +173,8 @@ function describeKeySource(
 	config: VisionConfig,
 ): string {
 	if (env[spec.apiKeyEnv]) return `env (${spec.apiKeyEnv})`;
-	if (config.provider === spec.id && config.apiKey.length > 0) return "config (apiKey)";
 	if (getStoredProviderKey(spec.id)) return "keyring";
+	if (config.provider === spec.id && config.apiKey.length > 0) return "config (apiKey)";
 	return `missing (${spec.apiKeyEnv})`;
 }
 

@@ -51,8 +51,8 @@ export function setKeyringBackend(backend: KeyringBackend | null): void {
 	backendOverride = backend;
 }
 
-function keyringDisabled(): boolean {
-	const v = process.env.VP_KEYRING;
+function keyringDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	const v = env.VP_KEYRING;
 	return v === "0" || v === "false" || v === "off";
 }
 
@@ -68,8 +68,8 @@ interface KeyringModule {
 	findCredentials(service: string): Array<{ account: string; password: string }>;
 }
 
-function loadDefaultBackend(): KeyringBackend | null {
-	if (keyringDisabled()) return null;
+function loadDefaultBackend(env: NodeJS.ProcessEnv = process.env): KeyringBackend | null {
+	if (keyringDisabled(env)) return null;
 	try {
 		const require = createRequire(import.meta.url);
 		const mod = require("@napi-rs/keyring") as KeyringModule;
@@ -105,16 +105,18 @@ function loadDefaultBackend(): KeyringBackend | null {
 }
 
 /** Resolve the active backend, caching a successful load for the process. */
-export function getKeyringBackend(): KeyringBackend | null {
+export function getKeyringBackend(env?: NodeJS.ProcessEnv): KeyringBackend | null {
+	const effectiveEnv = env ?? process.env;
+	if (keyringDisabled(effectiveEnv)) return null;
 	if (backendOverride !== undefined) return backendOverride;
-	const backend = loadDefaultBackend();
+	const backend = loadDefaultBackend(effectiveEnv);
 	if (backend) backendOverride = backend;
 	return backend;
 }
 
 /** Whether a usable keyring backend is present. */
-export function keyringAvailable(): boolean {
-	return getKeyringBackend() !== null;
+export function keyringAvailable(env?: NodeJS.ProcessEnv): boolean {
+	return getKeyringBackend(env) !== null;
 }
 
 /** Store a provider API key in the keyring. */

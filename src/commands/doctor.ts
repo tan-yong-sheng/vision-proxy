@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { access, constants } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { cacheStats, configureCache } from "../cache.ts";
 import { loadConfig } from "../config.ts";
 import { integrationStatus } from "../integrations/index.ts";
@@ -52,14 +53,17 @@ function line(c: DoctorCheck): string {
 	return `${c.severity}  ${c.name}: ${c.detail}`;
 }
 
-function parseRequiredMajor(engines: string): number | undefined {
-	const m = engines.match(/(\d+)\.(\d+)\.(\d+)/);
-	return m ? Number(m[1]) : undefined;
+function parseVersion(version: string): [number, number, number] | undefined {
+	const m = version.match(/(\d+)\.(\d+)\.(\d+)/);
+	return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
 }
 
-function parseNodeMajor(version: string): number | undefined {
-	const m = version.match(/^v?(\d+)\./);
-	return m ? Number(m[1]) : undefined;
+function compareVersions(a: [number, number, number], b: [number, number, number]): number {
+	for (let i = 0; i < 3; i++) {
+		if (a[i]! < b[i]!) return -1;
+		if (a[i]! > b[i]!) return 1;
+	}
+	return 0;
 }
 
 async function defaultProbeSharp(): Promise<void> {
@@ -109,9 +113,13 @@ export async function doctor(opts: DoctorOptions = {}): Promise<DoctorResult> {
 	// 1. Node version vs engines.
 	const nodeVersion = deps.nodeVersion ?? process.version;
 	const engines = deps.requiredEngines ?? (await readEnginesRequirement().catch(() => ">=22.6.0"));
-	const requiredMajor = parseRequiredMajor(engines);
-	const actualMajor = parseNodeMajor(nodeVersion);
-	if (requiredMajor !== undefined && actualMajor !== undefined && actualMajor < requiredMajor) {
+	const requiredVersion = parseVersion(engines);
+	const actualVersion = parseVersion(nodeVersion);
+	if (
+		requiredVersion !== undefined &&
+		actualVersion !== undefined &&
+		compareVersions(actualVersion, requiredVersion) < 0
+	) {
 		checks.push({
 			name: "node",
 			severity: "FAIL",
@@ -181,7 +189,11 @@ export async function doctor(opts: DoctorOptions = {}): Promise<DoctorResult> {
 	// 5. Cache dir writable + size/entries: WARN-only.
 	try {
 		const { config } = await loadConfig({ cwd, env });
-		configureCache(config.cacheSize, undefined, config.cacheMaxAgeDays);
+		configureCache(
+			config.cacheSize,
+			path.join(cacheDirFor(env), "cache.json"),
+			config.cacheMaxAgeDays,
+		);
 		const stats = await cacheStats();
 		const dir = path.dirname(stats.path);
 		const probe = await (deps.cacheWritable ?? defaultCacheWritable)(dir);
@@ -208,7 +220,7 @@ export async function doctor(opts: DoctorOptions = {}): Promise<DoctorResult> {
 
 	// 6. Keyring backend loadable: WARN-only (env keys work without it).
 	checks.push(
-		keyringAvailable()
+		keyringAvailable(env)
 			? { name: "keyring", severity: "OK", detail: "backend loadable" }
 			: {
 					name: "keyring",
@@ -268,7 +280,7 @@ export async function doctor(opts: DoctorOptions = {}): Promise<DoctorResult> {
 
 function runningRoot(): string {
 	// src/commands/doctor.ts -> repo root; dist/commands/doctor.js -> dist -> root.
-	return path.resolve(new URL(".", import.meta.url).pathname, "..", "..");
+	return path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 }
 
 async function readEnginesRequirement(): Promise<string> {

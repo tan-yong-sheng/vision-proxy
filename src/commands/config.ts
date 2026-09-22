@@ -13,7 +13,7 @@ import path from "node:path";
 import { loadConfig, readJsonFile } from "../config.ts";
 import { DEFAULT_CONFIG, resolveConfig, type VisionConfig } from "../core.ts";
 import { getStoredProviderKey } from "../keyring.ts";
-import { type getProvider, listProviders, resolveModel } from "../provider.ts";
+import { type ApiProviderSpec, listProviders, resolveModel } from "../provider.ts";
 
 export interface ConfigResult {
 	ok: boolean;
@@ -134,7 +134,7 @@ export async function configShow(opts: {
 		lines.push(`provider: ${spec.id}${active}`);
 		lines.push(`model: ${spec.id}/${model}`);
 		if (spec.id === sanitized.provider && sanitized.baseUrl) {
-			lines.push(`baseUrl: ${sanitized.baseUrl}`);
+			lines.push(`baseUrl: ${redactBaseUrl(sanitized.baseUrl)}`);
 		}
 		lines.push(`key: ${describeKeySource(spec, env, sanitized)}`);
 	}
@@ -145,8 +145,26 @@ export async function configShow(opts: {
 	return { ok: true, message: lines.join("\n"), code: 0 };
 }
 
+function redactBaseUrl(url: string): string {
+	try {
+		const u = new URL(url);
+		if (u.username || u.password) {
+			u.username = "***";
+			u.password = "***";
+		}
+		if (u.search) {
+			for (const key of [...u.searchParams.keys()]) {
+				if (/api[_-]?key|token|key|secret|password/i.test(key)) u.searchParams.set(key, "***");
+			}
+		}
+		return u.toString();
+	} catch {
+		return url.replace(/:\/\/[^/\s]*:[^/\s@]*@/g, "://***@");
+	}
+}
+
 function describeKeySource(
-	spec: NonNullable<ReturnType<typeof getProvider>>,
+	spec: ApiProviderSpec,
 	env: NodeJS.ProcessEnv,
 	config: VisionConfig,
 ): string {

@@ -664,6 +664,67 @@ test("pi extension leaves attachments untouched and reminds the referenced path"
 	reset();
 });
 
+test("pi tool_result strips own reminder blocks from analyze context", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const {
+		events,
+		dir: testDir,
+		calls,
+		setNextResult,
+	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
+	process.env.VP_MODE = "always";
+	const imagePath = fakeImage(testDir, "pic.png");
+	setNextResult({ status: 0, stdout: "@@FENCE pi strip desc@@", stderr: "" });
+	// The session branch already carries the synthetic reminder persisted by
+	// the context handler; tool_result must strip it before formatting so
+	// boilerplate never echoes into the vision prompt. The ctx stub exposes
+	// sessionManager.getBranch() exactly as the extension reads it.
+	const branch = [
+		{
+			type: "message",
+			message: {
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: "[vision-proxy:read-reminder] The user message references the following image file(s):\n- /tmp/a.png",
+					},
+					{ type: "text", text: "what is this image about" },
+				],
+			},
+		},
+		{
+			type: "message",
+			message: { role: "assistant", content: [{ type: "text", text: "reading it now" }] },
+		},
+	];
+	const before = calls.filter(([, args]) => args[0] === "analyze").length;
+	const out = (await events.tool_result[0](
+		{
+			type: "tool_result",
+			toolName: "read",
+			input: { path: imagePath },
+			content: [{ type: "text", text: "raw" }],
+			isError: false,
+		},
+		{ sessionManager: { getBranch: () => branch }, signal: undefined },
+	)) as any;
+	assert.ok(out, "read with a reminder-carrying branch must produce a description");
+	assert.match(out.content[0].text, /@@FENCE pi strip desc@@/);
+	assert.equal(
+		calls.filter(([, args]) => args[0] === "analyze").length,
+		before + 1,
+		"must analyze once",
+	);
+	reset();
+});
+
 test("pi extension analyzes a rewritten file fresh on every tool_result read", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;

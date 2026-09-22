@@ -282,13 +282,24 @@ export default function setup(pi: ExtensionAPI): void {
     // SessionEntry[]; only the message entries carry the LLM message, and its
     // { role, content } lives one level down in entry.message. Map those to
     // the plain { role, content } shape the formatter expects (chronological),
-    // and fail open on any shape the formatter does not recognize.
+    // and fail open on any shape the formatter does not recognize. Our own
+    // injected reminder blocks are stripped first (same as the opencode
+    // plugin): the context handler persists them on user turns, and without
+    // this they would echo a read-tool instruction into the vision prompt.
     var context = "";
     try {
       var branch = ctx && (ctx as any).sessionManager ? (ctx as any).sessionManager.getBranch() : null;
       var msgs = (Array.isArray(branch) ? branch : [])
         .filter((e) => e && e.type === "message" && e.message)
-        .map((e) => ({ role: e.message.role, content: e.message.content }));
+        .map((e) => {
+          var c = e.message.content;
+          if (Array.isArray(c)) {
+            c = c.filter(function (b) {
+              return !(b && b.type === "text" && typeof b.text === "string" && b.text.indexOf(REMINDER_MARKER) === 0);
+            });
+          }
+          return { role: e.message.role, content: c };
+        });
       context = buildConversationContext(msgs);
     } catch { /* fail open: no context */ }
     const description = await runAnalyze(

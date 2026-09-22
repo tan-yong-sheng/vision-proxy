@@ -159,7 +159,7 @@ function readToolFilePath(event: Record<string, any>): string | null {
 // interleaved tool-result lines.
 var TRANSCRIPT_TAIL_LINES = 400;
 // How many bytes of the transcript tail to read. 512 KB comfortably covers
-// the 200-line window even for large tool-result lines; the read is capped
+// the 400-line window even for large tool-result lines; the read is capped
 // so multi-GB transcripts stay cheap.
 var TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 
@@ -269,11 +269,10 @@ function readTranscriptContext(transcriptPath: string | undefined): string {
       // the shared formatter counts only text.
       var blocks = Array.isArray(rec.payload.content) ? rec.payload.content : [];
       content = blocks.map(function (b) {
-        return b && b.type === "input_text"
-          ? { type: "text", text: b.text }
-          : b && b.type === "output_text"
-            ? { type: "text", text: b.text }
-            : b;
+        if (b && (b.type === "input_text" || b.type === "output_text")) {
+          return { type: "text", text: b.text };
+        }
+        return b;
       });
     } else {
       continue;

@@ -332,6 +332,8 @@ const CONTEXT_FILE_BASENAME_RE = /^vp-context-[A-Za-z0-9][A-Za-z0-9.-]*\.txt$/;
 
 /** Well-known pending file for deterministic auto-discovery (Phase 1). */
 const PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+/** Pending file freshness window — short, since it is milliseconds-old by design. */
+const PENDING_CONTEXT_TTL_MS = 60 * 1000;
 
 /**
  * True when `path` is a hook-created `--context-file` handoff file: a
@@ -431,6 +433,23 @@ export function readPendingContextFile(
 ): string | undefined {
 	if (!hasAgentMarker(env)) return undefined;
 	const path = pendingContextFilePath();
+	// Freshness gate: pending is seconds-old by design (hook writes
+	// milliseconds before the CLI reads). Reject stale files so a
+	// concurrent or earlier session's context cannot be consumed.
+	try {
+		const st = statSync(path);
+		const age = Date.now() - st.mtimeMs;
+		if (!Number.isFinite(age) || age < 0 || age > PENDING_CONTEXT_TTL_MS) {
+			try {
+				rmSync(path);
+			} catch {
+				// ignore
+			}
+			return undefined;
+		}
+	} catch {
+		return undefined;
+	}
 	let content: string | null;
 	try {
 		content = readFile(path);
@@ -1018,10 +1037,16 @@ export async function runCommand(
 				)
 			: undefined;
 	// Phase 1 deterministic fallback: pending file auto-discovered when an
-	// agent marker is present and no explicit --context-file was consumed.
-	const contextFile =
-		explicitContextFile ??
-		(command === "analyze" ? readPendingContextFile(env, opts.readContextFile) : undefined);
+	// agent marker is present and no explicit --context-file flag was present.
+	// Track flag presence separately from file content so an empty/invalid
+	// explicit file does not fallback to a stale pending file from another
+	// invocation (CWE-359).
+	const hasExplicitContextFile = "context-file" in flags || "contextFile" in flags;
+	const contextFile = hasExplicitContextFile
+		? explicitContextFile
+		: command === "analyze"
+			? readPendingContextFile(env, opts.readContextFile)
+			: undefined;
 	if (parsed.error) return err(parsed.error);
 
 	switch (command) {

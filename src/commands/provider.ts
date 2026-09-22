@@ -72,14 +72,34 @@ export interface ProviderTestOptions {
 	readImage?: (path: string) => Promise<{ data: string; mimeType: string } | { error: string }>;
 }
 
-/** Redact credential-like fragments and cap length before surfacing a provider error. */
-function sanitizeProbeError(raw: string): string {
+/** Escape a literal for RegExp. */
+function escapeRegExp(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Redact credential-like fragments and cap length before surfacing a provider error.
+ *
+ * @tags provider, security, redact
+ */
+function sanitizeProbeError(raw: string, secrets: string[] = []): string {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips C0 controls before surfacing provider error
 	let s = raw.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+	for (const secret of secrets) {
+		if (!secret) continue;
+		s = s.replaceAll(secret, "***");
+		const enc = encodeURIComponent(secret);
+		if (enc !== secret) s = s.replaceAll(enc, "***");
+	}
 	s = s.replace(/:\/\/[^/\s]*:[^/\s@]*@/g, "://***@");
 	s = s.replace(/([?&=](?:api[_-]?key|token|key|secret|password)=)[^&\s]+/gi, "$1***");
 	s = s.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer ***");
 	s = s.replace(/sk-[A-Za-z0-9._-]+/g, "***");
+	for (const secret of secrets) {
+		if (!secret || secret.length < 4) continue;
+		const pat = `${escapeRegExp(secret.slice(0, 4))}[A-Za-z0-9._\\-]*`;
+		s = s.replace(new RegExp(pat, "g"), "***");
+	}
 	if (s.length > 500) s = `${s.slice(0, 500)}…`;
 	return s;
 }
@@ -87,10 +107,12 @@ function sanitizeProbeError(raw: string): string {
 /**
  * Classify a probe failure into an actionable one-liner. Never includes key
  * material; the caller renders the string verbatim.
+ *
+ * @tags provider, probe
  */
-export function classifyProbeError(err: unknown): string {
+export function classifyProbeError(err: unknown, secrets: string[] = []): string {
 	const raw = err instanceof Error ? err.message : String(err);
-	const safe = sanitizeProbeError(raw);
+	const safe = sanitizeProbeError(raw, secrets);
 	const msg = raw.toLowerCase();
 	if (/\b401\b/.test(msg) || /unauthorized|invalid[^\n]*api[^\n]*key|incorrect api key/.test(msg)) {
 		return `authentication failed (401): check the API key. ${safe}`;
@@ -138,6 +160,7 @@ interface ResolvedProbeTarget {
 	modelRef: string;
 	source: string;
 	model: unknown;
+	apiKey: string;
 }
 
 function keySourceLabel(
@@ -149,8 +172,8 @@ function keySourceLabel(
 ): string {
 	if (explicitApiKey) return "flag (--api-key)";
 	if (env[spec.apiKeyEnv]) return `env (${spec.apiKeyEnv})`;
-	if (configProvider === spec.id && configApiKey.length > 0) return "config (apiKey)";
 	if (getStoredProviderKey(spec.id)) return "keyring";
+	if (configProvider === spec.id && configApiKey.length > 0) return "config (apiKey)";
 	return "unknown";
 }
 
@@ -187,6 +210,7 @@ function resolveProbeTarget(opts: {
 			opts.explicitApiKey,
 		),
 		model: resolved.model.model,
+		apiKey: resolved.model.apiKey ?? "",
 	};
 }
 
@@ -251,6 +275,8 @@ function visionMessage(image: { data: string; mimeType: string }): ModelMessage[
  *
  * The text and vision outcomes stay separate so a text-only endpoint reports
  * `TEXT OK / VISION FAIL` instead of a single pass/fail.
+ *
+ * @tags provider, probe
  */
 export async function providerTest(opts: ProviderTestOptions = {}): Promise<ProviderResult> {
 	const env = opts.env ?? process.env;
@@ -271,7 +297,9 @@ export async function providerTest(opts: ProviderTestOptions = {}): Promise<Prov
 			code: 1,
 		};
 	}
-	const modelId = opts.model ?? (opts.provider ? spec.defaultModelId : config.modelId);
+	const modelId =
+		opts.model ??
+		(opts.provider && opts.provider !== config.provider ? spec.defaultModelId : config.modelId);
 	const timeout = probeTimeout({ timeoutMs: opts.timeoutMs });
 	if (timeout.error) {
 		return { ok: false, message: timeout.error, code: 1 };
@@ -311,7 +339,7 @@ export async function providerTest(opts: ProviderTestOptions = {}): Promise<Prov
 		outcome.textMs = text.ms;
 	} catch (err) {
 		outcome.textOk = false;
-		outcome.textError = classifyProbeError(err);
+		outcome.textError = classifyProbeError(err, target.apiKey ? [target.apiKey] : []);
 	}
 	try {
 		const vision = await runSingleProbe(generateTextImpl, {
@@ -324,7 +352,7 @@ export async function providerTest(opts: ProviderTestOptions = {}): Promise<Prov
 		outcome.visionMs = vision.ms;
 	} catch (err) {
 		outcome.visionOk = false;
-		outcome.visionError = classifyProbeError(err);
+		outcome.visionError = classifyProbeError(err, target.apiKey ? [target.apiKey] : []);
 	}
 	const ok = outcome.textOk && outcome.visionOk;
 	if (opts.json) {

@@ -79,8 +79,8 @@ const OPENCODE_PLUGIN_HEADER = String.raw`/**
  */
 import type { Hooks } from "@opencode-ai/plugin";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 // __VP_VERSION__PLACEHOLDER__
@@ -197,6 +197,56 @@ function runVp(
   });
 }
 
+var CONTEXT_FILE_PREFIX = "vp-context-";
+
+function contextFileDir(): string {
+  var base = "";
+  try {
+    var tmp = process.env.TMPDIR || process.env.TMP || process.env.TEMP;
+    if (tmp && tmp.trim()) base = tmp.trim();
+  } catch {
+    base = "";
+  }
+  if (!base) {
+    try {
+      base = tmpdir();
+    } catch {
+      base = "";
+    }
+  }
+  if (!base) base = "/tmp";
+  return join(base, "vision-proxy-context");
+}
+
+/**
+ * Persist context text to a 0600 tempfile for context-file handoff.
+ * Returns the path, or null on any failure (fail open: the caller leaves
+ * the tool args unmutated so the original command runs unchanged).
+ */
+async function writeContextFile(context: string): Promise<string | null> {
+  if (!context) return null;
+  if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      return null;
+    }
+    var name = CONTEXT_FILE_PREFIX + Date.now().toString(36) + "-" + process.pid + "-" + Math.floor(Math.random() * 0x100000000).toString(36);
+    var file = join(dir, name + ".txt");
+    writeFileSync(file, context, { encoding: "utf8", mode: 0o600 });
+    try {
+      chmodSync(file, 0o600);
+    } catch {
+      // ignore: creation mode already requested 0600
+    }
+    return file;
+  } catch {
+    return null;
+  }
+}
+
 /** Monotonic part id generator; opencode requires ids to start with "prt". */
 let partCounter = 0;
 function newPartId(): string {
@@ -253,6 +303,26 @@ async function handleToolExecuteBefore(
   cwd: string,
   client?: unknown,
 ): Promise<void> {
+  // Shell-tool rewrite path (U4): a model-invoked analyze command gets its
+  // recent conversation context via a tempfile reference. The plugin writes
+  // the session context it already fetches and mutates output.args.command
+  // in place, so the model's own command executes with the reference.
+  // Fail open: every failure returns with args unmutated so the original
+  // command runs unchanged.
+  if (input.tool === "bash" || input.tool === "shell") {
+    var rawCommand =
+      output.args && typeof output.args.command === "string" ? output.args.command : undefined;
+    if (!rawCommand || !isUnflaggedAnalyzeCommand(rawCommand)) return;
+    var shellContext = "";
+    try {
+      shellContext = await loadConversationContext(client, input.sessionID);
+    } catch { /* fail open: no context */ }
+    if (!shellContext) return;
+    var contextPath = await writeContextFile(shellContext);
+    if (!contextPath) return;
+    output.args.command = appendContextFileArg(rawCommand, quoteShellArg(contextPath));
+    return;
+  }
   if (input.tool !== "read") return;
   const argPath =
     output.args && typeof output.args.path === "string"

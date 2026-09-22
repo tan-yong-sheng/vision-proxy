@@ -141,25 +141,32 @@ function isSafeContextDir(dir: string): boolean {
 
 /**
  * Ensure the context directory exists as a private directory: create with
- * mode 0700 when missing; when present, validate ownership/permissions
- * (fail closed) and repair lax modes with chmod 0700. Returns false on any
- * failure (fail open: the caller leaves the tool input unmutated).
+ * mode 0700 when missing, then always validate (fresh or reused) before
+ * use. A recursive mkdir that succeeds on an existing directory must not
+ * bypass the ownership/permission checks, so validation runs on both
+ * paths; lax modes are repaired with chmod 0700 and rechecked. Returns
+ * false on any failure (fail open: the caller leaves the tool input
+ * unmutated).
  */
 function ensurePrivateContextDir(dir: string): boolean {
   try {
     try {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
-      return true;
     } catch {
-      // Exists already: validate before reuse.
+      // Exists already or raced creation: fall through to validation.
     }
+    // Never trust a fresh-or-reused directory without validating: a
+    // pre-created directory may carry permissive modes, wrong ownership,
+    // or be a symlink, and recursive mkdir succeeds on it silently.
     if (!isSafeContextDir(dir)) return false;
     try {
       chmodSync(dir, 0o700);
     } catch {
       // Non-fatal: the mode check above already passed.
     }
-    return true;
+    // Recheck after the repair attempt so a failed chmod cannot leave a
+    // lax directory in use.
+    return isSafeContextDir(dir);
   } catch {
     return false;
   }
@@ -233,6 +240,15 @@ function writeContextFile(context: string): string | null {
     if (fd === -1 || !file) return null;
     try {
       writeFileSync(fd, context, { encoding: "utf8" });
+    } catch {
+      // A failed write may leave a partial file at its final path with no
+      // later prune guaranteed, so remove it before failing open.
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        // ignore: best-effort failure cleanup
+      }
+      return null;
     } finally {
       try {
         closeSync(fd);

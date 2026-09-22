@@ -15,11 +15,13 @@ import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
@@ -303,8 +305,11 @@ test("PreToolUse Bash rewrites a model-invoked analyze command with a context fi
 			: filePath;
 	const saved = readFileSync(unquoted, "utf8");
 	assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
-	const savedStat = statSync(unquoted);
-	assert.equal(savedStat.mode & 0o777, 0o600, "tempfile must be owner-only");
+	if (process.platform !== "win32") {
+		// Windows reports writable files as 0666 regardless of creation mode.
+		const savedStat = statSync(unquoted);
+		assert.equal(savedStat.mode & 0o777, 0o600, "tempfile must be owner-only");
+	}
 	assert.match(
 		unquoted,
 		/vp-context-[0-9a-f]{32}\.txt$/,
@@ -351,6 +356,69 @@ test("PreToolUse Bash prunes stale context files before writing a new handoff", 
 			? filePath.slice(1, -1).replace(/'\\''/g, "'")
 			: filePath;
 	rmSync(unquoted, { force: true });
+});
+
+test("PreToolUse Bash refuses a preexisting permissive context directory", () => {
+	// Regression test for the mkdir-bypass finding: recursive mkdir
+	// succeeds on an existing directory, so validation must run on both
+	// the fresh-create and reuse paths. POSIX-only: Windows and root
+	// cannot block removal via directory permissions.
+	if (process.platform === "win32" || (process.getuid?.() ?? 0) === 0) return;
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+	]);
+	const tmpBase = mkdtempSync(join(tmpdir(), "vp-permissive-base-"));
+	const dir = join(tmpBase, "vision-proxy-context");
+	mkdirSync(dir, { recursive: true, mode: 0o755 });
+	chmodSync(dir, 0o755);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp(), TMPDIR: tmpBase },
+	);
+	assert.equal(run.status, 0);
+	assert.equal(run.stdout.trim(), "", "unsafe preexisting dir must fail open with no rewrite");
+	rmSync(dir, { recursive: true, force: true });
+});
+
+test("PreToolUse Bash refuses a symlinked context directory", () => {
+	// A symlink at the context dir would redirect the handoff write; the
+	// lstat check must reject it. Same POSIX-only scope as above.
+	if (process.platform === "win32" || (process.getuid?.() ?? 0) === 0) return;
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+	]);
+	const tmpBase = mkdtempSync(join(tmpdir(), "vp-symlink-base-"));
+	const target = mkdtempSync(join(tmpdir(), "vp-symlink-target-"));
+	const dir = join(tmpBase, "vision-proxy-context");
+	symlinkSync(target, dir);
+	assert.equal(lstatSync(dir).isSymbolicLink(), true);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp(), TMPDIR: tmpBase },
+	);
+	assert.equal(run.status, 0);
+	assert.equal(run.stdout.trim(), "", "symlinked dir must fail open with no rewrite");
+	rmSync(dir, { force: true });
 });
 
 test("PreToolUse Bash passes through flagged and non-analyze commands silently", () => {

@@ -337,6 +337,34 @@ function pruneStaleContextFiles(dir: string): void {
   }
 }
 
+var PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+
+function pendingContextFilePath(): string {
+  return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
+}
+
+async function writePendingContextFile(context: string): Promise<string | null> {
+  if (!context) return null;
+  if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var path = pendingContextFilePath();
+    try { rmSync(path, { force: true }); } catch { /* ignore */ }
+    var fd2 = -1;
+    try { fd2 = openSync(path, "wx", 0o600); } catch { return null; }
+    try { writeFileSync(fd2, context, { encoding: "utf8" }); } catch {
+      try { closeSync(fd2); } catch { /* ignore */ }
+      fd2 = -1;
+      try { rmSync(path, { force: true }); } catch { /* ignore */ }
+      return null;
+    } finally { if (fd2 !== -1) { try { closeSync(fd2); } catch { /* ignore */ } } }
+    try { chmodSync(path, 0o600); } catch { /* ignore */ }
+    return path;
+  } catch { return null; }
+}
+
 /**
  * Persist context text to a 0600 tempfile for context-file handoff.
  * Returns the path, or null on any failure (fail open: the caller leaves
@@ -471,14 +499,17 @@ async function handleToolExecuteBefore(
   // Fail open: every failure returns with args unmutated so the original
   // command runs unchanged.
   if (input.tool === "bash" || input.tool === "shell") {
-    var rawCommand =
-      output.args && typeof output.args.command === "string" ? output.args.command : undefined;
-    if (!rawCommand || !isUnflaggedAnalyzeCommand(rawCommand)) return;
     var shellContext = "";
     try {
       shellContext = await loadConversationContext(client, input.sessionID);
     } catch { /* fail open: no context */ }
     if (!shellContext) return;
+    // Phase 1 dual path: deterministic pending for any launcher, plus
+    // explicit handoff for vp analyze (keeps 16-parallel isolation).
+    await writePendingContextFile(shellContext);
+    var rawCommand =
+      output.args && typeof output.args.command === "string" ? output.args.command : undefined;
+    if (!rawCommand || !isUnflaggedAnalyzeCommand(rawCommand)) return;
     var contextPath = await writeContextFile(shellContext);
     if (!contextPath) return;
     output.args.command = appendContextFileArg(rawCommand, quoteShellArg(contextPath));

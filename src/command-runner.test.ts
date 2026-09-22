@@ -8,18 +8,21 @@
  * routing is pinned without stream capture.
  */
 import { strict as assert } from "node:assert";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import * as cli from "./cli.ts";
 import {
 	HELP,
+	hasAgentMarker,
 	hookContextFileDir,
 	isHookContextFile,
 	MAX_ANALYZE_STDIN_BYTES,
 	parseAnalyzeStdin,
 	parseFlags,
+	pendingContextFilePath,
 	readAnalyzeContextFile,
 	readAnalyzeStdin,
+	readPendingContextFile,
 	renderHelp,
 	runCommand,
 	VALUE_FLAGS,
@@ -207,6 +210,51 @@ describe("command-runner seam", () => {
 		} finally {
 			rmSync(link, { force: true });
 			rmSync(sandbox, { recursive: true, force: true });
+		}
+	});
+
+	it("auto-discovers pending context when an agent marker is present", () => {
+		const pending = pendingContextFilePath();
+		// Writer is gated on agent marker: outside-agent manual `vp analyze`
+		// must not steal agent context.
+		assert.equal(hasAgentMarker({}), false);
+		assert.equal(hasAgentMarker({ CLAUDECODE: "1" }), true);
+		// Outside agent: pending file exists but marker absent → not consumed.
+		const dir = hookContextFileDir();
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		writeFileSync(pending, "pending-ctx-value");
+		try {
+			const reader = (p: string): string | null => readFileSync(p, "utf8");
+			const envOutside: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv;
+			assert.equal(
+				readPendingContextFile(envOutside, reader),
+				undefined,
+				"outside agent must not consume",
+			);
+			assert.ok(existsSync(pending), "outside agent must not delete pending");
+			const envInside: NodeJS.ProcessEnv = { CLAUDECODE: "1" } as NodeJS.ProcessEnv;
+			assert.equal(
+				readPendingContextFile(envInside, reader),
+				"pending-ctx-value",
+				"inside agent must consume",
+			);
+			assert.equal(existsSync(pending), false, "pending must be deleted after read");
+		} finally {
+			rmSync(pending, { force: true });
+		}
+	});
+
+	it("pending fallback wins when no explicit --context-file is given", async () => {
+		const pending = pendingContextFilePath();
+		writeFileSync(pending, "  pending-trimmed  ");
+		try {
+			const res = await runCommand(["analyze", "/tmp/img.png"], {
+				env: { ...process.env, CLAUDECODE: "1" },
+			});
+			assert.equal(existsSync(pending), false, "pending consumed even when analyze errors");
+			assert.ok(res !== undefined);
+		} finally {
+			rmSync(pending, { force: true });
 		}
 	});
 

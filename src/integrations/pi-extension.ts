@@ -223,6 +223,34 @@ function pruneStaleContextFiles(dir: string): void {
   }
 }
 
+var PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+
+function pendingContextFilePath(): string {
+  return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
+}
+
+function writePendingContextFile(context: string): string | null {
+  if (!context) return null;
+  if (typeof Buffer !== "undefined" && Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var path = pendingContextFilePath();
+    try { rmSync(path, { force: true }); } catch { /* ignore */ }
+    var fd2 = -1;
+    try { fd2 = openSync(path, "wx", 0o600); } catch { return null; }
+    try { writeFileSync(fd2, context, { encoding: "utf8" }); } catch {
+      try { closeSync(fd2); } catch { /* ignore */ }
+      fd2 = -1;
+      try { rmSync(path, { force: true }); } catch { /* ignore */ }
+      return null;
+    } finally { if (fd2 !== -1) { try { closeSync(fd2); } catch { /* ignore */ } } }
+    try { chmodSync(path, 0o600); } catch { /* ignore */ }
+    return path;
+  } catch { return null; }
+}
+
 /**
  * Persist context text to a 0600 tempfile for context-file handoff.
  * Returns the path, or null on any failure (fail open: the caller leaves
@@ -516,9 +544,12 @@ export default function setup(pi: ExtensionAPI): void {
     if (!event || (event as any).toolName !== "bash") return undefined;
     var input = (event as any).input;
     if (!input || typeof input.command !== "string") return undefined;
-    if (!isUnflaggedAnalyzeCommand(input.command)) return undefined;
     var toolContext = sessionBranchContext(ctx);
     if (!toolContext) return undefined;
+    // Phase 1 dual path: deterministic pending for any launcher, plus
+    // explicit handoff for vp analyze (keeps 16-parallel isolation).
+    writePendingContextFile(toolContext);
+    if (!isUnflaggedAnalyzeCommand(input.command)) return undefined;
     var toolContextPath = writeContextFile(toolContext);
     if (!toolContextPath) return undefined;
     input.command = appendContextFileArg(input.command, quoteShellArg(toolContextPath));

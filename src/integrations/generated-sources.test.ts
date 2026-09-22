@@ -170,6 +170,19 @@ test("generated artifacts preserve the historical reminder and deny wording", ()
 	}
 });
 
+test("every generated artifact shares the Windows-safe context-dir policy", () => {
+	// POSIX mode bits are meaningless on Windows (mkdir ignores mode,
+	// chmod only toggles read-only), so the strict bit check must be
+	// skipped there in every writer; privacy relies on per-user temp ACL
+	// inheritance. Pins the shared policy so the three adapters cannot drift.
+	for (const host of HOSTS) {
+		assert.ok(
+			host.source.includes('process.platform !== "win32"'),
+			`${host.name} must skip the POSIX mode-bit check on Windows`,
+		);
+	}
+});
+
 test("generated artifacts keep their fail-open and fence discipline", () => {
 	for (const host of HOSTS) {
 		assert.ok(

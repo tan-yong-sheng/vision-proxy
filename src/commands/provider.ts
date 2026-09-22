@@ -4,16 +4,20 @@
  * Subcommands:
  *   list                 list configured providers + key presence
  *   check [<name>]       verify an API key is configured for a provider (or all)
+ *   test [<name>]        live text + vision probe against the provider
  */
 
+import { generateText as defaultGenerateText, type ModelMessage } from "ai";
+import { loadConfig } from "../config.ts";
 import type { VisionConfig } from "../core.ts";
+import { readImageFileWithReason } from "../core.ts";
 import {
 	deleteProviderKey,
 	getStoredProviderKey,
 	listStoredProviderKeys,
 	storeProviderKey,
 } from "../keyring.ts";
-import { type ApiProviderSpec, getProvider, listProviders } from "../provider.ts";
+import { type ApiProviderSpec, getProvider, listProviders, resolveModel } from "../provider.ts";
 
 /** Config slice needed to evaluate key presence from a plain-text config key. */
 type ConfigApiKey = Pick<VisionConfig, "apiKey" | "provider">;
@@ -22,6 +26,326 @@ export interface ProviderResult {
 	ok: boolean;
 	message: string;
 	code: number;
+}
+
+export const PROVIDER_TEST_PROMPT = "Reply with exactly: OK";
+
+export const PROVIDER_TEST_VISION_PROMPT = "Describe this image in one word.";
+
+export const PROVIDER_TEST_TEXT_TOKENS = 16;
+
+export const PROVIDER_TEST_DEFAULT_TIMEOUT_MS = 30_000;
+
+/** Embedded 1x1 transparent PNG used for the default vision probe (no fixture needed). */
+export const PROVIDER_TEST_PIXEL_BASE64 =
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+export type GenerateTextLike = (opts: {
+	model: unknown;
+	prompt?: string;
+	messages?: unknown[];
+	maxOutputTokens?: number;
+	timeout?: number | { totalMs?: number };
+	maxRetries?: number;
+}) => Promise<{ text: string }>;
+
+export interface ProviderTestOutcome {
+	textOk: boolean;
+	visionOk: boolean;
+	textMs?: number;
+	visionMs?: number;
+	textError?: string;
+	visionError?: string;
+}
+
+export interface ProviderTestOptions {
+	provider?: string;
+	model?: string;
+	apiKey?: string;
+	imagePath?: string;
+	timeoutMs?: number;
+	json?: boolean;
+	env?: NodeJS.ProcessEnv;
+	cwd?: string;
+	configPath?: string;
+	generateTextImpl?: GenerateTextLike;
+	readImage?: (path: string) => Promise<{ data: string; mimeType: string } | { error: string }>;
+}
+
+/**
+ * Classify a probe failure into an actionable one-liner. Never includes key
+ * material; the caller renders the string verbatim.
+ */
+export function classifyProbeError(err: unknown): string {
+	const raw = err instanceof Error ? err.message : String(err);
+	const msg = raw.toLowerCase();
+	if (/\b401\b/.test(msg) || /unauthorized|invalid[^\n]*api[^\n]*key|incorrect api key/.test(msg)) {
+		return `authentication failed (401): check the API key. ${raw}`;
+	}
+	if (/\b404\b/.test(msg) || /model[^\n]*not found|not_found/.test(msg)) {
+		return `model not found (404): check --model and the provider base URL. ${raw}`;
+	}
+	if (/(image|vision)[^\n]*(not supported|unsupported)/.test(msg)) {
+		return `model does not accept images: pick a vision-capable model. ${raw}`;
+	}
+	if (/\b400\b/.test(msg)) {
+		return `request rejected (400): check --model and the prompt payload. ${raw}`;
+	}
+	if (/\b402\b/.test(msg) || /payment|quota|billing/.test(msg)) {
+		return `quota or billing issue (402): check the provider account. ${raw}`;
+	}
+	if (/\b408\b/.test(msg) || /\b504\b/.test(msg) || /timed out|timeout|deadline/.test(msg)) {
+		return `request timed out: the endpoint may be slow or unreachable. ${raw}`;
+	}
+	if (/\b429\b/.test(msg) || /rate[^\n]*limit/.test(msg)) {
+		return `rate limited (429): wait and retry. ${raw}`;
+	}
+	if (
+		/\b5\d\d\b/.test(msg) ||
+		/internal server|bad gateway|service unavailable|overloaded/.test(msg)
+	) {
+		return `provider error: the model endpoint failed. ${raw}`;
+	}
+	if (/enotfound|econnrefused|econnreset|eai_again|network|fetch failed|socket/.test(msg)) {
+		return `network error: check the base URL and connectivity. ${raw}`;
+	}
+	return raw;
+}
+
+async function defaultReadImage(
+	path: string,
+): Promise<{ data: string; mimeType: string } | { error: string }> {
+	const r = await readImageFileWithReason(path);
+	if (!r.image) return { error: "could not read image" };
+	return { data: r.image.data, mimeType: r.image.mimeType };
+}
+
+interface ResolvedProbeTarget {
+	providerId: string;
+	modelRef: string;
+	source: string;
+	model: unknown;
+}
+
+function keySourceLabel(
+	spec: ApiProviderSpec,
+	env: NodeJS.ProcessEnv,
+	configApiKey: string,
+	configProvider: string,
+	explicitApiKey?: string,
+): string {
+	if (explicitApiKey) return "flag (--api-key)";
+	if (env[spec.apiKeyEnv]) return `env (${spec.apiKeyEnv})`;
+	if (configProvider === spec.id && configApiKey.length > 0) return "config (apiKey)";
+	if (getStoredProviderKey(spec.id)) return "keyring";
+	return "unknown";
+}
+
+function resolveProbeTarget(opts: {
+	spec: ApiProviderSpec;
+	env: NodeJS.ProcessEnv;
+	modelId: string;
+	explicitApiKey?: string;
+	explicitBaseURL?: string;
+	configApiKey: string;
+	configProvider: string;
+}): ResolvedProbeTarget | { error: string } {
+	const resolved = resolveModel(
+		opts.spec.id,
+		opts.modelId,
+		opts.env,
+		opts.explicitApiKey,
+		opts.explicitBaseURL,
+		opts.configApiKey,
+	);
+	if (!resolved.ok) {
+		return {
+			error: `no API key for provider "${resolved.provider}". Set ${resolved.apiKeyEnv} (or pass --api-key).`,
+		};
+	}
+	return {
+		providerId: opts.spec.id,
+		modelRef: `${opts.spec.id}/${opts.modelId}`,
+		source: keySourceLabel(
+			opts.spec,
+			opts.env,
+			opts.configApiKey,
+			opts.configProvider,
+			opts.explicitApiKey,
+		),
+		model: resolved.model.model,
+	};
+}
+
+function probeTimeout(opts: { timeoutMs?: number }): { value: number; error?: string } {
+	if (opts.timeoutMs === undefined) return { value: PROVIDER_TEST_DEFAULT_TIMEOUT_MS };
+	if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) {
+		return {
+			value: PROVIDER_TEST_DEFAULT_TIMEOUT_MS,
+			error: "--timeout must be a positive number of ms",
+		};
+	}
+	return { value: Math.floor(opts.timeoutMs) };
+}
+
+async function runSingleProbe(
+	generateTextImpl: GenerateTextLike,
+	call: {
+		model: unknown;
+		prompt?: string;
+		messages?: unknown[];
+		maxOutputTokens: number;
+		timeout: number;
+	},
+	timer?: () => number,
+): Promise<{ text: string; ms: number }> {
+	const now = timer ?? Date.now;
+	const start = now();
+	const result = await generateTextImpl({
+		model: call.model,
+		...(call.prompt !== undefined ? { prompt: call.prompt } : {}),
+		...(call.messages !== undefined ? { messages: call.messages } : {}),
+		maxOutputTokens: call.maxOutputTokens,
+		timeout: call.timeout,
+		maxRetries: 0,
+	});
+	return { text: result.text, ms: Math.max(0, now() - start) };
+}
+
+function formatSeconds(ms: number): string {
+	return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function visionMessage(image: { data: string; mimeType: string }): ModelMessage[] {
+	return [
+		{
+			role: "user",
+			content: [
+				{ type: "text", text: PROVIDER_TEST_VISION_PROMPT },
+				{
+					type: "file",
+					data: Buffer.from(image.data, "base64"),
+					mediaType: image.mimeType,
+				},
+			],
+		},
+	];
+}
+
+/**
+ * Two-stage live connectivity probe: text first, then vision. Never touches
+ * the description cache and never prints key material.
+ *
+ * The text and vision outcomes stay separate so a text-only endpoint reports
+ * `TEXT OK / VISION FAIL` instead of a single pass/fail.
+ */
+export async function providerTest(opts: ProviderTestOptions = {}): Promise<ProviderResult> {
+	const env = opts.env ?? process.env;
+	const cwd = opts.cwd ?? process.cwd();
+	const { config } = await loadConfig({
+		explicitConfigPath: opts.configPath,
+		cwd,
+		env,
+	});
+	const providerId = opts.provider ?? config.provider;
+	const spec = getProvider(providerId);
+	if (!spec) {
+		return {
+			ok: false,
+			message: `unknown provider "${providerId}". Known: ${listProviders()
+				.map((p) => p.id)
+				.join(", ")}`,
+			code: 1,
+		};
+	}
+	const modelId = opts.model ?? (opts.provider ? spec.defaultModelId : config.modelId);
+	const timeout = probeTimeout({ timeoutMs: opts.timeoutMs });
+	if (timeout.error) {
+		return { ok: false, message: timeout.error, code: 1 };
+	}
+	const target = resolveProbeTarget({
+		spec,
+		env,
+		modelId,
+		explicitApiKey: opts.apiKey,
+		explicitBaseURL: config.baseUrl || undefined,
+		configApiKey: config.apiKey,
+		configProvider: config.provider,
+	});
+	if ("error" in target) {
+		return { ok: false, message: target.error, code: 1 };
+	}
+	let image = { data: PROVIDER_TEST_PIXEL_BASE64, mimeType: "image/png" };
+	if (opts.imagePath) {
+		const read = await (opts.readImage ?? defaultReadImage)(opts.imagePath);
+		if ("error" in read) {
+			return { ok: false, message: `could not read --image: ${read.error}`, code: 1 };
+		}
+		image = { data: read.data, mimeType: read.mimeType };
+	}
+	const generateTextImpl =
+		opts.generateTextImpl ?? (defaultGenerateText as unknown as GenerateTextLike);
+	const outcome: ProviderTestOutcome = { textOk: false, visionOk: false };
+	try {
+		const text = await runSingleProbe(generateTextImpl, {
+			model: target.model,
+			prompt: PROVIDER_TEST_PROMPT,
+			maxOutputTokens: PROVIDER_TEST_TEXT_TOKENS,
+			timeout: timeout.value,
+		});
+		outcome.textOk = true;
+		outcome.textMs = text.ms;
+	} catch (err) {
+		outcome.textOk = false;
+		outcome.textError = classifyProbeError(err);
+	}
+	try {
+		const vision = await runSingleProbe(generateTextImpl, {
+			model: target.model,
+			messages: visionMessage(image),
+			maxOutputTokens: PROVIDER_TEST_TEXT_TOKENS,
+			timeout: timeout.value,
+		});
+		outcome.visionOk = true;
+		outcome.visionMs = vision.ms;
+	} catch (err) {
+		outcome.visionOk = false;
+		outcome.visionError = classifyProbeError(err);
+	}
+	const ok = outcome.textOk && outcome.visionOk;
+	if (opts.json) {
+		return {
+			ok,
+			message: JSON.stringify(
+				{
+					provider: target.providerId,
+					model: target.modelRef,
+					source: target.source,
+					text: outcome.textOk
+						? { status: "OK", latencyMs: outcome.textMs }
+						: { status: "FAIL", error: outcome.textError },
+					vision: outcome.visionOk
+						? { status: "OK", latencyMs: outcome.visionMs }
+						: { status: "FAIL", error: outcome.visionError },
+				},
+				null,
+				2,
+			),
+			code: ok ? 0 : 1,
+		};
+	}
+	const lines = [
+		`Source: ${target.source}`,
+		`Model: ${target.modelRef}`,
+		outcome.textOk
+			? `Text: OK (${formatSeconds(outcome.textMs ?? 0)})`
+			: `Text: FAIL (${outcome.textError})`,
+		outcome.visionOk
+			? `Vision: OK (${formatSeconds(outcome.visionMs ?? 0)})`
+			: `Vision: FAIL (${outcome.visionError})`,
+		ok ? "Connection test successful" : "Connection test failed",
+	];
+	return { ok, message: lines.join("\n"), code: ok ? 0 : 1 };
 }
 
 /**

@@ -225,7 +225,10 @@ export default function setup(pi: ExtensionAPI): void {
       const content = (msg as any).content as Array<any>;
       // Idempotency guard: strip reminders injected by a previous run of this
       // handler before collecting paths, so re-delivery (Pi re-fires context
-      // for every model call) never stacks duplicate reminder text.
+      // for every model call) never stacks duplicate reminder text. Matching
+      // is by marker prefix: user text starting with our internal marker is
+      // treated as ours (the marker is never user-facing; typing it verbatim
+      // is the only false positive, and is accepted as user error).
       const fresh = content.filter(
         (c) => !(c && c.type === "text" && typeof c.text === "string" && c.text.indexOf(REMINDER_MARKER) === 0),
       );

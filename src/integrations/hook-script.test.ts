@@ -19,6 +19,8 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	statSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -301,7 +303,54 @@ test("PreToolUse Bash rewrites a model-invoked analyze command with a context fi
 			: filePath;
 	const saved = readFileSync(unquoted, "utf8");
 	assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
+	const savedStat = statSync(unquoted);
+	assert.equal(savedStat.mode & 0o777, 0o600, "tempfile must be owner-only");
+	assert.match(
+		unquoted,
+		/vp-context-[0-9a-f]{32}\.txt$/,
+		"tempfile must use the exclusive random handoff name",
+	);
 	rmSync(unquoted);
+});
+
+test("PreToolUse Bash prunes stale context files before writing a new handoff", () => {
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+	]);
+	const tmpBase =
+		// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps empty-string TMPDIR falling through to tmpdir().
+		process.env.TMPDIR && process.env.TMPDIR.trim() ? process.env.TMPDIR.trim() : tmpdir();
+	const dir = join(tmpBase, "vision-proxy-context");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const stale = join(dir, "vp-context-stale.txt");
+	writeFileSync(stale, "stale context");
+	const oldTime = new Date(Date.now() - 11 * 60 * 1000);
+	utimesSync(stale, oldTime, oldTime);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp() },
+	);
+	assert.equal(run.status, 0);
+	const out = parseOutput(run);
+	assert.ok(out, "analyze command must emit rewrite JSON");
+	assert.equal(existsSync(stale), false, "stale handoff must be pruned");
+	const rewritten = out.hookSpecificOutput.updatedInput.command as string;
+	const filePath = rewritten.slice(rewritten.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	rmSync(unquoted, { force: true });
 });
 
 test("PreToolUse Bash passes through flagged and non-analyze commands silently", () => {
@@ -311,6 +360,11 @@ test("PreToolUse Bash passes through flagged and non-analyze commands silently",
 		"vp analyze /tmp/a.png --context-file /tmp/ctx.txt",
 		"vp config get",
 		"ls /tmp/a.png",
+		// Compound/nested commands are rejected standalone-only: the
+		// append-only rewrite would land the flag on the wrong command.
+		"vp analyze /tmp/a.png && echo done",
+		"vp analyze /tmp/a.png; echo done",
+		"echo vp analyze /tmp/a.png",
 	]) {
 		const run = runHook(
 			script,

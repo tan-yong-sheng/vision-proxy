@@ -123,7 +123,7 @@ export async function configShow(opts: {
 	if (providers.length === 0) {
 		return {
 			ok: false,
-			message: `unknown provider "${opts.provider}". Known: ${listProviders()
+			message: `unknown provider "${opts.provider ?? sanitized.provider}". Known: ${listProviders()
 				.map((p) => p.id)
 				.join(", ")}`,
 			code: 1,
@@ -173,8 +173,8 @@ function describeKeySource(
 	config: VisionConfig,
 ): string {
 	if (env[spec.apiKeyEnv]) return `env (${spec.apiKeyEnv})`;
-	if (getStoredProviderKey(spec.id)) return "keyring";
 	if (config.provider === spec.id && config.apiKey.length > 0) return "config (apiKey)";
+	if (getStoredProviderKey(spec.id, env)) return "keyring";
 	return `missing (${spec.apiKeyEnv})`;
 }
 

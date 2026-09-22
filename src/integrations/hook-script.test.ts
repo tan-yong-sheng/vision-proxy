@@ -18,6 +18,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -261,6 +262,79 @@ test("PreToolUse ignores non-Read tools and non-image paths", () => {
 		assert.equal(run.status, 0);
 		assert.equal(run.stdout.trim(), "", `must stay silent for ${JSON.stringify(event)}`);
 	}
+});
+
+test("PreToolUse Bash rewrites a model-invoked analyze command with a context file", () => {
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+		{
+			type: "assistant",
+			message: { role: "assistant", content: [{ type: "text", text: "A square." }] },
+		},
+	]);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp() },
+	);
+	assert.equal(run.status, 0);
+	const out = parseOutput(run);
+	assert.ok(out, "analyze command must emit rewrite JSON");
+	assert.equal(out.hookSpecificOutput.hookEventName, "PreToolUse");
+	assert.equal(out.hookSpecificOutput.permissionDecision, "allow");
+	const rewritten = out.hookSpecificOutput.updatedInput.command as string;
+	assert.match(rewritten, /^vp analyze \/tmp\/diagram\.png --context-file /);
+	assert.ok(!rewritten.includes("Which shape"), "context must not leak onto argv");
+	const filePath = rewritten.slice(rewritten.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	const saved = readFileSync(unquoted, "utf8");
+	assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
+	rmSync(unquoted);
+});
+
+test("PreToolUse Bash passes through flagged and non-analyze commands silently", () => {
+	const script = writeScript();
+	const env = { VP_BIN: fakeVp() };
+	for (const command of [
+		"vp analyze /tmp/a.png --context-file /tmp/ctx.txt",
+		"vp config get",
+		"ls /tmp/a.png",
+	]) {
+		const run = runHook(
+			script,
+			{ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } },
+			env,
+		);
+		assert.equal(run.status, 0);
+		assert.equal(run.stdout.trim(), "", `must stay silent for ${command}`);
+	}
+});
+
+test("PreToolUse Bash runs the original command when there is no transcript context", () => {
+	const script = writeScript();
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+		},
+		{ VP_BIN: fakeVp() },
+	);
+	assert.equal(run.status, 0);
+	assert.equal(run.stdout.trim(), "", "no context means no rewrite: original runs");
 });
 
 test("PreToolUse fails open when an image path cannot be passed to spawn", () => {

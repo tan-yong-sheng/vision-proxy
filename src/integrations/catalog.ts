@@ -267,7 +267,7 @@ function makeHookAgentSpec(opts: {
 			applyHooks(
 				raw,
 				makeTsHookCommand(opts.scriptPath()),
-				opts.id === "codex" ? ["Read", "view_image"] : ["Read"],
+				opts.id === "codex" ? ["Read", "view_image", "Bash"] : ["Read", "Bash"],
 			),
 		remove: (raw) => removeHooks(raw),
 		isInstalled: (raw?: string) => hooksInstalled(raw ?? ""),

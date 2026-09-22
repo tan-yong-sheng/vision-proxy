@@ -66,8 +66,9 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
 // __VP_VERSION__PLACEHOLDER__
 
 import { Buffer } from "node:buffer";
+import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync, chmodSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -166,8 +167,12 @@ var TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 
 // Where hook-written context files live: a dedicated directory under the
 // OS temp root so the files never sit beside user data. Each file is
-// created mode 0600 and deleted by the CLI after reading.
+// created exclusively (O_EXCL, mode 0600) with 128-bit random entropy and
+// deleted by the CLI after reading; stale files are pruned before each
+// write (10-minute TTL) so rejected handoffs cannot accumulate.
 var CONTEXT_FILE_PREFIX = "vp-context-";
+// Stale-file TTL: handoffs older than this are pruned before each write.
+var CONTEXT_FILE_TTL_MS = 10 * 60 * 1000;
 
 function contextFileDir(): string {
   var base = "";
@@ -183,23 +188,138 @@ function contextFileDir(): string {
 }
 
 /**
- * Persist context text to a 0600 tempfile for context-file handoff.
- * Returns the path, or null on any failure (fail open: the caller runs
- * the original command unchanged).
+ * True when an existing context directory is safe to reuse: not a symlink,
+ * owned by the current user, and mode 0700 (no group/world access).
+ * Fail-closed on any stat failure so callers abort rather than write into
+ * an untrusted directory.
+ */
+function isSafeContextDir(dir: string): boolean {
+  var st = null;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    return false;
+  }
+  if (!st) return false;
+  try {
+    if (st.isSymbolicLink()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    if ((st.mode & 0o077) !== 0) return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Ensure the context directory exists as a private directory: create with
+ * mode 0700 when missing; when present, validate ownership/permissions
+ * (fail closed) and repair lax modes with chmod 0700. Returns false on any
+ * failure (fail open: the caller skips the handoff).
+ */
+function ensurePrivateContextDir(dir: string): boolean {
+  try {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      return true;
+    } catch {
+      // Exists already: validate before reuse.
+    }
+    if (!isSafeContextDir(dir)) return false;
+    try {
+      chmodSync(dir, 0o700);
+    } catch {
+      // Non-fatal: the mode check above already passed.
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort prune of stale vp-context-*.txt files older than the TTL.
+ * Fail-open: every failure is swallowed so pruning never blocks the
+ * handoff. Runs before each write so rejected or interrupted handoffs
+ * cannot accumulate forever.
+ */
+function pruneStaleContextFiles(dir: string): void {
+  var entries = null;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  if (!entries) return;
+  var now = Date.now();
+  for (var i = 0; i < entries.length; i++) {
+    var name = entries[i] || "";
+    if (name.indexOf(CONTEXT_FILE_PREFIX) !== 0) continue;
+    if (name.slice(-4) !== ".txt") continue;
+    var full = join(dir, name);
+    var age = -1;
+    try {
+      age = now - statSync(full).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (age < 0 || age <= CONTEXT_FILE_TTL_MS) continue;
+    try {
+      rmSync(full, { force: true });
+    } catch {
+      // ignore: best-effort cleanup
+    }
+  }
+}
+
+/**
+ * Persist context text to an exclusively-created 0600 tempfile for
+ * context-file handoff. Returns the path, or null on any failure (fail
+ * open: the caller runs the original command unchanged).
  */
 function writeContextFile(context: string): string | null {
   if (!context) return null;
   if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
   var dir = contextFileDir();
   try {
-    try {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-    } catch {
-      return null;
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var fd = -1;
+    var file = "";
+    var attempts = 0;
+    while (fd === -1 && attempts < 5) {
+      attempts++;
+      // 128-bit random entropy: unlinkable without directory listing,
+      // unlike the prior timestamp+pid sequence.
+      var name = CONTEXT_FILE_PREFIX + randomBytes(16).toString("hex") + ".txt";
+      file = join(dir, name);
+      try {
+        // O_EXCL: fail when the path already exists instead of following
+        // a pre-created symlink or overwriting another process's file.
+        fd = openSync(file, "wx", 0o600);
+      } catch {
+        fd = -1;
+        file = "";
+      }
     }
-    var name = CONTEXT_FILE_PREFIX + Date.now().toString(36) + "-" + process.pid + "-" + Math.floor(Math.random() * 0x100000000).toString(36);
-    var file = join(dir, name + ".txt");
-    writeFileSync(file, context, { encoding: "utf8", mode: 0o600 });
+    if (fd === -1 || !file) return null;
+    try {
+      writeFileSync(fd, context, { encoding: "utf8" });
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore: descriptor cleanup is best-effort
+      }
+    }
     try {
       chmodSync(file, 0o600);
     } catch {

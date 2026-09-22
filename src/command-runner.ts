@@ -211,6 +211,15 @@ const DEFAULT_ANALYZE_STDIN_TIMEOUT_MS = 50;
  *
  * @tags cli, runner
  */
+/**
+ * Hard cap (bytes) on the `vp analyze` stdin drain. Our own adapters send
+ * at most ~20KB; anything larger is either a runaway pipe or hostile
+ * input, and is dropped before it can bloat memory or reach JSON.parse.
+ *
+ * @tags cli, runner
+ */
+export const MAX_ANALYZE_STDIN_BYTES = 256 * 1024;
+
 export async function readAnalyzeStdin(
 	timeoutMs = DEFAULT_ANALYZE_STDIN_TIMEOUT_MS,
 ): Promise<string> {
@@ -220,7 +229,23 @@ export async function readAnalyzeStdin(
 		return await new Promise<string>((resolve) => {
 			const chunks: Buffer[] = [];
 			let settled = false;
+			let receivedBytes = 0;
 			const onData = (c: Buffer): void => {
+				// Fail closed on oversize input: stop listening and degrade
+				// to no payload rather than retaining unbounded data.
+				if (receivedBytes + c.length > MAX_ANALYZE_STDIN_BYTES) {
+					try {
+						process.stderr.write(
+							"[vision-proxy] analyze stdin payload exceeds " +
+								`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring stdin\n`,
+						);
+					} catch {
+						// ignore: stderr may be torn down in tests
+					}
+					finish("");
+					return;
+				}
+				receivedBytes += c.length;
 				chunks.push(c);
 			};
 			const finish = (val: string): void => {

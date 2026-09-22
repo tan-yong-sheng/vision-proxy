@@ -33,6 +33,11 @@ export type { AgentSpec, IntegrationInstallOptions, IntegrationResult };
  * entry point here; `integration status` surfaces it so a dev wiring
  * never masquerades as a production install.
  *
+ * Control characters (including newlines and ANSI escapes, which JSON
+ * decoding would otherwise materialize) are rejected: the value is
+ * interpolated into terminal output, so a crafted artifact must not be
+ * able to inject status lines or control sequences.
+ *
  * @tags integration, lifecycle
  */
 export function installedVpBin(target: string): string | undefined {
@@ -47,10 +52,27 @@ export function installedVpBin(target: string): string | undefined {
 	try {
 		const bin = JSON.parse(m[1]!) as unknown;
 		if (typeof bin !== "string" || !bin || bin === "vp") return undefined;
+		if (hasControlChars(bin)) return undefined;
 		return bin;
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * True when a string contains terminal-unsafe control characters (including
+ * newlines and ANSI escapes, which JSON decoding would otherwise
+ * materialize). Split out so the security check reads without an inline
+ * control-character regex literal.
+ *
+ * @tags integration, lifecycle
+ */
+function hasControlChars(s: string): boolean {
+	for (let i = 0; i < s.length; i++) {
+		const code = s.charCodeAt(i);
+		if (code <= 0x1f || code === 0x7f) return true;
+	}
+	return false;
 }
 
 /**

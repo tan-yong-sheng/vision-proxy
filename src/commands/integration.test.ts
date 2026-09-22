@@ -1616,6 +1616,26 @@ test("status surfaces a dev-stamped binary and hides prod installs", async () =>
 		/✓ pi\s+\S+ \(dev: \/work\/vision-proxy\/dist\/cli\.js\)/,
 		"dev wiring must be visible in status",
 	);
+	// A crafted artifact with control characters in the stamped path must
+	// not inject status lines: the dev suffix is dropped, fail-open. The
+	// stamp line is built by concatenating a backslash-n escape at runtime
+	// (a literal backslash-n in source would decode too early and never
+	// exercise the control-char reject). Note: the previous block replaced
+	// the prod marker with the dev path, so match the current file content.
+	const backslashN = String.fromCharCode(92, 110);
+	writeFileSync(
+		ext,
+		readFileSync(ext, "utf8").replace(
+			'var DEFAULT_VP_BIN = "/work/vision-proxy/dist/cli.js";',
+			`var DEFAULT_VP_BIN = "/tmp/evil${backslashN}✓ forged status";`,
+		),
+	);
+	const forged = await runIntegration("status", "");
+	assert.ok(
+		forged.message.split("\n").some((l) => /^✓ pi\s+\S+$/.test(l)),
+		"control-char stamped paths degrade to the bare marker line",
+	);
+	assert.ok(!forged.message.includes("forged status"), "injected lines must not render");
 	// A plain PATH install renders exactly as before (no suffix).
 	writeFileSync(
 		ext,

@@ -12,6 +12,7 @@ import { describe, it } from "node:test";
 import * as cli from "./cli.ts";
 import {
 	HELP,
+	MAX_ANALYZE_STDIN_BYTES,
 	parseAnalyzeStdin,
 	parseFlags,
 	readAnalyzeStdin,
@@ -318,6 +319,28 @@ describe("readAnalyzeStdin", () => {
 			errChunks.join("").includes("stdin payload incomplete"),
 			"partial-data timeout must be diagnosable",
 		);
+	});
+
+	it("drops oversize stdin before it can bloat memory", async () => {
+		const { fake, emit } = fakeStdin();
+		const errChunks: string[] = [];
+		const savedErr = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			errChunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+			return true;
+		}) as typeof process.stderr.write;
+		try {
+			await withStdin(fake, async () => {
+				const p = readAnalyzeStdin(2000);
+				await new Promise((r) => setImmediate(r));
+				// One chunk over the 256KB cap: fail closed, no buffering.
+				emit("data", Buffer.alloc(MAX_ANALYZE_STDIN_BYTES + 1, "x"));
+				assert.equal(await p, "");
+			});
+		} finally {
+			process.stderr.write = savedErr;
+		}
+		assert.ok(errChunks.join("").includes("exceeds"), "oversize stdin must be diagnosable");
 	});
 
 	it("degrades to empty on a stream error", async () => {

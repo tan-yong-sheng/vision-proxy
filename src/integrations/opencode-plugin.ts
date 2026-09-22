@@ -222,12 +222,12 @@ function contextFileDir(): string {
 }
 
 /**
- * True when an existing context directory is safe to reuse: not a symlink,
- * owned by the current user, and mode 0700 (no group/world access).
- * Fail-closed on any stat failure so callers abort rather than write into
- * an untrusted directory.
+ * True when an existing context directory is safe to use: not a symlink,
+ * owned by the current user, and (unless lax modes are being repaired)
+ * mode 0700 with no group/world access. Fail-closed on any stat failure
+ * so callers abort rather than write into an untrusted directory.
  */
-function isSafeContextDir(dir: string): boolean {
+function isSafeContextDir(dir: string, allowLaxMode?: boolean): boolean {
   var st = null;
   try {
     st = lstatSync(dir);
@@ -245,10 +245,15 @@ function isSafeContextDir(dir: string): boolean {
   } catch {
     return false;
   }
-  try {
-    if ((st.mode & 0o077) !== 0) return false;
-  } catch {
-    return false;
+  // Lax group/world bits are tolerated only on the pre-repair pass: an
+  // existing 0755 directory owned by us is repaired to 0700 below, then
+  // rechecked strictly. Ownership and symlink checks always apply.
+  if (!allowLaxMode) {
+    try {
+      if ((st.mode & 0o077) !== 0) return false;
+    } catch {
+      return false;
+    }
   }
   return true;
 }
@@ -272,11 +277,13 @@ function ensurePrivateContextDir(dir: string): boolean {
     // Never trust a fresh-or-reused directory without validating: a
     // pre-created directory may carry permissive modes, wrong ownership,
     // or be a symlink, and recursive mkdir succeeds on it silently.
-    if (!isSafeContextDir(dir)) return false;
+    // Ownership/symlink are checked first so only our own lax directory
+    // reaches the chmod repair; the strict recheck then enforces 0700.
+    if (!isSafeContextDir(dir, true)) return false;
     try {
       chmodSync(dir, 0o700);
     } catch {
-      // Non-fatal: the mode check above already passed.
+      // Non-fatal: the strict recheck below still enforces the mode.
     }
     // Recheck after the repair attempt so a failed chmod cannot leave a
     // lax directory in use.
@@ -356,7 +363,15 @@ async function writeContextFile(context: string): Promise<string | null> {
       writeFileSync(fd, context, { encoding: "utf8" });
     } catch {
       // A failed write may leave a partial file at its final path with no
-      // later prune guaranteed, so remove it before failing open.
+      // later prune guaranteed. Close first: unlinking an open descriptor
+      // fails on platforms such as Windows, and the finally below would
+      // then only close without retrying the removal.
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore: descriptor cleanup is best-effort
+      }
+      fd = -1;
       try {
         rmSync(file, { force: true });
       } catch {
@@ -364,10 +379,13 @@ async function writeContextFile(context: string): Promise<string | null> {
       }
       return null;
     } finally {
-      try {
-        closeSync(fd);
-      } catch {
-        // ignore: descriptor cleanup is best-effort
+      // fd is -1 when the catch above already closed it.
+      if (fd !== -1) {
+        try {
+          closeSync(fd);
+        } catch {
+          // ignore: descriptor cleanup is best-effort
+        }
       }
     }
     try {

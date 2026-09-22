@@ -358,11 +358,12 @@ test("PreToolUse Bash prunes stale context files before writing a new handoff", 
 	rmSync(unquoted, { force: true });
 });
 
-test("PreToolUse Bash refuses a preexisting permissive context directory", () => {
-	// Regression test for the mkdir-bypass finding: recursive mkdir
-	// succeeds on an existing directory, so validation must run on both
-	// the fresh-create and reuse paths. POSIX-only: Windows and root
-	// cannot block removal via directory permissions.
+test("PreToolUse Bash repairs a preexisting lax context directory it owns", () => {
+	// Regression test for the repair-ordering finding: recursive mkdir
+	// succeeds on an existing directory, so ownership/symlink validation
+	// must run on both the fresh-create and reuse paths, with lax modes
+	// repaired to 0700 before the strict recheck. POSIX-only: Windows
+	// and root cannot block removal via directory permissions.
 	if (process.platform === "win32" || (process.getuid?.() ?? 0) === 0) return;
 	const script = writeScript();
 	const transcript = writeTranscript([
@@ -386,7 +387,18 @@ test("PreToolUse Bash refuses a preexisting permissive context directory", () =>
 		{ VP_BIN: fakeVp(), TMPDIR: tmpBase },
 	);
 	assert.equal(run.status, 0);
-	assert.equal(run.stdout.trim(), "", "unsafe preexisting dir must fail open with no rewrite");
+	// Our own preexisting 0755 dir is repaired to 0700 and the handoff
+	// proceeds: ownership/symlink pass, chmod repairs, strict recheck ok.
+	const out = parseOutput(run);
+	assert.ok(out, "repaired dir must allow the rewrite");
+	assert.equal(out.hookSpecificOutput.permissionDecision, "allow");
+	const rewritten = out.hookSpecificOutput.updatedInput.command as string;
+	const filePath = rewritten.slice(rewritten.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	rmSync(unquoted, { force: true });
 	rmSync(dir, { recursive: true, force: true });
 });
 

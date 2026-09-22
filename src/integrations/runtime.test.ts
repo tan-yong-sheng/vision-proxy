@@ -26,6 +26,7 @@ import {
 	isUnflaggedAnalyzeCommand,
 	maxOutputTokens,
 	parsePositiveInt,
+	quoteShellArg,
 	RECENT_MESSAGE_COUNT,
 	readReminder,
 	resolveImagePath,
@@ -348,6 +349,13 @@ test("appendContextFileArg joins the flag spelling every host shares", () => {
 	assert.equal(CONTEXT_FILE_MAX_BYTES, 256 * 1024);
 });
 
+test("quoteShellArg matches the catalog quotePath POSIX branch", () => {
+	assert.equal(quoteShellArg("/tmp/vp-ctx-abc.txt"), "/tmp/vp-ctx-abc.txt");
+	assert.equal(quoteShellArg("/tmp/my ctx.txt"), "'/tmp/my ctx.txt'");
+	assert.equal(quoteShellArg("/tmp/don't.txt"), "'/tmp/don'\\''t.txt'");
+	assert.equal(quoteShellArg(""), "''");
+});
+
 test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 	for (const fn of [
 		parsePositiveInt,
@@ -358,6 +366,7 @@ test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 		buildAnalyzeArgs,
 		isUnflaggedAnalyzeCommand,
 		appendContextFileArg,
+		quoteShellArg,
 		isImagePath,
 		resolveImagePath,
 		extractImagePaths,

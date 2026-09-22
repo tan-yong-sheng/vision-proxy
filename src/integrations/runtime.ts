@@ -282,6 +282,28 @@ function appendContextFileArg(command: string, quotedPath: string): string {
 // info/parts, CC transcript lines, Codex rollout items) before calling.
 
 /**
+ * Quote an argv value for the generated shell artifacts.
+ *
+ * Single source for the POSIX single-quote escaping shared by the hook
+ * script, the Pi extension, and the opencode plugin when they append
+ * `--context-file <path>` to a model-invoked command. Kept in the
+ * canonical runtime so the tested implementation and the shipped source
+ * cannot drift; composed into HOOK_RUNTIME_SOURCE like every other
+ * shared helper.
+ *
+ * @param p The path to quote.
+ * @returns The shell-safe quoted path.
+ *
+ * @tags integrations, runtime
+ */
+function quoteShellArg(p: string): string {
+	if (p === "") return "''";
+	if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(p)) return p;
+	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+	return "'" + p.replace(/'/g, "'\\''") + "'";
+}
+
+/**
  * True when a content item is a plain text block (type "text" with string text).
  *
  * @param c The content item to test.
@@ -513,6 +535,7 @@ export {
 	MIN_MAX_OUTPUT_TOKENS,
 	maxOutputTokens,
 	parsePositiveInt,
+	quoteShellArg,
 	RECENT_MESSAGE_COUNT,
 	REMINDER_MARKER,
 	readReminder,
@@ -587,4 +610,5 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	extractImagePaths.toString(),
 	withImageInstruction.toString(),
 	readReminder.toString(),
+	quoteShellArg.toString(),
 ].join("\n\n");

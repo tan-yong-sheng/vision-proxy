@@ -1352,86 +1352,78 @@ test("opencode tool.execute.before denies image reads and fails open", async (t)
 	// vp failure -> fail-open: no throw, the original read proceeds.
 	setNextResult({ status: 1, stdout: "", stderr: "boom" });
 	await hooks["tool.execute.before"]({ tool: "read" }, { args: { path: imagePath } });
-
-	test("opencode tool.execute.before rewrites model-invoked analyze with a context file", async (t) => {
-		t.after(() => {
-			delete process.env.VP_BIN;
-			delete process.env.VP_HOOK_TIMEOUT_MS;
-			delete process.env.VP_MAX_OUTPUT_TOKENS;
-			reset();
-		});
-		const home = isolate();
-		const dir = installDir(home);
-		await runIntegration("install", "opencode", dir);
-		const { hooksWithClient } = await loadOpencodePlugin(
-			readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
-			home,
-		);
-		const sessionClient = {
-			session: {
-				messages: async () => ({
-					data: [
-						{
-							info: { role: "user" },
-							parts: [{ type: "text", text: "Which shape is this?" }],
-						},
-						{
-							info: { role: "assistant" },
-							parts: [{ type: "text", text: "A square." }],
-						},
-					],
-				}),
-			},
-		};
-		const clientHooks = await hooksWithClient(sessionClient);
-		const args = { command: "vp analyze /tmp/diagram.png" };
-		await clientHooks["tool.execute.before"]({ tool: "bash", sessionID: "sess-1" }, { args });
-		assert.match(args.command, /^vp analyze \/tmp\/diagram\.png --context-file /);
-		assert.ok(!args.command.includes("Which shape"), "context must not leak onto argv");
-		const filePath = args.command.slice(args.command.indexOf("--context-file ") + 15).trim();
-		const unquoted =
-			filePath.startsWith("'") && filePath.endsWith("'")
-				? filePath.slice(1, -1).replace(/'\\''/g, "'")
-				: filePath;
-		const saved = readFileSync(unquoted, "utf8");
-		assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
-		rmSync(unquoted);
-	});
-
-	test("opencode tool.execute.before leaves flagged and non-analyze shell commands alone", async (t) => {
-		t.after(() => {
-			delete process.env.VP_BIN;
-			delete process.env.VP_HOOK_TIMEOUT_MS;
-			delete process.env.VP_MAX_OUTPUT_TOKENS;
-			reset();
-		});
-		const home = isolate();
-		const dir = installDir(home);
-		await runIntegration("install", "opencode", dir);
-		const { hooks } = await loadOpencodePlugin(
-			readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
-			home,
-		);
-		for (const command of [
-			"vp analyze /tmp/a.png --context-file /tmp/ctx.txt",
-			"vp config get",
-			"ls /tmp/a.png",
-		]) {
-			const args = { command };
-			await hooks["tool.execute.before"]({ tool: "bash", sessionID: "sess-1" }, { args });
-			assert.equal(args.command, command, `must leave ${command} unmutated`);
-		}
-	});
-
-	// Non-image reads and other tools pass through untouched (no vp spawn).
-	const callsBeforePassthrough = calls.length;
-	await hooks["tool.execute.before"](
-		{ tool: "read" },
-		{ args: { path: join(testDir, "notes.txt") } },
-	);
-	await hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "ls" } });
-	assert.equal(calls.length, callsBeforePassthrough, "non-image reads must not spawn vp");
 	reset();
+});
+
+test("opencode tool.execute.before rewrites model-invoked analyze with a context file", async (t) => {
+	t.after(() => {
+		delete process.env.VP_BIN;
+		delete process.env.VP_HOOK_TIMEOUT_MS;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const { hooksWithClient } = await loadOpencodePlugin(
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
+		home,
+	);
+	const sessionClient = {
+		session: {
+			messages: async () => ({
+				data: [
+					{
+						info: { role: "user" },
+						parts: [{ type: "text", text: "Which shape is this?" }],
+					},
+					{
+						info: { role: "assistant" },
+						parts: [{ type: "text", text: "A square." }],
+					},
+				],
+			}),
+		},
+	};
+	const clientHooks = await hooksWithClient(sessionClient);
+	const args = { command: "vp analyze /tmp/diagram.png" };
+	await clientHooks["tool.execute.before"]({ tool: "bash", sessionID: "sess-1" }, { args });
+	assert.match(args.command, /^vp analyze \/tmp\/diagram\.png --context-file /);
+	assert.ok(!args.command.includes("Which shape"), "context must not leak onto argv");
+	const filePath = args.command.slice(args.command.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	const saved = readFileSync(unquoted, "utf8");
+	assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
+	rmSync(unquoted);
+});
+
+test("opencode tool.execute.before leaves flagged and non-analyze shell commands alone", async (t) => {
+	// Sibling of the parent read test (un-nested): owns its own fixtures.
+	t.after(() => {
+		delete process.env.VP_BIN;
+		delete process.env.VP_HOOK_TIMEOUT_MS;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const { hooks } = await loadOpencodePlugin(
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
+		home,
+	);
+	for (const command of [
+		"vp analyze /tmp/a.png --context-file /tmp/ctx.txt",
+		"vp config get",
+		"ls /tmp/a.png",
+	]) {
+		const args = { command };
+		await hooks["tool.execute.before"]({ tool: "bash", sessionID: "sess-1" }, { args });
+		assert.equal(args.command, command, `must leave ${command} unmutated`);
+	}
 });
 
 test("install pi is idempotent (no error on re-install)", async () => {

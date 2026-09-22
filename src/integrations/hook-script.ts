@@ -65,9 +65,10 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
 
 // __VP_VERSION__PLACEHOLDER__
 
+import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync, chmodSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 `;
@@ -162,6 +163,53 @@ var TRANSCRIPT_TAIL_LINES = 400;
 // the 400-line window even for large tool-result lines; the read is capped
 // so multi-GB transcripts stay cheap.
 var TRANSCRIPT_TAIL_BYTES = 512 * 1024;
+
+// Where hook-written context files live: a dedicated directory under the
+// OS temp root so the files never sit beside user data. Each file is
+// created mode 0600 and deleted by the CLI after reading.
+var CONTEXT_FILE_PREFIX = "vp-context-";
+
+function contextFileDir(): string {
+  var base = "";
+  try {
+    var tmp = process.env.TMPDIR || process.env.TMP || process.env.TEMP;
+    if (tmp && tmp.trim()) base = tmp.trim();
+  } catch {
+    base = "";
+  }
+  if (!base) base = tmpdir();
+  if (!base) base = "/tmp";
+  return join(base, "vision-proxy-context");
+}
+
+/**
+ * Persist context text to a 0600 tempfile for context-file handoff.
+ * Returns the path, or null on any failure (fail open: the caller runs
+ * the original command unchanged).
+ */
+function writeContextFile(context: string): string | null {
+  if (!context) return null;
+  if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      return null;
+    }
+    var name = CONTEXT_FILE_PREFIX + Date.now().toString(36) + "-" + process.pid + "-" + Math.floor(Math.random() * 0x100000000).toString(36);
+    var file = join(dir, name + ".txt");
+    writeFileSync(file, context, { encoding: "utf8", mode: 0o600 });
+    try {
+      chmodSync(file, 0o600);
+    } catch {
+      // ignore: creation mode already requested 0600
+    }
+    return file;
+  } catch {
+    return null;
+  }
+}
 
 function runAnalyze(images: string[], extras): string | null {
   if (!images || images.length === 0) return null;
@@ -282,7 +330,12 @@ function readTranscriptContext(transcriptPath: string | undefined): string {
   return buildConversationContext(msgs);
 }
 
-function emit(eventName: string, description: string, permissionDecision?: string): void {
+function emit(
+  eventName: string,
+  description: string,
+  permissionDecision?: string,
+  updatedInput?: Record<string, unknown>,
+): void {
   var hookSpecificOutput: Record<string, unknown> = {
     hookEventName: eventName,
     additionalContext: description,
@@ -290,6 +343,9 @@ function emit(eventName: string, description: string, permissionDecision?: strin
   if (permissionDecision) {
     hookSpecificOutput.permissionDecision = permissionDecision;
     hookSpecificOutput.permissionDecisionReason = "Image read intercepted by vision-proxy; see additionalContext for the description.";
+  }
+  if (updatedInput) {
+    hookSpecificOutput.updatedInput = updatedInput;
   }
   process.stdout.write(JSON.stringify({ hookSpecificOutput: hookSpecificOutput }) + "\n");
 }
@@ -308,6 +364,43 @@ function runHook(event: Record<string, any> | null): void {
     return;
   }
   if (eventName === "PreToolUse") {
+    // Shell-tool rewrite path (U3): a model-invoked analyze command gets
+    // its recent conversation context via a tempfile reference. The hook
+    // writes the context the transcript handed it and appends
+    // --context-file to the model's own command, which then executes
+    // (allow + updatedInput). Fail open: any failure emits nothing so the
+    // original command runs unchanged.
+    var toolNameEarly = event.tool_name != null ? event.tool_name : event.toolName;
+    if (toolNameEarly === "Bash") {
+      var toolInputEarly = readToolInput(event);
+      var rawCommand = typeof toolInputEarly.command === "string" ? toolInputEarly.command : "";
+      if (rawCommand && isUnflaggedAnalyzeCommand(rawCommand)) {
+        var shellContext = "";
+        try {
+          shellContext = readTranscriptContext(
+            event.transcript_path != null ? event.transcript_path : event.transcriptPath,
+          );
+        } catch {
+          shellContext = "";
+        }
+        if (shellContext) {
+          var contextPath = writeContextFile(shellContext);
+          if (contextPath) {
+            var rewritten = appendContextFileArg(rawCommand, quoteShellArg(contextPath));
+            process.stdout.write(
+              JSON.stringify({ hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "allow",
+                updatedInput: { command: rewritten },
+              } }) + "\n",
+            );
+            return;
+          }
+        }
+        return;
+      }
+      return;
+    }
     var file = readToolFilePath(event);
     if (!file) return;
     // Ground the description in the recent conversation by reading the host

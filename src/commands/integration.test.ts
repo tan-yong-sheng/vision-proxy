@@ -1284,8 +1284,11 @@ test("install claude-code writes a tsx hook script and metadata-free settings.js
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
-	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
+	assert.deepEqual(
+		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
+		["Read", "Bash"],
+	);
 	const expected = `npx tsx ${script}`;
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
@@ -1317,10 +1320,10 @@ test("install codex writes its hook script under ~/.codex and registers it in ho
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 2);
+	assert.equal(cfg.hooks.PreToolUse.length, 3);
 	assert.deepEqual(
 		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
-		["Read", "view_image"],
+		["Read", "view_image", "Bash"],
 	);
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
@@ -1355,7 +1358,7 @@ test("re-install does not duplicate hooks or scripts", async () => {
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
 	reset();
 });
@@ -1367,7 +1370,7 @@ test("install is idempotent (no duplicate blocks) for claude-code", async () => 
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(process.env.HOME!, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	reset();
 });
 
@@ -1396,7 +1399,7 @@ test("install claude-code replaces legacy vp hook entries", async () => {
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
 	assert.equal(existsSync(claudeHookPath(home)), true);
@@ -1490,7 +1493,7 @@ test("uninstall claude-code removes only the vision-proxy registrations and leav
 	assert.equal(existsSync(claudeHookPath(home)), true);
 	let cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	const r = await runIntegration("uninstall", "claude-code");
 	assert.equal(r.ok, true);
 	cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));

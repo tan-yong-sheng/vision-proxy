@@ -110,8 +110,10 @@ function contextFileDir(): string {
 /**
  * True when an existing context directory is safe to use: not a symlink,
  * owned by the current user, and (unless lax modes are being repaired)
- * mode 0700 with no group/world access. Fail-closed on any stat failure
- * so callers abort rather than write into an untrusted directory.
+ * mode 0700 with no group/world access (POSIX only; on Windows the mode
+ * check is skipped and privacy relies on per-user temp ACL inheritance).
+ * Fail-closed on any stat failure so callers abort rather than write into
+ * an untrusted directory.
  */
 function isSafeContextDir(dir: string, allowLaxMode?: boolean): boolean {
   var st = null;
@@ -131,10 +133,14 @@ function isSafeContextDir(dir: string, allowLaxMode?: boolean): boolean {
   } catch {
     return false;
   }
+  // Windows has no POSIX owner/group/other bits: mkdir ignores mode and
+  // chmod only toggles the read-only flag, so the bit check is skipped
+  // there and privacy relies on the per-user temp directory ACL
+  // inheritance. Ownership and symlink checks always apply where available.
   // Lax group/world bits are tolerated only on the pre-repair pass: an
   // existing 0755 directory owned by us is repaired to 0700 below, then
-  // rechecked strictly. Ownership and symlink checks always apply.
-  if (!allowLaxMode) {
+  // rechecked strictly.
+  if (!allowLaxMode && process.platform !== "win32") {
     try {
       if ((st.mode & 0o077) !== 0) return false;
     } catch {
@@ -164,7 +170,9 @@ function ensurePrivateContextDir(dir: string): boolean {
     // pre-created directory may carry permissive modes, wrong ownership,
     // or be a symlink, and recursive mkdir succeeds on it silently.
     // Ownership/symlink are checked first so only our own lax directory
-    // reaches the chmod repair; the strict recheck then enforces 0700.
+    // reaches the chmod repair; the strict recheck then enforces 0700
+    // (POSIX; on Windows the mode bits are not meaningful and ACL
+    // inheritance is relied upon).
     if (!isSafeContextDir(dir, true)) return false;
     try {
       chmodSync(dir, 0o700);
@@ -172,7 +180,8 @@ function ensurePrivateContextDir(dir: string): boolean {
       // Non-fatal: the strict recheck below still enforces the mode.
     }
     // Recheck after the repair attempt so a failed chmod cannot leave a
-    // lax directory in use.
+    // lax directory in use (POSIX; skipped on Windows where chmod is a
+    // read-only-flag no-op).
     return isSafeContextDir(dir);
   } catch {
     return false;

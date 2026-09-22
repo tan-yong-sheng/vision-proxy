@@ -307,6 +307,54 @@ function pruneStaleContextFiles(dir: string): void {
  * context-file handoff. Returns the path, or null on any failure (fail
  * open: the caller runs the original command unchanged).
  */
+var PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+
+function pendingContextFilePath(): string {
+  return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
+}
+
+function writePendingContextFile(context: string): string | null {
+  if (!context) return null;
+  if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var path = pendingContextFilePath();
+    // Overwrite deterministically — last writer wins, delete-on-read
+    // prevents cross-turn reuse. 0600 here is advisory; the dir gate is
+    // the privacy boundary (Windows relies on ACL inheritance).
+    try {
+      // Remove any prior pending so open("wx") can create fresh.
+      rmSync(path, { force: true });
+    } catch {
+      // ignore
+    }
+    var fd2 = -1;
+    try {
+      fd2 = openSync(path, "wx", 0o600);
+    } catch {
+      return null;
+    }
+    try {
+      writeFileSync(fd2, context, { encoding: "utf8" });
+    } catch {
+      try { closeSync(fd2); } catch { /* ignore */ }
+      fd2 = -1;
+      try { rmSync(path, { force: true }); } catch { /* ignore */ }
+      return null;
+    } finally {
+      if (fd2 !== -1) {
+        try { closeSync(fd2); } catch { /* ignore */ }
+      }
+    }
+    try { chmodSync(path, 0o600); } catch { /* ignore */ }
+    return path;
+  } catch {
+    return null;
+  }
+}
+
 function writeContextFile(context: string): string | null {
   if (!context) return null;
   if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
@@ -534,18 +582,28 @@ function runHook(event: Record<string, any> | null): void {
     // original command runs unchanged.
     var toolNameEarly = event.tool_name != null ? event.tool_name : event.toolName;
     if (toolNameEarly === "Bash") {
-      var toolInputEarly = readToolInput(event);
-      var rawCommand = typeof toolInputEarly.command === "string" ? toolInputEarly.command : "";
-      if (rawCommand && isUnflaggedAnalyzeCommand(rawCommand)) {
-        var shellContext = "";
+      // Phase 1 dual path: keep explicit handoff for vp analyze (detector
+      // + rewrite), and additionally publish the deterministic pending file
+      // so any launcher (vp, node dist/cli.js, npx tsx) auto-discovers.
+      var shellContext = "";
+      try {
+        shellContext = readTranscriptContext(
+          event.transcript_path != null ? event.transcript_path : event.transcriptPath,
+        );
+      } catch {
+        shellContext = "";
+      }
+      if (shellContext) {
+        // Deterministic fallback (covers any launcher).
+        writePendingContextFile(shellContext);
+        var rawCommand = "";
         try {
-          shellContext = readTranscriptContext(
-            event.transcript_path != null ? event.transcript_path : event.transcriptPath,
-          );
+          var toolInputEarly = readToolInput(event);
+          rawCommand = typeof toolInputEarly.command === "string" ? toolInputEarly.command : "";
         } catch {
-          shellContext = "";
+          rawCommand = "";
         }
-        if (shellContext) {
+        if (rawCommand && isUnflaggedAnalyzeCommand(rawCommand)) {
           var contextPath = writeContextFile(shellContext);
           if (contextPath) {
             var rewritten = appendContextFileArg(rawCommand, quoteShellArg(contextPath));
@@ -559,7 +617,6 @@ function runHook(event: Record<string, any> | null): void {
             return;
           }
         }
-        return;
       }
       return;
     }

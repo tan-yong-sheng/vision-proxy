@@ -330,6 +330,9 @@ export function hookContextFileDir(): string {
 /** Basename shape of hook-created handoff files (`vp-context-<rand>.txt`). */
 const CONTEXT_FILE_BASENAME_RE = /^vp-context-[A-Za-z0-9][A-Za-z0-9.-]*\.txt$/;
 
+/** Well-known pending file for deterministic auto-discovery (Phase 1). */
+const PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+
 /**
  * True when `path` is a hook-created `--context-file` handoff file: a
  * direct child of the hook context directory with a hook-created basename.
@@ -393,6 +396,62 @@ export function readAnalyzeContextFile(
 			);
 		} catch {
 			// ignore: stderr may be torn down in tests
+		}
+		return undefined;
+	}
+	const trimmed = content.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+/** True when an agent host marker is present — gates pending auto-read. */
+export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
+	return (
+		!!env.CLAUDECODE ||
+		!!env.CLAUDE_CODE_ENTRY ||
+		!!env.CURSOR_AGENT ||
+		!!env.CODEX_HOME ||
+		!!env.PI_DEBUG ||
+		!!env.OPENCODE ||
+		!!env.VP_AUTO_CONTEXT
+	);
+}
+
+export function pendingContextFilePath(): string {
+	return join(hookContextFileDir(), PENDING_CONTEXT_FILE_NAME);
+}
+
+/**
+ * Read the well-known pending file (deterministic fallback). Only consumed
+ * when an agent marker is present so a manual `vp analyze` outside an agent
+ * never steals agent context. Reuses the same lstat/size/delete discipline.
+ */
+export function readPendingContextFile(
+	env: NodeJS.ProcessEnv = process.env,
+	readFile: (path: string) => string | null = defaultReadContextFile,
+): string | undefined {
+	if (!hasAgentMarker(env)) return undefined;
+	const path = pendingContextFilePath();
+	let content: string | null;
+	try {
+		content = readFile(path);
+	} catch {
+		return undefined;
+	} finally {
+		try {
+			rmSync(path);
+		} catch {
+			// ignore: best-effort cleanup
+		}
+	}
+	if (content === null || content === undefined) return undefined;
+	if (Buffer.byteLength(content, "utf8") > MAX_ANALYZE_STDIN_BYTES) {
+		try {
+			process.stderr.write(
+				"[vision-proxy] analyze context file exceeds " +
+					`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
+			);
+		} catch {
+			// ignore
 		}
 		return undefined;
 	}
@@ -951,13 +1010,18 @@ export async function runCommand(
 	// Consume the analyze handoff up front so parse-error, help, and
 	// missing-image early returns cannot strand the sensitive file on
 	// disk; the analyze branch reuses this value instead of reading again.
-	const contextFile =
+	const explicitContextFile =
 		command === "analyze"
 			? readAnalyzeContextFile(
 					str(flags, "context-file") ?? str(flags, "contextFile"),
 					opts.readContextFile,
 				)
 			: undefined;
+	// Phase 1 deterministic fallback: pending file auto-discovered when an
+	// agent marker is present and no explicit --context-file was consumed.
+	const contextFile =
+		explicitContextFile ??
+		(command === "analyze" ? readPendingContextFile(env, opts.readContextFile) : undefined);
 	if (parsed.error) return err(parsed.error);
 
 	switch (command) {

@@ -69,6 +69,10 @@ test("hook script keeps its stdio adapter: image-cache refs, spawnSync, deny sha
 		HOOK_SCRIPT_SOURCE.includes("permissionDecision"),
 		"must keep the permissionDecision deny field",
 	);
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes("updatedInput"),
+		"must keep the updatedInput rewrite field",
+	);
 	assert.ok(HOOK_SCRIPT_SOURCE.includes("#!/usr/bin/env -S npx tsx"), "must keep the tsx shebang");
 });
 
@@ -79,6 +83,10 @@ test("pi extension keeps its lifecycle adapter: mode gating, abort handling, con
 	assert.ok(PI_EXTENSION_SOURCE.includes("SIGKILL"), "must keep the force-stop executor");
 	assert.ok(PI_EXTENSION_SOURCE.includes('pi.on("input"'), "must keep the input handler");
 	assert.ok(PI_EXTENSION_SOURCE.includes('pi.on("context"'), "must keep the context handler");
+	assert.ok(
+		PI_EXTENSION_SOURCE.includes('pi.on("tool_call"'),
+		"must keep the tool_call rewrite handler",
+	);
 	assert.ok(
 		PI_EXTENSION_SOURCE.includes('pi.on("tool_result"'),
 		"must keep the tool_result handler",
@@ -93,6 +101,10 @@ test("opencode plugin keeps its factory adapter: throw-to-deny, synthetic parts,
 	);
 	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("chat.message"), "must keep the chat.message hook");
 	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("throw new Error("), "must keep throw-to-deny");
+	assert.ok(
+		OPENCODE_PLUGIN_SOURCE.includes("isUnflaggedAnalyzeCommand"),
+		"must keep the analyze-command rewrite detector",
+	);
 	assert.ok(
 		OPENCODE_PLUGIN_SOURCE.includes("synthetic: true"),
 		"must keep synthetic reminder parts",

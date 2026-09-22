@@ -72,9 +72,9 @@ const PI_EXTENSION_HEADER = String.raw`/**
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 // __VP_VERSION__PLACEHOLDER__
 
@@ -82,6 +82,78 @@ import { homedir } from "node:os";
 
 const PI_EXTENSION_ADAPTER = String.raw`
 var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
+
+var CONTEXT_FILE_PREFIX = "vp-context-";
+
+function contextFileDir(): string {
+  var base = "";
+  try {
+    var tmp = process.env.TMPDIR || process.env.TMP || process.env.TEMP;
+    if (tmp && tmp.trim()) base = tmp.trim();
+  } catch {
+    base = "";
+  }
+  if (!base) {
+    try {
+      base = tmpdir();
+    } catch {
+      base = "";
+    }
+  }
+  if (!base) base = "/tmp";
+  return join(base, "vision-proxy-context");
+}
+
+/**
+ * Persist context text to a 0600 tempfile for context-file handoff.
+ * Returns the path, or null on any failure (fail open: the caller leaves
+ * the tool input unmutated so the original command runs unchanged).
+ */
+function writeContextFile(context: string): string | null {
+  if (!context) return null;
+  if (typeof Buffer !== "undefined" && Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      return null;
+    }
+    var name = CONTEXT_FILE_PREFIX + Date.now().toString(36) + "-" + (typeof process !== "undefined" && process.pid ? process.pid : Math.floor(Math.random() * 0x100000000).toString(36)) + "-" + Math.floor(Math.random() * 0x100000000).toString(36);
+    var file = join(dir, name + ".txt");
+    writeFileSync(file, context, { encoding: "utf8", mode: 0o600 });
+    try {
+      chmodSync(file, 0o600);
+    } catch {
+      // ignore: creation mode already requested 0600
+    }
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+/** Session-branch messages formatted for the analyze context value.
+ * Shared by the tool_result read path and the tool_call rewrite path:
+ * maps session entries to the plain shape the formatter expects, strips
+ * our own reminder blocks, and fails open to "" on any shape error. */
+function sessionBranchContext(ctx: unknown): string {
+  try {
+    var branch = ctx && (ctx as any).sessionManager ? (ctx as any).sessionManager.getBranch() : null;
+    var msgs = (Array.isArray(branch) ? branch : [])
+      .filter((e) => e && e.type === "message" && e.message)
+      .map((e) => {
+        var c = e.message.content;
+        if (Array.isArray(c)) {
+          c = c.filter(function (b) {
+            return !(b && b.type === "text" && typeof b.text === "string" && b.text.indexOf(REMINDER_MARKER) === 0);
+          });
+        }
+        return { role: e.message.role, content: c };
+      });
+    return buildConversationContext(msgs);
+  } catch { return ""; }
+}
 
 /** Run vp analyze (async) and return the fenced description, or null on failure.
  * The optional extras (question, context) travel on stdin, never argv, so the
@@ -272,6 +344,26 @@ export default function setup(pi: ExtensionAPI): void {
     return undefined;
   });
 
+  // --- tool_call: append a context-file reference to model-invoked analyze ---
+  // Fires before the tool executes; event.input is mutable, so appending
+  // --context-file here rewrites the model's own bash command in place and
+  // it executes with the reference (no deny, no substitute). Fail open:
+  // every failure returns undefined with input unmutated so the original
+  // command runs unchanged.
+  pi.on("tool_call", async (event, ctx) => {
+    if (getMode() === "off") return undefined;
+    if (!event || (event as any).toolName !== "bash") return undefined;
+    var input = (event as any).input;
+    if (!input || typeof input.command !== "string") return undefined;
+    if (!isUnflaggedAnalyzeCommand(input.command)) return undefined;
+    var toolContext = sessionBranchContext(ctx);
+    if (!toolContext) return undefined;
+    var toolContextPath = writeContextFile(toolContext);
+    if (!toolContextPath) return undefined;
+    input.command = appendContextFileArg(input.command, quoteShellArg(toolContextPath));
+    return undefined;
+  });
+
   // --- tool_result: replace read results on image files ---
   pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "read") return undefined;
@@ -280,31 +372,7 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
-    // Ground the description in the recent conversation: format the last
-    // user/assistant messages of the session branch. getBranch() returns
-    // SessionEntry[]; only the message entries carry the LLM message, and its
-    // { role, content } lives one level down in entry.message. Map those to
-    // the plain { role, content } shape the formatter expects (chronological),
-    // and fail open on any shape the formatter does not recognize. Our own
-    // injected reminder blocks are stripped first (same as the opencode
-    // plugin): the context handler persists them on user turns, and without
-    // this they would echo a read-tool instruction into the vision prompt.
-    var context = "";
-    try {
-      var branch = ctx && (ctx as any).sessionManager ? (ctx as any).sessionManager.getBranch() : null;
-      var msgs = (Array.isArray(branch) ? branch : [])
-        .filter((e) => e && e.type === "message" && e.message)
-        .map((e) => {
-          var c = e.message.content;
-          if (Array.isArray(c)) {
-            c = c.filter(function (b) {
-              return !(b && b.type === "text" && typeof b.text === "string" && b.text.indexOf(REMINDER_MARKER) === 0);
-            });
-          }
-          return { role: e.message.role, content: c };
-        });
-      context = buildConversationContext(msgs);
-    } catch { /* fail open: no context */ }
+    var context = sessionBranchContext(ctx);
     const description = await runAnalyze(
       [filePath],
       context ? { context } : undefined,

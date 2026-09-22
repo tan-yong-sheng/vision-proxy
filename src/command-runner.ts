@@ -14,7 +14,7 @@
 
 import { readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
 import { configGet, configInit, configSet, configValidate } from "./commands/config.ts";
@@ -331,19 +331,22 @@ export function hookContextFileDir(): string {
 const CONTEXT_FILE_BASENAME_RE = /^vp-context-[A-Za-z0-9][A-Za-z0-9.-]*\.txt$/;
 
 /**
- * True when `path` is a hook-created `--context-file` handoff file: inside
- * the hook context directory with a hook-created basename. Anything else
- * is never consumed or deleted, so a crafted `--context-file` pointing at
- * an arbitrary readable file fails open without touching it.
+ * True when `path` is a hook-created `--context-file` handoff file: a
+ * direct child of the hook context directory with a hook-created basename.
+ * Both sides are resolved before comparison so `<dir>/../victim/...`
+ * traversal paths are rejected. Anything else is never consumed or
+ * deleted, so a crafted `--context-file` pointing at an arbitrary readable
+ * file fails open without touching it.
  *
  * @tags cli, runner
  */
 export function isHookContextFile(path: string | undefined): boolean {
 	// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps whitespace-only paths rejected.
 	if (!path || !path.trim()) return false;
-	const dir = hookContextFileDir();
-	if (path !== dir && !path.startsWith(dir + sep)) return false;
-	return CONTEXT_FILE_BASENAME_RE.test(basename(path));
+	const resolvedDir = resolve(hookContextFileDir());
+	const resolvedPath = resolve(path);
+	if (dirname(resolvedPath) !== resolvedDir) return false;
+	return CONTEXT_FILE_BASENAME_RE.test(basename(resolvedPath));
 }
 
 /**
@@ -940,8 +943,18 @@ export async function runCommand(
 		return ok(VERSION);
 	}
 	const parsed = parseFlags(rest);
-	if (parsed.error) return err(parsed.error);
 	const { flags, positionals } = parsed;
+	// Consume the analyze handoff up front so parse-error, help, and
+	// missing-image early returns cannot strand the sensitive file on
+	// disk; the analyze branch reuses this value instead of reading again.
+	const contextFile =
+		command === "analyze"
+			? readAnalyzeContextFile(
+					str(flags, "context-file") ?? str(flags, "contextFile"),
+					opts.readContextFile,
+				)
+			: undefined;
+	if (parsed.error) return err(parsed.error);
 
 	switch (command) {
 		case "analyze": {
@@ -958,15 +971,10 @@ export async function runCommand(
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
 			const stdinText = await drainAnalyzeStdin(opts);
 			const stdinPayload = parseAnalyzeStdin(stdinText);
-			// Consume the handoff file unconditionally: deletion lives in
-			// the read, so skipping it on the stdin/--no-context paths
-			// would strand the sensitive file on disk. Precedence still
-			// applies to the value: stdin first, then the file, then
-			// argv; --no-context drops whatever was read.
-			const contextFile = readAnalyzeContextFile(
-				str(flags, "context-file") ?? str(flags, "contextFile"),
-				opts.readContextFile,
-			);
+			// Deletion lives in the up-front read above, so skipping the
+			// value on the stdin/--no-context paths never strands the
+			// sensitive file. Precedence: stdin first, then the file,
+			// then argv; --no-context drops whatever was read.
 			const analyzeFlags: AnalyzeFlags = {
 				format,
 				provider: str(flags, "provider"),

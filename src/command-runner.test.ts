@@ -167,6 +167,21 @@ describe("command-runner seam", () => {
 		assert.equal(isHookContextFile(undefined), false);
 	});
 
+	it("rejects traversal paths that resolve outside the handoff directory", () => {
+		const dir = hookContextFileDir();
+		const traversal = `${dir}/../victim/vp-context-secret.txt`;
+		let reads = 0;
+		assert.equal(
+			readAnalyzeContextFile(traversal, () => {
+				reads++;
+				return "should never be read";
+			}),
+			undefined,
+		);
+		assert.equal(isHookContextFile(traversal), false);
+		assert.equal(reads, 0, "traversal paths must never reach the reader");
+	});
+
 	it("measures the context-file cap in UTF-8 bytes, not UTF-16 units", () => {
 		// U+1F600 encodes as 4 UTF-8 bytes but 2 UTF-16 units: a payload of
 		// (cap/4)+1 emoji exceeds the byte cap while staying under a
@@ -249,6 +264,50 @@ describe("command-runner seam", () => {
 			readContextFile: () => "User: file history",
 		});
 		assert.equal(r.code, 1);
+	});
+
+	it("consumes the handoff before help and validation early returns", async () => {
+		const dir = hookContextFileDir();
+		// analyze --help must not strand the handoff file on disk.
+		const helpHandoff = `${dir}/vp-context-help.txt`;
+		let helpReads = 0;
+		const helpResult = await runCommand(["analyze", "--help", "--context-file", helpHandoff], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: () => {
+				helpReads++;
+				return "User: file history";
+			},
+		});
+		assert.equal(helpResult.code, 0);
+		assert.equal(helpReads, 1, "help path must still consume the handoff");
+		// Missing-image error must not strand the handoff either.
+		const missingHandoff = `${dir}/vp-context-missing.txt`;
+		let missingReads = 0;
+		const missingResult = await runCommand(["analyze", "--context-file", missingHandoff], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: () => {
+				missingReads++;
+				return "User: file history";
+			},
+		});
+		assert.equal(missingResult.code, 1);
+		assert.equal(missingReads, 1, "validation path must still consume the handoff");
+		// Non-analyze commands must never touch the reader.
+		let otherReads = 0;
+		const versionResult = await runCommand(["version", "--context-file", helpHandoff], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			readContextFile: () => {
+				otherReads++;
+				return "User: file history";
+			},
+		});
+		assert.equal(versionResult.code, 0);
+		assert.equal(otherReads, 0, "non-analyze commands must not consume the handoff");
 	});
 
 	it("renders help with parent fallback then top-level HELP", () => {

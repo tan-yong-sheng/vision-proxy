@@ -72,9 +72,9 @@ async function defaultProbeSharp(): Promise<void> {
 		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
 		"base64",
 	);
-	const meta = await sharp(pixel).metadata();
-	if (!meta.mediaType || !/^image\//.test(meta.mediaType)) {
-		throw new Error("sharp decoded the probe pixel without an image media type");
+	const { info } = await sharp(pixel).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+	if (info.width !== 1 || info.height !== 1 || info.channels !== 4) {
+		throw new Error("sharp raster decode produced unexpected dimensions");
 	}
 }
 

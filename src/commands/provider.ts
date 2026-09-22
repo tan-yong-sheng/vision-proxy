@@ -172,8 +172,8 @@ function keySourceLabel(
 ): string {
 	if (explicitApiKey) return "flag (--api-key)";
 	if (env[spec.apiKeyEnv]) return `env (${spec.apiKeyEnv})`;
-	if (getStoredProviderKey(spec.id)) return "keyring";
 	if (configProvider === spec.id && configApiKey.length > 0) return "config (apiKey)";
+	if (getStoredProviderKey(spec.id, env)) return "keyring";
 	return "unknown";
 }
 
@@ -398,8 +398,8 @@ export async function providerTest(opts: ProviderTestOptions = {}): Promise<Prov
  */
 function hasProviderKey(p: ApiProviderSpec, env: NodeJS.ProcessEnv, config: ConfigApiKey): boolean {
 	if (env[p.apiKeyEnv]) return true;
-	if (getStoredProviderKey(p.id)) return true;
 	if (config.provider === p.id && config.apiKey.length > 0) return true;
+	if (getStoredProviderKey(p.id, env)) return true;
 	return false;
 }
 

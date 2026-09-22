@@ -140,8 +140,11 @@ export function storeProviderKey(
 }
 
 /** Read a stored provider API key, or undefined when none/blocked. */
-export function getStoredProviderKey(providerId: string): string | undefined {
-	const backend = getKeyringBackend();
+export function getStoredProviderKey(
+	providerId: string,
+	env?: NodeJS.ProcessEnv,
+): string | undefined {
+	const backend = getKeyringBackend(env);
 	if (!backend) return undefined;
 	try {
 		const v = backend.get(providerKeyAccount(providerId));

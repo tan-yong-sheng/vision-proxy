@@ -15,6 +15,7 @@ import {
 	MAX_ANALYZE_STDIN_BYTES,
 	parseAnalyzeStdin,
 	parseFlags,
+	readAnalyzeContextFile,
 	readAnalyzeStdin,
 	renderHelp,
 	runCommand,
@@ -136,6 +137,83 @@ describe("command-runner seam", () => {
 
 	it("advertises --context in analyze help", () => {
 		assert.match(renderHelp(["analyze"]), /--context <text>/);
+	});
+
+	it("parses --context-file as a value flag without swallowing positionals", () => {
+		const parsed = parseFlags(["--context-file", "/tmp/vp-ctx.txt", "image.png"]);
+		assert.deepEqual(parsed.positionals, ["image.png"]);
+		assert.equal(parsed.flags["context-file"], "/tmp/vp-ctx.txt");
+		assert.ok(VALUE_FLAGS.has("context-file"));
+		assert.equal(parseFlags(["--context-file"]).error, "missing value for --context-file");
+	});
+
+	it("advertises --context-file in analyze help", () => {
+		assert.match(renderHelp(["analyze"]), /--context-file <path>/);
+	});
+
+	it("reads --context-file content as analyze context", async () => {
+		const r = await runCommand(["analyze", "--context-file", "/tmp/vp-ctx.txt", "img.png"], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: (p) => (p === "/tmp/vp-ctx.txt" ? "User: file history" : null),
+		});
+		// No API key: fails at provider resolution, proving the file read
+		// threaded through without throwing.
+		assert.equal(r.code, 1);
+		assert.equal(
+			readAnalyzeContextFile("/tmp/vp-ctx.txt", () => "User: file history"),
+			"User: file history",
+		);
+	});
+
+	it("prefers stdin over --context-file, and --context-file over argv --context", () => {
+		const file = (p: string) => (p === "/tmp/vp-ctx.txt" ? "file-ctx" : null);
+		assert.equal(readAnalyzeContextFile("/tmp/vp-ctx.txt", file), "file-ctx");
+		assert.equal(readAnalyzeContextFile(undefined, file), undefined);
+		assert.equal(readAnalyzeContextFile("", file), undefined);
+		assert.equal(
+			readAnalyzeContextFile("/tmp/vp-ctx.txt", () => null),
+			undefined,
+		);
+		assert.equal(
+			readAnalyzeContextFile("/tmp/vp-ctx.txt", () => "   "),
+			undefined,
+		);
+	});
+
+	it("drops oversize --context-file content with a stderr diagnostic", () => {
+		const errChunks: string[] = [];
+		const savedErr = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			errChunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+			return true;
+		}) as typeof process.stderr.write;
+		try {
+			assert.equal(
+				readAnalyzeContextFile("/tmp/vp-ctx.txt", () => "x".repeat(MAX_ANALYZE_STDIN_BYTES + 1)),
+				undefined,
+			);
+		} finally {
+			process.stderr.write = savedErr;
+		}
+		assert.ok(errChunks.join("").includes("exceeds"), "oversize file must be diagnosable");
+	});
+
+	it("drops --context-file content under --no-context", async () => {
+		const parsed = parseFlags(["--no-context", "--context-file", "/tmp/vp-ctx.txt", "img.png"]);
+		assert.equal(parsed.flags["no-context"], true);
+		assert.equal(parsed.flags["context-file"], "/tmp/vp-ctx.txt");
+		const r = await runCommand(
+			["analyze", "--no-context", "--context-file", "/tmp/vp-ctx.txt", "img.png"],
+			{
+				env: {} as NodeJS.ProcessEnv,
+				cwd: "/",
+				stdinText: "",
+				readContextFile: () => "User: file history",
+			},
+		);
+		assert.equal(r.code, 1);
 	});
 
 	it("renders help with parent fallback then top-level HELP", () => {

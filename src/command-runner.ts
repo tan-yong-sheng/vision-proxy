@@ -426,6 +426,9 @@ export function pendingContextFilePath(): string {
  * Read the well-known pending file (deterministic fallback). Only consumed
  * when an agent marker is present so a manual `vp analyze` outside an agent
  * never steals agent context. Reuses the same lstat/size/delete discipline.
+ * `__pending__.txt` is a single last-writer-wins slot (60s TTL,
+ * delete-on-read): parallel bare-launcher agents may cross-read or lose
+ * context, so prefer the `vp` binary path for parallel work.
  */
 export function readPendingContextFile(
 	env: NodeJS.ProcessEnv = process.env,
@@ -650,7 +653,10 @@ Options:
 
 Notes:
   The description fence is ON by default. Image-derived text is
-  attacker-controlled, so only use --no-fence for local debugging.`,
+  attacker-controlled, so only use --no-fence for local debugging.
+  Without --context-file, analyze auto-discovers a single last-writer-wins
+  pending file (60s TTL, delete-on-read) when an agent marker is present;
+  prefer vp for parallel work.`,
 
 	config: `vp config <subcommand> [options]
 

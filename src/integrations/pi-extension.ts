@@ -72,9 +72,10 @@ const PI_EXTENSION_HEADER = String.raw`/**
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 // __VP_VERSION__PLACEHOLDER__
 
@@ -82,6 +83,266 @@ import { homedir } from "node:os";
 
 const PI_EXTENSION_ADAPTER = String.raw`
 var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
+
+var CONTEXT_FILE_PREFIX = "vp-context-";
+// Stale-file TTL: handoffs older than this are pruned before each write.
+var CONTEXT_FILE_TTL_MS = 10 * 60 * 1000;
+
+function contextFileDir(): string {
+  var base = "";
+  try {
+    var tmp = process.env.TMPDIR || process.env.TMP || process.env.TEMP;
+    if (tmp && tmp.trim()) base = tmp.trim();
+  } catch {
+    base = "";
+  }
+  if (!base) {
+    try {
+      base = tmpdir();
+    } catch {
+      base = "";
+    }
+  }
+  if (!base) base = "/tmp";
+  return join(base, "vision-proxy-context");
+}
+
+/**
+ * True when an existing context directory is safe to use: not a symlink,
+ * owned by the current user, and (unless lax modes are being repaired)
+ * mode 0700 with no group/world access (POSIX only; on Windows the mode
+ * check is skipped and privacy relies on per-user temp ACL inheritance).
+ * Fail-closed on any stat failure so callers abort rather than write into
+ * an untrusted directory.
+ */
+function isSafeContextDir(dir: string, allowLaxMode?: boolean): boolean {
+  var st = null;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    return false;
+  }
+  if (!st) return false;
+  try {
+    if (st.isSymbolicLink()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) return false;
+  } catch {
+    return false;
+  }
+  // Windows has no POSIX owner/group/other bits: mkdir ignores mode and
+  // chmod only toggles the read-only flag, so the bit check is skipped
+  // there and privacy relies on the per-user temp directory ACL
+  // inheritance. Ownership and symlink checks always apply where available.
+  // Lax group/world bits are tolerated only on the pre-repair pass: an
+  // existing 0755 directory owned by us is repaired to 0700 below, then
+  // rechecked strictly.
+  if (!allowLaxMode && process.platform !== "win32") {
+    try {
+      if ((st.mode & 0o077) !== 0) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Ensure the context directory exists as a private directory: create with
+ * mode 0700 when missing, then always validate (fresh or reused) before
+ * use. A recursive mkdir that succeeds on an existing directory must not
+ * bypass the ownership/permission checks, so validation runs on both
+ * paths; lax modes are repaired with chmod 0700 and rechecked. Returns
+ * false on any failure (fail open: the caller leaves the tool input
+ * unmutated).
+ */
+function ensurePrivateContextDir(dir: string): boolean {
+  try {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      // Exists already or raced creation: fall through to validation.
+    }
+    // Never trust a fresh-or-reused directory without validating: a
+    // pre-created directory may carry permissive modes, wrong ownership,
+    // or be a symlink, and recursive mkdir succeeds on it silently.
+    // Ownership/symlink are checked first so only our own lax directory
+    // reaches the chmod repair; the strict recheck then enforces 0700
+    // (POSIX; on Windows the mode bits are not meaningful and ACL
+    // inheritance is relied upon).
+    if (!isSafeContextDir(dir, true)) return false;
+    try {
+      chmodSync(dir, 0o700);
+    } catch {
+      // Non-fatal: the strict recheck below still enforces the mode.
+    }
+    // Recheck after the repair attempt so a failed chmod cannot leave a
+    // lax directory in use (POSIX; skipped on Windows where chmod is a
+    // read-only-flag no-op).
+    return isSafeContextDir(dir);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort prune of stale vp-context-*.txt files older than the TTL.
+ * Fail-open: every failure is swallowed so pruning never blocks the
+ * handoff. Runs before each write so rejected or interrupted handoffs
+ * cannot accumulate forever.
+ */
+function pruneStaleContextFiles(dir: string): void {
+  var entries = null;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  if (!entries) return;
+  var now = Date.now();
+  for (var i = 0; i < entries.length; i++) {
+    var name = entries[i] || "";
+    if (name.indexOf(CONTEXT_FILE_PREFIX) !== 0) continue;
+    if (name.slice(-4) !== ".txt") continue;
+    var full = join(dir, name);
+    var age = -1;
+    try {
+      age = now - statSync(full).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (age < 0 || age <= CONTEXT_FILE_TTL_MS) continue;
+    try {
+      rmSync(full, { force: true });
+    } catch {
+      // ignore: best-effort cleanup
+    }
+  }
+}
+
+var PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+
+function pendingContextFilePath(): string {
+  return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
+}
+
+function writePendingContextFile(context: string): string | null {
+  if (!context) return null;
+  if (typeof Buffer !== "undefined" && Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var path = pendingContextFilePath();
+    try { rmSync(path, { force: true }); } catch { /* ignore */ }
+    var fd2 = -1;
+    try { fd2 = openSync(path, "wx", 0o600); } catch { return null; }
+    try { writeFileSync(fd2, context, { encoding: "utf8" }); } catch {
+      try { closeSync(fd2); } catch { /* ignore */ }
+      fd2 = -1;
+      try { rmSync(path, { force: true }); } catch { /* ignore */ }
+      return null;
+    } finally { if (fd2 !== -1) { try { closeSync(fd2); } catch { /* ignore */ } } }
+    try { chmodSync(path, 0o600); } catch { /* ignore */ }
+    return path;
+  } catch { return null; }
+}
+
+/**
+ * Persist context text to a 0600 tempfile for context-file handoff.
+ * Returns the path, or null on any failure (fail open: the caller leaves
+ * the tool input unmutated so the original command runs unchanged).
+ */
+function writeContextFile(context: string): string | null {
+  if (!context) return null;
+  if (typeof Buffer !== "undefined" && Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var fd = -1;
+    var file = "";
+    var attempts = 0;
+    while (fd === -1 && attempts < 5) {
+      attempts++;
+      // 128-bit random entropy: unlinkable without directory listing.
+      // Pi may run without process.pid, so no pid component is assumed.
+      var name = CONTEXT_FILE_PREFIX + randomBytes(16).toString("hex") + ".txt";
+      file = join(dir, name);
+      try {
+        // O_EXCL: fail when the path already exists instead of following
+        // a pre-created symlink or overwriting another process's file.
+        fd = openSync(file, "wx", 0o600);
+      } catch {
+        fd = -1;
+        file = "";
+      }
+    }
+    if (fd === -1 || !file) return null;
+    try {
+      writeFileSync(fd, context, { encoding: "utf8" });
+    } catch {
+      // A failed write may leave a partial file at its final path with no
+      // later prune guaranteed. Close first: unlinking an open descriptor
+      // fails on platforms such as Windows, and the finally below would
+      // then only close without retrying the removal.
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore: descriptor cleanup is best-effort
+      }
+      fd = -1;
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        // ignore: best-effort failure cleanup
+      }
+      return null;
+    } finally {
+      // fd is -1 when the catch above already closed it.
+      if (fd !== -1) {
+        try {
+          closeSync(fd);
+        } catch {
+          // ignore: descriptor cleanup is best-effort
+        }
+      }
+    }
+    try {
+      chmodSync(file, 0o600);
+    } catch {
+      // ignore: creation mode already requested 0600
+    }
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+/** Session-branch messages formatted for the analyze context value.
+ * Shared by the tool_result read path and the tool_call rewrite path:
+ * maps session entries to the plain shape the formatter expects, strips
+ * our own reminder blocks, and fails open to "" on any shape error. */
+function sessionBranchContext(ctx: unknown): string {
+  try {
+    var branch = ctx && (ctx as any).sessionManager ? (ctx as any).sessionManager.getBranch() : null;
+    var msgs = (Array.isArray(branch) ? branch : [])
+      .filter((e) => e && e.type === "message" && e.message)
+      .map((e) => {
+        var c = e.message.content;
+        if (Array.isArray(c)) {
+          c = c.filter(function (b) {
+            return !(b && b.type === "text" && typeof b.text === "string" && b.text.indexOf(REMINDER_MARKER) === 0);
+          });
+        }
+        return { role: e.message.role, content: c };
+      });
+    return buildConversationContext(msgs);
+  } catch { return ""; }
+}
 
 /** Run vp analyze (async) and return the fenced description, or null on failure.
  * The optional extras (question, context) travel on stdin, never argv, so the
@@ -272,6 +533,29 @@ export default function setup(pi: ExtensionAPI): void {
     return undefined;
   });
 
+  // --- tool_call: append a context-file reference to model-invoked analyze ---
+  // Fires before the tool executes; event.input is mutable, so appending
+  // --context-file here rewrites the model's own bash command in place and
+  // it executes with the reference (no deny, no substitute). Fail open:
+  // every failure returns undefined with input unmutated so the original
+  // command runs unchanged.
+  pi.on("tool_call", async (event, ctx) => {
+    if (getMode() === "off") return undefined;
+    if (!event || (event as any).toolName !== "bash") return undefined;
+    var input = (event as any).input;
+    if (!input || typeof input.command !== "string") return undefined;
+    var toolContext = sessionBranchContext(ctx);
+    if (!toolContext) return undefined;
+    // Phase 1 dual path: deterministic pending for any launcher, plus
+    // explicit handoff for vp analyze (keeps 16-parallel isolation).
+    writePendingContextFile(toolContext);
+    if (!isUnflaggedAnalyzeCommand(input.command)) return undefined;
+    var toolContextPath = writeContextFile(toolContext);
+    if (!toolContextPath) return undefined;
+    input.command = appendContextFileArg(input.command, quoteShellArg(toolContextPath));
+    return undefined;
+  });
+
   // --- tool_result: replace read results on image files ---
   pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "read") return undefined;
@@ -280,31 +564,7 @@ export default function setup(pi: ExtensionAPI): void {
     if (getMode() === "off") return undefined;
     const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
-    // Ground the description in the recent conversation: format the last
-    // user/assistant messages of the session branch. getBranch() returns
-    // SessionEntry[]; only the message entries carry the LLM message, and its
-    // { role, content } lives one level down in entry.message. Map those to
-    // the plain { role, content } shape the formatter expects (chronological),
-    // and fail open on any shape the formatter does not recognize. Our own
-    // injected reminder blocks are stripped first (same as the opencode
-    // plugin): the context handler persists them on user turns, and without
-    // this they would echo a read-tool instruction into the vision prompt.
-    var context = "";
-    try {
-      var branch = ctx && (ctx as any).sessionManager ? (ctx as any).sessionManager.getBranch() : null;
-      var msgs = (Array.isArray(branch) ? branch : [])
-        .filter((e) => e && e.type === "message" && e.message)
-        .map((e) => {
-          var c = e.message.content;
-          if (Array.isArray(c)) {
-            c = c.filter(function (b) {
-              return !(b && b.type === "text" && typeof b.text === "string" && b.text.indexOf(REMINDER_MARKER) === 0);
-            });
-          }
-          return { role: e.message.role, content: c };
-        });
-      context = buildConversationContext(msgs);
-    } catch { /* fail open: no context */ }
+    var context = sessionBranchContext(ctx);
     const description = await runAnalyze(
       [filePath],
       context ? { context } : undefined,

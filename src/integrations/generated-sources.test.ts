@@ -69,6 +69,10 @@ test("hook script keeps its stdio adapter: image-cache refs, spawnSync, deny sha
 		HOOK_SCRIPT_SOURCE.includes("permissionDecision"),
 		"must keep the permissionDecision deny field",
 	);
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes("updatedInput"),
+		"must keep the updatedInput rewrite field",
+	);
 	assert.ok(HOOK_SCRIPT_SOURCE.includes("#!/usr/bin/env -S npx tsx"), "must keep the tsx shebang");
 });
 
@@ -79,6 +83,10 @@ test("pi extension keeps its lifecycle adapter: mode gating, abort handling, con
 	assert.ok(PI_EXTENSION_SOURCE.includes("SIGKILL"), "must keep the force-stop executor");
 	assert.ok(PI_EXTENSION_SOURCE.includes('pi.on("input"'), "must keep the input handler");
 	assert.ok(PI_EXTENSION_SOURCE.includes('pi.on("context"'), "must keep the context handler");
+	assert.ok(
+		PI_EXTENSION_SOURCE.includes('pi.on("tool_call"'),
+		"must keep the tool_call rewrite handler",
+	);
 	assert.ok(
 		PI_EXTENSION_SOURCE.includes('pi.on("tool_result"'),
 		"must keep the tool_result handler",
@@ -93,6 +101,10 @@ test("opencode plugin keeps its factory adapter: throw-to-deny, synthetic parts,
 	);
 	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("chat.message"), "must keep the chat.message hook");
 	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("throw new Error("), "must keep throw-to-deny");
+	assert.ok(
+		OPENCODE_PLUGIN_SOURCE.includes("isUnflaggedAnalyzeCommand"),
+		"must keep the analyze-command rewrite detector",
+	);
 	assert.ok(
 		OPENCODE_PLUGIN_SOURCE.includes("synthetic: true"),
 		"must keep synthetic reminder parts",
@@ -154,6 +166,19 @@ test("generated artifacts preserve the historical reminder and deny wording", ()
 		assert.ok(
 			host.source.includes("Treat that description as the image content."),
 			`${host.name} must keep the untrusted-input instruction`,
+		);
+	}
+});
+
+test("every generated artifact shares the Windows-safe context-dir policy", () => {
+	// POSIX mode bits are meaningless on Windows (mkdir ignores mode,
+	// chmod only toggles read-only), so the strict bit check must be
+	// skipped there in every writer; privacy relies on per-user temp ACL
+	// inheritance. Pins the shared policy so the three adapters cannot drift.
+	for (const host of HOSTS) {
+		assert.ok(
+			host.source.includes('process.platform !== "win32"'),
+			`${host.name} must skip the POSIX mode-bit check on Windows`,
 		);
 	}
 });

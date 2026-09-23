@@ -65,9 +65,11 @@ const HOOK_SCRIPT_HEADER = String.raw`#!/usr/bin/env -S npx tsx
 
 // __VP_VERSION__PLACEHOLDER__
 
+import { Buffer } from "node:buffer";
+import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 `;
@@ -162,6 +164,262 @@ var TRANSCRIPT_TAIL_LINES = 400;
 // the 400-line window even for large tool-result lines; the read is capped
 // so multi-GB transcripts stay cheap.
 var TRANSCRIPT_TAIL_BYTES = 512 * 1024;
+
+// Where hook-written context files live: a dedicated directory under the
+// OS temp root so the files never sit beside user data. Each file is
+// created exclusively (O_EXCL, mode 0600) with 128-bit random entropy and
+// deleted by the CLI after reading; stale files are pruned before each
+// write (10-minute TTL) so rejected handoffs cannot accumulate.
+var CONTEXT_FILE_PREFIX = "vp-context-";
+// Stale-file TTL: handoffs older than this are pruned before each write.
+var CONTEXT_FILE_TTL_MS = 10 * 60 * 1000;
+
+function contextFileDir(): string {
+  var base = "";
+  try {
+    var tmp = process.env.TMPDIR || process.env.TMP || process.env.TEMP;
+    if (tmp && tmp.trim()) base = tmp.trim();
+  } catch {
+    base = "";
+  }
+  if (!base) base = tmpdir();
+  if (!base) base = "/tmp";
+  return join(base, "vision-proxy-context");
+}
+
+/**
+ * True when an existing context directory is safe to use: not a symlink,
+ * owned by the current user, and (unless lax modes are being repaired)
+ * mode 0700 with no group/world access (POSIX only; on Windows the mode
+ * check is skipped and privacy relies on per-user temp ACL inheritance).
+ * Fail-closed on any stat failure so callers abort rather than write into
+ * an untrusted directory.
+ */
+function isSafeContextDir(dir: string, allowLaxMode?: boolean): boolean {
+  var st = null;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    return false;
+  }
+  if (!st) return false;
+  try {
+    if (st.isSymbolicLink()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) return false;
+  } catch {
+    return false;
+  }
+  // Windows has no POSIX owner/group/other bits: mkdir ignores mode and
+  // chmod only toggles the read-only flag, so the bit check is skipped
+  // there and privacy relies on the per-user temp directory ACL
+  // inheritance. Ownership and symlink checks always apply where available.
+  // Lax group/world bits are tolerated only on the pre-repair pass: an
+  // existing 0755 directory owned by us is repaired to 0700 below, then
+  // rechecked strictly.
+  if (!allowLaxMode && process.platform !== "win32") {
+    try {
+      if ((st.mode & 0o077) !== 0) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Ensure the context directory exists as a private directory: create with
+ * mode 0700 when missing, then always validate (fresh or reused) before
+ * use. A recursive mkdir that succeeds on an existing directory must not
+ * bypass the ownership/permission checks, so validation runs on both
+ * paths; lax modes are repaired with chmod 0700 and rechecked. Returns
+ * false on any failure (fail open: the caller skips the handoff).
+ */
+function ensurePrivateContextDir(dir: string): boolean {
+  try {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      // Exists already or raced creation: fall through to validation.
+    }
+    // Never trust a fresh-or-reused directory without validating: a
+    // pre-created directory may carry permissive modes, wrong ownership,
+    // or be a symlink, and recursive mkdir succeeds on it silently.
+    // Ownership/symlink are checked first so only our own lax directory
+    // reaches the chmod repair; the strict recheck then enforces 0700
+    // (POSIX; on Windows the mode bits are not meaningful and ACL
+    // inheritance is relied upon).
+    if (!isSafeContextDir(dir, true)) return false;
+    try {
+      chmodSync(dir, 0o700);
+    } catch {
+      // Non-fatal: the strict recheck below still enforces the mode.
+    }
+    // Recheck after the repair attempt so a failed chmod cannot leave a
+    // lax directory in use (POSIX; skipped on Windows where chmod is a
+    // read-only-flag no-op).
+    return isSafeContextDir(dir);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort prune of stale vp-context-*.txt files older than the TTL.
+ * Fail-open: every failure is swallowed so pruning never blocks the
+ * handoff. Runs before each write so rejected or interrupted handoffs
+ * cannot accumulate forever.
+ */
+function pruneStaleContextFiles(dir: string): void {
+  var entries = null;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  if (!entries) return;
+  var now = Date.now();
+  for (var i = 0; i < entries.length; i++) {
+    var name = entries[i] || "";
+    if (name.indexOf(CONTEXT_FILE_PREFIX) !== 0) continue;
+    if (name.slice(-4) !== ".txt") continue;
+    var full = join(dir, name);
+    var age = -1;
+    try {
+      age = now - statSync(full).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (age < 0 || age <= CONTEXT_FILE_TTL_MS) continue;
+    try {
+      rmSync(full, { force: true });
+    } catch {
+      // ignore: best-effort cleanup
+    }
+  }
+}
+
+/**
+ * Persist context text to an exclusively-created 0600 tempfile for
+ * context-file handoff. Returns the path, or null on any failure (fail
+ * open: the caller runs the original command unchanged).
+ */
+var PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+
+function pendingContextFilePath(): string {
+  return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
+}
+
+function writePendingContextFile(context: string): string | null {
+  if (!context) return null;
+  if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var path = pendingContextFilePath();
+    // Overwrite deterministically — last writer wins, delete-on-read
+    // prevents cross-turn reuse. 0600 here is advisory; the dir gate is
+    // the privacy boundary (Windows relies on ACL inheritance).
+    try {
+      // Remove any prior pending so open("wx") can create fresh.
+      rmSync(path, { force: true });
+    } catch {
+      // ignore
+    }
+    var fd2 = -1;
+    try {
+      fd2 = openSync(path, "wx", 0o600);
+    } catch {
+      return null;
+    }
+    try {
+      writeFileSync(fd2, context, { encoding: "utf8" });
+    } catch {
+      try { closeSync(fd2); } catch { /* ignore */ }
+      fd2 = -1;
+      try { rmSync(path, { force: true }); } catch { /* ignore */ }
+      return null;
+    } finally {
+      if (fd2 !== -1) {
+        try { closeSync(fd2); } catch { /* ignore */ }
+      }
+    }
+    try { chmodSync(path, 0o600); } catch { /* ignore */ }
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+function writeContextFile(context: string): string | null {
+  if (!context) return null;
+  if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+  var dir = contextFileDir();
+  try {
+    if (!ensurePrivateContextDir(dir)) return null;
+    pruneStaleContextFiles(dir);
+    var fd = -1;
+    var file = "";
+    var attempts = 0;
+    while (fd === -1 && attempts < 5) {
+      attempts++;
+      // 128-bit random entropy: unlinkable without directory listing,
+      // unlike the prior timestamp+pid sequence.
+      var name = CONTEXT_FILE_PREFIX + randomBytes(16).toString("hex") + ".txt";
+      file = join(dir, name);
+      try {
+        // O_EXCL: fail when the path already exists instead of following
+        // a pre-created symlink or overwriting another process's file.
+        fd = openSync(file, "wx", 0o600);
+      } catch {
+        fd = -1;
+        file = "";
+      }
+    }
+    if (fd === -1 || !file) return null;
+    try {
+      writeFileSync(fd, context, { encoding: "utf8" });
+    } catch {
+      // A failed write may leave a partial file at its final path with no
+      // later prune guaranteed. Close first: unlinking an open descriptor
+      // fails on platforms such as Windows, and the finally below would
+      // then only close without retrying the removal.
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore: descriptor cleanup is best-effort
+      }
+      fd = -1;
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        // ignore: best-effort failure cleanup
+      }
+      return null;
+    } finally {
+      // fd is -1 when the catch above already closed it.
+      if (fd !== -1) {
+        try {
+          closeSync(fd);
+        } catch {
+          // ignore: descriptor cleanup is best-effort
+        }
+      }
+    }
+    try {
+      chmodSync(file, 0o600);
+    } catch {
+      // ignore: creation mode already requested 0600
+    }
+    return file;
+  } catch {
+    return null;
+  }
+}
 
 function runAnalyze(images: string[], extras): string | null {
   if (!images || images.length === 0) return null;
@@ -282,7 +540,12 @@ function readTranscriptContext(transcriptPath: string | undefined): string {
   return buildConversationContext(msgs);
 }
 
-function emit(eventName: string, description: string, permissionDecision?: string): void {
+function emit(
+  eventName: string,
+  description: string,
+  permissionDecision?: string,
+  updatedInput?: Record<string, unknown>,
+): void {
   var hookSpecificOutput: Record<string, unknown> = {
     hookEventName: eventName,
     additionalContext: description,
@@ -290,6 +553,9 @@ function emit(eventName: string, description: string, permissionDecision?: strin
   if (permissionDecision) {
     hookSpecificOutput.permissionDecision = permissionDecision;
     hookSpecificOutput.permissionDecisionReason = "Image read intercepted by vision-proxy; see additionalContext for the description.";
+  }
+  if (updatedInput) {
+    hookSpecificOutput.updatedInput = updatedInput;
   }
   process.stdout.write(JSON.stringify({ hookSpecificOutput: hookSpecificOutput }) + "\n");
 }
@@ -308,6 +574,52 @@ function runHook(event: Record<string, any> | null): void {
     return;
   }
   if (eventName === "PreToolUse") {
+    // Shell-tool rewrite path (U3): a model-invoked analyze command gets
+    // its recent conversation context via a tempfile reference. The hook
+    // writes the context the transcript handed it and appends
+    // --context-file to the model's own command, which then executes
+    // (allow + updatedInput). Fail open: any failure emits nothing so the
+    // original command runs unchanged.
+    var toolNameEarly = event.tool_name != null ? event.tool_name : event.toolName;
+    if (toolNameEarly === "Bash") {
+      // Phase 1 dual path: keep explicit handoff for vp analyze (detector
+      // + rewrite), and additionally publish the deterministic pending file
+      // so any launcher (vp, node dist/cli.js, npx tsx) auto-discovers.
+      var shellContext = "";
+      try {
+        shellContext = readTranscriptContext(
+          event.transcript_path != null ? event.transcript_path : event.transcriptPath,
+        );
+      } catch {
+        shellContext = "";
+      }
+      if (shellContext) {
+        // Deterministic fallback (covers any launcher).
+        writePendingContextFile(shellContext);
+        var rawCommand = "";
+        try {
+          var toolInputEarly = readToolInput(event);
+          rawCommand = typeof toolInputEarly.command === "string" ? toolInputEarly.command : "";
+        } catch {
+          rawCommand = "";
+        }
+        if (rawCommand && isUnflaggedAnalyzeCommand(rawCommand)) {
+          var contextPath = writeContextFile(shellContext);
+          if (contextPath) {
+            var rewritten = appendContextFileArg(rawCommand, quoteShellArg(contextPath));
+            process.stdout.write(
+              JSON.stringify({ hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "allow",
+                updatedInput: { command: rewritten },
+              } }) + "\n",
+            );
+            return;
+          }
+        }
+      }
+      return;
+    }
     var file = readToolFilePath(event);
     if (!file) return;
     // Ground the description in the recent conversation by reading the host

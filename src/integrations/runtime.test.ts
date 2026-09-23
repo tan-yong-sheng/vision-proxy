@@ -14,15 +14,19 @@ import { test } from "node:test";
 import {
 	ANALYZE_STDIN_MARKER,
 	ASSISTANT_TRUNCATE_CHARS,
+	appendContextFileArg,
 	buildAnalyzeArgs,
 	buildConversationContext,
+	CONTEXT_FILE_MAX_BYTES,
 	CONTEXT_MAX_CHARS,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
 	hookTimeoutMs,
 	isImagePath,
+	isUnflaggedAnalyzeCommand,
 	maxOutputTokens,
 	parsePositiveInt,
+	quoteShellArg,
 	RECENT_MESSAGE_COUNT,
 	readReminder,
 	resolveImagePath,
@@ -314,6 +318,44 @@ test("readReminder keeps each host's historical submit-time phrasing", () => {
 	);
 });
 
+test("isUnflaggedAnalyzeCommand detects model-invoked analyze without the flag", () => {
+	assert.equal(isUnflaggedAnalyzeCommand("vp analyze /tmp/a.png"), true);
+	assert.equal(isUnflaggedAnalyzeCommand("vp analyze --json /tmp/a.png"), true);
+	assert.equal(isUnflaggedAnalyzeCommand("/opt/bin/vp analyze /tmp/a.png"), true);
+	assert.equal(isUnflaggedAnalyzeCommand("npx vp analyze /tmp/a.png"), true);
+	assert.equal(
+		isUnflaggedAnalyzeCommand("vp analyze /tmp/a.png --context-file /tmp/ctx.txt"),
+		false,
+	);
+	assert.equal(
+		isUnflaggedAnalyzeCommand("vp analyze /tmp/a.png --context-file=/tmp/ctx.txt"),
+		false,
+	);
+	assert.equal(isUnflaggedAnalyzeCommand("vp analyze --question what /tmp/a.png"), true);
+	assert.equal(isUnflaggedAnalyzeCommand("vp config get"), false);
+	assert.equal(isUnflaggedAnalyzeCommand("ls /tmp/a.png"), false);
+	assert.equal(isUnflaggedAnalyzeCommand("vp analyze"), true);
+	assert.equal(isUnflaggedAnalyzeCommand(""), false);
+	assert.equal(isUnflaggedAnalyzeCommand(undefined), false);
+	assert.equal(isUnflaggedAnalyzeCommand(42), false);
+	assert.equal(isUnflaggedAnalyzeCommand('vp analyze "/tmp/my pic.png"'), true);
+});
+
+test("appendContextFileArg joins the flag spelling every host shares", () => {
+	assert.equal(
+		appendContextFileArg("vp analyze /tmp/a.png", "'/tmp/ctx.txt'"),
+		"vp analyze /tmp/a.png --context-file '/tmp/ctx.txt'",
+	);
+	assert.equal(CONTEXT_FILE_MAX_BYTES, 256 * 1024);
+});
+
+test("quoteShellArg matches the catalog quotePath POSIX branch", () => {
+	assert.equal(quoteShellArg("/tmp/vp-ctx-abc.txt"), "/tmp/vp-ctx-abc.txt");
+	assert.equal(quoteShellArg("/tmp/my ctx.txt"), "'/tmp/my ctx.txt'");
+	assert.equal(quoteShellArg("/tmp/don't.txt"), "'/tmp/don'\\''t.txt'");
+	assert.equal(quoteShellArg(""), "''");
+});
+
 test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 	for (const fn of [
 		parsePositiveInt,
@@ -322,6 +364,9 @@ test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 		vpEntryToSpawn,
 		resolveVpBin,
 		buildAnalyzeArgs,
+		isUnflaggedAnalyzeCommand,
+		appendContextFileArg,
+		quoteShellArg,
 		isImagePath,
 		resolveImagePath,
 		extractImagePaths,

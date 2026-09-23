@@ -8,14 +8,21 @@
  * routing is pinned without stream capture.
  */
 import { strict as assert } from "node:assert";
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import * as cli from "./cli.ts";
 import {
 	HELP,
+	hasAgentMarker,
+	hookContextFileDir,
+	isHookContextFile,
 	MAX_ANALYZE_STDIN_BYTES,
 	parseAnalyzeStdin,
 	parseFlags,
+	pendingContextFilePath,
+	readAnalyzeContextFile,
 	readAnalyzeStdin,
+	readPendingContextFile,
 	renderHelp,
 	runCommand,
 	VALUE_FLAGS,
@@ -136,6 +143,279 @@ describe("command-runner seam", () => {
 
 	it("advertises --context in analyze help", () => {
 		assert.match(renderHelp(["analyze"]), /--context <text>/);
+	});
+
+	it("parses --context-file as a value flag without swallowing positionals", () => {
+		const parsed = parseFlags(["--context-file", "/tmp/vp-ctx.txt", "image.png"]);
+		assert.deepEqual(parsed.positionals, ["image.png"]);
+		assert.equal(parsed.flags["context-file"], "/tmp/vp-ctx.txt");
+		assert.ok(VALUE_FLAGS.has("context-file"));
+		assert.equal(parseFlags(["--context-file"]).error, "missing value for --context-file");
+	});
+
+	it("advertises --context-file in analyze help", () => {
+		assert.match(renderHelp(["analyze"]), /--context-file <path>/);
+	});
+
+	it("rejects non-handoff --context-file paths without reading or deleting", () => {
+		let reads = 0;
+		const reader = (_p: string): string | null => {
+			reads++;
+			return "should never be read";
+		};
+		assert.equal(readAnalyzeContextFile("/tmp/vp-ctx.txt", reader), undefined);
+		assert.equal(readAnalyzeContextFile("/etc/passwd", reader), undefined);
+		assert.equal(readAnalyzeContextFile("~/.some-file", reader), undefined);
+		assert.equal(reads, 0, "non-handoff paths must never reach the reader");
+		assert.equal(isHookContextFile("/tmp/vp-ctx.txt"), false);
+		assert.equal(isHookContextFile(undefined), false);
+	});
+
+	it("rejects traversal paths that resolve outside the handoff directory", () => {
+		const dir = hookContextFileDir();
+		const traversal = `${dir}/../victim/vp-context-secret.txt`;
+		let reads = 0;
+		assert.equal(
+			readAnalyzeContextFile(traversal, () => {
+				reads++;
+				return "should never be read";
+			}),
+			undefined,
+		);
+		assert.equal(isHookContextFile(traversal), false);
+		assert.equal(reads, 0, "traversal paths must never reach the reader");
+	});
+
+	it("rejects symlinked handoff paths without reading the target", async () => {
+		// POSIX-only: symlink creation and lstat semantics differ on Windows.
+		if (process.platform === "win32") return;
+		const { mkdtempSync, symlinkSync, writeFileSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const sandbox = mkdtempSync(join(tmpdir(), "vp-symlink-cli-"));
+		const target = join(sandbox, "secret.txt");
+		writeFileSync(target, "top secret");
+		const link = join(hookContextFileDir(), "vp-context-link.txt");
+		try {
+			symlinkSync(target, link);
+		} catch {
+			return;
+		}
+		try {
+			// Shape check passes (direct child + valid basename), so the
+			// lstat gate in the default reader must refuse the target.
+			assert.equal(isHookContextFile(link), true);
+			assert.equal(readAnalyzeContextFile(link), undefined);
+			assert.equal(readFileSync(target, "utf8"), "top secret");
+		} finally {
+			rmSync(link, { force: true });
+			rmSync(sandbox, { recursive: true, force: true });
+		}
+	});
+
+	it("auto-discovers pending context when an agent marker is present", () => {
+		const pending = pendingContextFilePath();
+		// Writer is gated on agent marker: outside-agent manual `vp analyze`
+		// must not steal agent context.
+		assert.equal(hasAgentMarker({}), false);
+		assert.equal(hasAgentMarker({ CLAUDECODE: "1" }), true);
+		// Outside agent: pending file exists but marker absent → not consumed.
+		const dir = hookContextFileDir();
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		writeFileSync(pending, "pending-ctx-value");
+		try {
+			const reader = (p: string): string | null => readFileSync(p, "utf8");
+			const envOutside: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv;
+			assert.equal(
+				readPendingContextFile(envOutside, reader),
+				undefined,
+				"outside agent must not consume",
+			);
+			assert.ok(existsSync(pending), "outside agent must not delete pending");
+			const envInside: NodeJS.ProcessEnv = { CLAUDECODE: "1" } as NodeJS.ProcessEnv;
+			assert.equal(
+				readPendingContextFile(envInside, reader),
+				"pending-ctx-value",
+				"inside agent must consume",
+			);
+			assert.equal(existsSync(pending), false, "pending must be deleted after read");
+		} finally {
+			rmSync(pending, { force: true });
+		}
+	});
+
+	it("explicit --context-file suppresses the pending fallback", async () => {
+		// Isolation wall of the dual path (CodeRabbit command-runner.ts:1024,
+		// CWE-359): an empty/invalid explicit file must stay no-context and
+		// never fall back to a stranger's pending file, and the pending file
+		// must survive untouched. The mtime is refreshed so a parallel
+		// full-suite run cannot age it past the freshness TTL mid-test.
+		const dir = hookContextFileDir();
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const handoff = `${dir}/vp-context-suppress.txt`;
+		const pending = pendingContextFilePath();
+		writeFileSync(pending, "stranger-context");
+		const now = new Date();
+		utimesSync(pending, now, now);
+		try {
+			const res = await runCommand(["analyze", "--context-file", handoff, "/tmp/img.png"], {
+				env: { ...process.env, CLAUDECODE: "1" },
+				// Empty explicit content: invalid handoff stays no-context.
+				readContextFile: (p) => (p === handoff ? "   " : readFileSync(p, "utf8")),
+			});
+			assert.equal(existsSync(handoff), false, "explicit handoff consumed");
+			assert.equal(
+				existsSync(pending),
+				true,
+				"pending must survive an explicit invocation untouched",
+			);
+			assert.ok(res !== undefined);
+		} finally {
+			rmSync(handoff, { force: true });
+			rmSync(pending, { force: true });
+		}
+	});
+
+	it("pending fallback wins when no explicit --context-file is given", async () => {
+		const pending = pendingContextFilePath();
+		writeFileSync(pending, "  pending-trimmed  ");
+		try {
+			const res = await runCommand(["analyze", "/tmp/img.png"], {
+				env: { ...process.env, CLAUDECODE: "1" },
+			});
+			assert.equal(existsSync(pending), false, "pending consumed even when analyze errors");
+			assert.ok(res !== undefined);
+		} finally {
+			rmSync(pending, { force: true });
+		}
+	});
+
+	it("measures the context-file cap in UTF-8 bytes, not UTF-16 units", () => {
+		// U+1F600 encodes as 4 UTF-8 bytes but 2 UTF-16 units: a payload of
+		// (cap/4)+1 emoji exceeds the byte cap while staying under a
+		// length-based check.
+		const emoji = "\uD83D\uDE00".repeat(MAX_ANALYZE_STDIN_BYTES / 4 + 1);
+		const dir = hookContextFileDir();
+		assert.equal(
+			readAnalyzeContextFile(`${dir}/vp-context-abc.txt`, () => emoji),
+			undefined,
+		);
+	});
+
+	it("reads --context-file content as analyze context", async () => {
+		const dir = hookContextFileDir();
+		const handoff = `${dir}/vp-context-test1.txt`;
+		const r = await runCommand(["analyze", "--context-file", handoff, "img.png"], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: (p) => (p === handoff ? "User: file history" : null),
+		});
+		// No API key: fails at provider resolution, proving the file read
+		// threaded through without throwing.
+		assert.equal(r.code, 1);
+		assert.equal(
+			readAnalyzeContextFile(handoff, () => "User: file history"),
+			"User: file history",
+		);
+		assert.equal(isHookContextFile(handoff), true);
+	});
+
+	it("prefers stdin over --context-file, and --context-file over argv --context", () => {
+		const dir = hookContextFileDir();
+		const handoff = `${dir}/vp-context-test2.txt`;
+		const file = (p: string) => (p === handoff ? "file-ctx" : null);
+		assert.equal(readAnalyzeContextFile(handoff, file), "file-ctx");
+		assert.equal(readAnalyzeContextFile(undefined, file), undefined);
+		assert.equal(readAnalyzeContextFile("", file), undefined);
+		assert.equal(
+			readAnalyzeContextFile(handoff, () => null),
+			undefined,
+		);
+		assert.equal(
+			readAnalyzeContextFile(handoff, () => "   "),
+			undefined,
+		);
+	});
+
+	it("drops oversize --context-file content with a stderr diagnostic", () => {
+		const errChunks: string[] = [];
+		const savedErr = process.stderr.write.bind(process.stderr);
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			errChunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+			return true;
+		}) as typeof process.stderr.write;
+		try {
+			const dir = hookContextFileDir();
+			assert.equal(
+				readAnalyzeContextFile(`${dir}/vp-context-big.txt`, () =>
+					"x".repeat(MAX_ANALYZE_STDIN_BYTES + 1),
+				),
+				undefined,
+			);
+		} finally {
+			process.stderr.write = savedErr;
+		}
+		assert.ok(errChunks.join("").includes("exceeds"), "oversize file must be diagnosable");
+	});
+
+	it("drops --context-file content under --no-context", async () => {
+		const dir = hookContextFileDir();
+		const handoff = `${dir}/vp-context-test3.txt`;
+		const parsed = parseFlags(["--no-context", "--context-file", handoff, "img.png"]);
+		assert.equal(parsed.flags["no-context"], true);
+		assert.equal(parsed.flags["context-file"], handoff);
+		const r = await runCommand(["analyze", "--no-context", "--context-file", handoff, "img.png"], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: () => "User: file history",
+		});
+		assert.equal(r.code, 1);
+	});
+
+	it("consumes the handoff before help and validation early returns", async () => {
+		const dir = hookContextFileDir();
+		// analyze --help must not strand the handoff file on disk.
+		const helpHandoff = `${dir}/vp-context-help.txt`;
+		let helpReads = 0;
+		const helpResult = await runCommand(["analyze", "--help", "--context-file", helpHandoff], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: () => {
+				helpReads++;
+				return "User: file history";
+			},
+		});
+		assert.equal(helpResult.code, 0);
+		assert.equal(helpReads, 1, "help path must still consume the handoff");
+		// Missing-image error must not strand the handoff either.
+		const missingHandoff = `${dir}/vp-context-missing.txt`;
+		let missingReads = 0;
+		const missingResult = await runCommand(["analyze", "--context-file", missingHandoff], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			stdinText: "",
+			readContextFile: () => {
+				missingReads++;
+				return "User: file history";
+			},
+		});
+		assert.equal(missingResult.code, 1);
+		assert.equal(missingReads, 1, "validation path must still consume the handoff");
+		// Non-analyze commands must never touch the reader.
+		let otherReads = 0;
+		const versionResult = await runCommand(["version", "--context-file", helpHandoff], {
+			env: {} as NodeJS.ProcessEnv,
+			cwd: "/",
+			readContextFile: () => {
+				otherReads++;
+				return "User: file history";
+			},
+		});
+		assert.equal(versionResult.code, 0);
+		assert.equal(otherReads, 0, "non-analyze commands must not consume the handoff");
 	});
 
 	it("renders help with parent fallback then top-level HELP", () => {

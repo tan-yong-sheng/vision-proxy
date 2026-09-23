@@ -15,9 +15,14 @@ import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -261,6 +266,209 @@ test("PreToolUse ignores non-Read tools and non-image paths", () => {
 		assert.equal(run.status, 0);
 		assert.equal(run.stdout.trim(), "", `must stay silent for ${JSON.stringify(event)}`);
 	}
+});
+
+test("PreToolUse Bash rewrites a model-invoked analyze command with a context file", () => {
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+		{
+			type: "assistant",
+			message: { role: "assistant", content: [{ type: "text", text: "A square." }] },
+		},
+	]);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp() },
+	);
+	assert.equal(run.status, 0);
+	const out = parseOutput(run);
+	assert.ok(out, "analyze command must emit rewrite JSON");
+	assert.equal(out.hookSpecificOutput.hookEventName, "PreToolUse");
+	assert.equal(out.hookSpecificOutput.permissionDecision, "allow");
+	const rewritten = out.hookSpecificOutput.updatedInput.command as string;
+	assert.match(rewritten, /^vp analyze \/tmp\/diagram\.png --context-file /);
+	assert.ok(!rewritten.includes("Which shape"), "context must not leak onto argv");
+	const filePath = rewritten.slice(rewritten.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	const saved = readFileSync(unquoted, "utf8");
+	assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
+	if (process.platform !== "win32") {
+		// Windows reports writable files as 0666 regardless of creation mode.
+		const savedStat = statSync(unquoted);
+		assert.equal(savedStat.mode & 0o777, 0o600, "tempfile must be owner-only");
+	}
+	assert.match(
+		unquoted,
+		/vp-context-[0-9a-f]{32}\.txt$/,
+		"tempfile must use the exclusive random handoff name",
+	);
+	rmSync(unquoted);
+});
+
+test("PreToolUse Bash prunes stale context files before writing a new handoff", () => {
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+	]);
+	const tmpBase =
+		// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps empty-string TMPDIR falling through to tmpdir().
+		process.env.TMPDIR && process.env.TMPDIR.trim() ? process.env.TMPDIR.trim() : tmpdir();
+	const dir = join(tmpBase, "vision-proxy-context");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const stale = join(dir, "vp-context-stale.txt");
+	writeFileSync(stale, "stale context");
+	const oldTime = new Date(Date.now() - 11 * 60 * 1000);
+	utimesSync(stale, oldTime, oldTime);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp() },
+	);
+	assert.equal(run.status, 0);
+	const out = parseOutput(run);
+	assert.ok(out, "analyze command must emit rewrite JSON");
+	assert.equal(existsSync(stale), false, "stale handoff must be pruned");
+	const rewritten = out.hookSpecificOutput.updatedInput.command as string;
+	const filePath = rewritten.slice(rewritten.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	rmSync(unquoted, { force: true });
+});
+
+test("PreToolUse Bash repairs a preexisting lax context directory it owns", () => {
+	// Regression test for the repair-ordering finding: recursive mkdir
+	// succeeds on an existing directory, so ownership/symlink validation
+	// must run on both the fresh-create and reuse paths, with lax modes
+	// repaired to 0700 before the strict recheck. POSIX-only: Windows
+	// and root cannot block removal via directory permissions.
+	if (process.platform === "win32" || (process.getuid?.() ?? 0) === 0) return;
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+	]);
+	const tmpBase = mkdtempSync(join(tmpdir(), "vp-permissive-base-"));
+	const dir = join(tmpBase, "vision-proxy-context");
+	mkdirSync(dir, { recursive: true, mode: 0o755 });
+	chmodSync(dir, 0o755);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp(), TMPDIR: tmpBase },
+	);
+	assert.equal(run.status, 0);
+	// Our own preexisting 0755 dir is repaired to 0700 and the handoff
+	// proceeds: ownership/symlink pass, chmod repairs, strict recheck ok.
+	const out = parseOutput(run);
+	assert.ok(out, "repaired dir must allow the rewrite");
+	assert.equal(out.hookSpecificOutput.permissionDecision, "allow");
+	const rewritten = out.hookSpecificOutput.updatedInput.command as string;
+	const filePath = rewritten.slice(rewritten.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	rmSync(unquoted, { force: true });
+	rmSync(dir, { recursive: true, force: true });
+});
+
+test("PreToolUse Bash refuses a symlinked context directory", () => {
+	// A symlink at the context dir would redirect the handoff write; the
+	// lstat check must reject it. Same POSIX-only scope as above.
+	if (process.platform === "win32" || (process.getuid?.() ?? 0) === 0) return;
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+	]);
+	const tmpBase = mkdtempSync(join(tmpdir(), "vp-symlink-base-"));
+	const target = mkdtempSync(join(tmpdir(), "vp-symlink-target-"));
+	const dir = join(tmpBase, "vision-proxy-context");
+	symlinkSync(target, dir);
+	assert.equal(lstatSync(dir).isSymbolicLink(), true);
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+			transcript_path: transcript,
+		},
+		{ VP_BIN: fakeVp(), TMPDIR: tmpBase },
+	);
+	assert.equal(run.status, 0);
+	assert.equal(run.stdout.trim(), "", "symlinked dir must fail open with no rewrite");
+	rmSync(dir, { force: true });
+});
+
+test("PreToolUse Bash passes through flagged and non-analyze commands silently", () => {
+	const script = writeScript();
+	const env = { VP_BIN: fakeVp() };
+	for (const command of [
+		"vp analyze /tmp/a.png --context-file /tmp/ctx.txt",
+		"vp config get",
+		"ls /tmp/a.png",
+		// Compound/nested commands are rejected standalone-only: the
+		// append-only rewrite would land the flag on the wrong command.
+		"vp analyze /tmp/a.png && echo done",
+		"vp analyze /tmp/a.png; echo done",
+		"echo vp analyze /tmp/a.png",
+	]) {
+		const run = runHook(
+			script,
+			{ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } },
+			env,
+		);
+		assert.equal(run.status, 0);
+		assert.equal(run.stdout.trim(), "", `must stay silent for ${command}`);
+	}
+});
+
+test("PreToolUse Bash runs the original command when there is no transcript context", () => {
+	const script = writeScript();
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "vp analyze /tmp/diagram.png" },
+		},
+		{ VP_BIN: fakeVp() },
+	);
+	assert.equal(run.status, 0);
+	assert.equal(run.stdout.trim(), "", "no context means no rewrite: original runs");
 });
 
 test("PreToolUse fails open when an image path cannot be passed to spawn", () => {

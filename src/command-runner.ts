@@ -12,6 +12,9 @@
  * tests can pin routing without capturing process streams.
  */
 
+import { lstatSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { AnalyzeError, type AnalyzeFlags, parseCropFlags, runAnalyze } from "./commands/analyze.ts";
 import { cacheClearCmd, cachePruneCmd, cacheStatus } from "./commands/cache.ts";
 import { configGet, configInit, configSet, configShow, configValidate } from "./commands/config.ts";
@@ -73,6 +76,8 @@ export const VALUE_FLAGS = new Set([
 	"question",
 	"q",
 	"context",
+	"context-file",
+	"contextFile",
 	"api-key",
 	"apiKey",
 	"older",
@@ -310,6 +315,207 @@ export async function readAnalyzeStdin(
  *
  * @tags cli, runner
  */
+/**
+ * Directory hooks write `--context-file` handoff files to. Mirrors the
+ * adapter-side `contextFileDir()` so the CLI only consumes files from the
+ * location its own hooks use. Exported for tests to build valid handoff
+ * paths without hardcoding the temp layout.
+ *
+ * @tags cli, runner
+ */
+export function hookContextFileDir(): string {
+	const env = process.env;
+	const override = env.TMPDIR || env.TMP || env.TEMP;
+	// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps empty-string TMPDIR falling through to tmpdir().
+	const base = (override && override.trim()) || tmpdir() || "/tmp";
+	return join(base, "vision-proxy-context");
+}
+
+/** Basename shape of hook-created handoff files (`vp-context-<rand>.txt`). */
+const CONTEXT_FILE_BASENAME_RE = /^vp-context-[A-Za-z0-9][A-Za-z0-9.-]*\.txt$/;
+
+/** Well-known pending file for deterministic auto-discovery (Phase 1). */
+const PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+/** Pending file freshness window — short, since it is milliseconds-old by design. */
+const PENDING_CONTEXT_TTL_MS = 60 * 1000;
+
+/**
+ * True when `path` is a hook-created `--context-file` handoff file: a
+ * direct child of the hook context directory with a hook-created basename.
+ * Both sides are resolved before comparison so `<dir>/../victim/...`
+ * traversal paths are rejected. Anything else is never consumed or
+ * deleted, so a crafted `--context-file` pointing at an arbitrary readable
+ * file fails open without touching it.
+ *
+ * @tags cli, runner
+ */
+export function isHookContextFile(path: string | undefined): boolean {
+	// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps whitespace-only paths rejected.
+	if (!path || !path.trim()) return false;
+	const resolvedDir = resolve(hookContextFileDir());
+	const resolvedPath = resolve(path);
+	if (dirname(resolvedPath) !== resolvedDir) return false;
+	return CONTEXT_FILE_BASENAME_RE.test(basename(resolvedPath));
+}
+
+/**
+ * Read one `--context-file` payload for `vp analyze` (U1).
+ *
+ * Hooks persist last-16 conversation context to a `0600` tempfile and
+ * rewrite the model's own command to reference it; the CLI consumes the
+ * file here and deletes it on every outcome (used, oversize, or empty).
+ * Only hook-created handoff files are consumed: anything else fails open
+ * without being read or deleted, so a crafted path can neither exfiltrate
+ * nor delete an arbitrary file. Every failure degrades to undefined
+ * (fail open to no context) and never throws.
+ *
+ * @tags cli, runner
+ */
+export function readAnalyzeContextFile(
+	filePath: string | undefined,
+	readFile: (path: string) => string | null = defaultReadContextFile,
+): string | undefined {
+	// biome-ignore lint/complexity/useOptionalChain: explicit trim guard keeps whitespace-only flags rejected.
+	if (!filePath || !filePath.trim()) return undefined;
+	if (!isHookContextFile(filePath)) return undefined;
+	let content: string | null;
+	try {
+		content = readFile(filePath);
+	} catch {
+		return undefined;
+	} finally {
+		// Delete on every outcome so a consumed, oversize, or empty
+		// handoff never lingers; only validated handoff paths reach here,
+		// so cleanup cannot touch user files.
+		try {
+			rmSync(filePath);
+		} catch {
+			// ignore: best-effort cleanup
+		}
+	}
+	if (content === null || content === undefined) return undefined;
+	if (Buffer.byteLength(content, "utf8") > MAX_ANALYZE_STDIN_BYTES) {
+		try {
+			process.stderr.write(
+				"[vision-proxy] analyze context file exceeds " +
+					`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
+			);
+		} catch {
+			// ignore: stderr may be torn down in tests
+		}
+		return undefined;
+	}
+	const trimmed = content.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+/** True when an agent host marker is present — gates pending auto-read. */
+export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
+	return (
+		!!env.CLAUDECODE ||
+		!!env.CLAUDE_CODE_ENTRY ||
+		!!env.CURSOR_AGENT ||
+		!!env.CODEX_HOME ||
+		!!env.PI_DEBUG ||
+		!!env.OPENCODE ||
+		!!env.VP_AUTO_CONTEXT
+	);
+}
+
+export function pendingContextFilePath(): string {
+	return join(hookContextFileDir(), PENDING_CONTEXT_FILE_NAME);
+}
+
+/**
+ * Read the well-known pending file (deterministic fallback). Only consumed
+ * when an agent marker is present so a manual `vp analyze` outside an agent
+ * never steals agent context. Reuses the same lstat/size/delete discipline.
+ * `__pending__.txt` is a single last-writer-wins slot (60s TTL,
+ * delete-on-read): parallel bare-launcher agents may cross-read or lose
+ * context, so prefer the `vp` binary path for parallel work.
+ */
+export function readPendingContextFile(
+	env: NodeJS.ProcessEnv = process.env,
+	readFile: (path: string) => string | null = defaultReadContextFile,
+): string | undefined {
+	if (!hasAgentMarker(env)) return undefined;
+	const path = pendingContextFilePath();
+	// Freshness gate: pending is seconds-old by design (hook writes
+	// milliseconds before the CLI reads). Reject stale files so a
+	// concurrent or earlier session's context cannot be consumed.
+	try {
+		const st = statSync(path);
+		const age = Date.now() - st.mtimeMs;
+		if (!Number.isFinite(age) || age < 0 || age > PENDING_CONTEXT_TTL_MS) {
+			try {
+				rmSync(path);
+			} catch {
+				// ignore
+			}
+			return undefined;
+		}
+	} catch {
+		return undefined;
+	}
+	let content: string | null;
+	try {
+		content = readFile(path);
+	} catch {
+		return undefined;
+	} finally {
+		try {
+			rmSync(path);
+		} catch {
+			// ignore: best-effort cleanup
+		}
+	}
+	if (content === null || content === undefined) return undefined;
+	if (Buffer.byteLength(content, "utf8") > MAX_ANALYZE_STDIN_BYTES) {
+		try {
+			process.stderr.write(
+				"[vision-proxy] analyze context file exceeds " +
+					`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
+			);
+		} catch {
+			// ignore
+		}
+		return undefined;
+	}
+	const trimmed = content.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+function defaultReadContextFile(path: string): string | null {
+	// Bounded pre-read: stat first so a huge file is rejected before an
+	// unbounded allocation. A stat/read race is acceptable: the byte check
+	// above still caps what is processed. The lstat gate rejects symlinks
+	// and non-regular files so a linked handoff path cannot disclose an
+	// arbitrary target's contents (readFileSync follows symlinks).
+	try {
+		const lst = lstatSync(path);
+		if (lst.isSymbolicLink() || !lst.isFile()) return null;
+		const size = statSync(path).size;
+		if (!Number.isFinite(size) || size > MAX_ANALYZE_STDIN_BYTES) {
+			try {
+				process.stderr.write(
+					"[vision-proxy] analyze context file exceeds " +
+						`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
+				);
+			} catch {
+				// ignore: stderr may be torn down in tests
+			}
+			return "";
+		}
+	} catch {
+		return null;
+	}
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
+}
+
 async function drainAnalyzeStdin(opts: CommandRunnerOptions): Promise<string> {
 	if (opts.stdinText !== undefined) return opts.stdinText;
 	if (opts.readStdin) {
@@ -374,6 +580,7 @@ analyze options:
   --max-output-tokens <n>  cap response tokens
   --question <text>  text to analyze against the image
   --context <text>   recent conversation context for the analysis
+  --context-file <path>  read context from a file (consumed + deleted)
   --no-context       drop conversation context for this call only
   --api-key <key>    explicit provider key
 
@@ -447,13 +654,19 @@ Options:
   --max-output-tokens <n>  cap the model response tokens
   --question <text>    text to analyze against the image (-q)
   --context <text>     recent conversation context for the analysis
+  --context-file <path>  read context from a file; the file is consumed
+                       and deleted after reading (hook handoff for
+                       model-invoked analyze calls)
   --no-context         drop conversation context for this call only
   --api-key <key>      explicit provider API key (-apiKey)
   -h, --help           show this help
 
 Notes:
   The description fence is ON by default. Image-derived text is
-  attacker-controlled, so only use --no-fence for local debugging.`,
+  attacker-controlled, so only use --no-fence for local debugging.
+  Without --context-file, analyze auto-discovers a single last-writer-wins
+  pending file (60s TTL, delete-on-read) when an agent marker is present;
+  prefer vp for parallel work.`,
 
 	config: `vp config <subcommand> [options]
 
@@ -834,6 +1047,8 @@ export interface CommandRunnerOptions {
 	readStdin?: () => Promise<string>;
 	/** Bound in ms for the `analyze` process-stdin drain (tests shorten it; default 50). */
 	stdinTimeoutMs?: number;
+	/** Filesystem used to read `--context-file` (tests inject an in-memory map; defaults to node:fs). */
+	readContextFile?: (path: string) => string | null;
 }
 
 export interface CommandRunnerResult {
@@ -883,8 +1098,29 @@ export async function runCommand(
 		return ok(VERSION);
 	}
 	const parsed = parseFlags(rest);
-	if (parsed.error) return err(parsed.error);
 	const { flags, positionals } = parsed;
+	// Consume the analyze handoff up front so parse-error, help, and
+	// missing-image early returns cannot strand the sensitive file on
+	// disk; the analyze branch reuses this value instead of reading again.
+	const explicitContextFile =
+		command === "analyze"
+			? readAnalyzeContextFile(
+					str(flags, "context-file") ?? str(flags, "contextFile"),
+					opts.readContextFile,
+				)
+			: undefined;
+	// Phase 1 deterministic fallback: pending file auto-discovered when an
+	// agent marker is present and no explicit --context-file flag was present.
+	// Track flag presence separately from file content so an empty/invalid
+	// explicit file does not fallback to a stale pending file from another
+	// invocation (CWE-359).
+	const hasExplicitContextFile = "context-file" in flags || "contextFile" in flags;
+	const contextFile = hasExplicitContextFile
+		? explicitContextFile
+		: command === "analyze"
+			? readPendingContextFile(env, opts.readContextFile)
+			: undefined;
+	if (parsed.error) return err(parsed.error);
 
 	switch (command) {
 		case "analyze": {
@@ -901,6 +1137,10 @@ export async function runCommand(
 				formatRaw && formatRaw !== "plain" ? (formatRaw as GroundingFormat) : undefined;
 			const stdinText = await drainAnalyzeStdin(opts);
 			const stdinPayload = parseAnalyzeStdin(stdinText);
+			// Deletion lives in the up-front read above, so skipping the
+			// value on the stdin/--no-context paths never strands the
+			// sensitive file. Precedence: stdin first, then the file,
+			// then argv; --no-context drops whatever was read.
 			const analyzeFlags: AnalyzeFlags = {
 				format,
 				provider: str(flags, "provider"),
@@ -916,13 +1156,16 @@ export async function runCommand(
 				// Stdin is authoritative when present: adapters now send
 				// sensitive text off-argv. Keep the argv flags as a fallback
 				// for older wrappers that still pass --question/--context.
-				// --no-context drops context only (question is opt-in per
-				// call, so there is nothing to suppress): privacy/cost escape
-				// hatch for one invocation without touching config.
+				// --context-file (written by hooks for model-invoked calls)
+				// sits between them: stdin first, then the consumed file,
+				// then argv. --no-context drops context only (question is
+				// opt-in per call, so there is nothing to suppress):
+				// privacy/cost escape hatch for one invocation without
+				// touching config.
 				question: stdinPayload.question ?? str(flags, "question") ?? str(flags, "q"),
 				context: bool(flags, "no-context", false)
 					? undefined
-					: (stdinPayload.context ?? str(flags, "context")),
+					: (stdinPayload.context ?? contextFile ?? str(flags, "context")),
 				apiKey: str(flags, "api-key") ?? str(flags, "apiKey"),
 				env,
 			};

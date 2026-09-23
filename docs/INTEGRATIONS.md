@@ -10,6 +10,7 @@ Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers 
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Pasted/attached images (rendered as `[Image #N]` refs) are resolved via Claude Code's `image-cache/<session>/<N>.<ext>` so each gets a reminder line too. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse Read` - the single analysis point: describes an image read via the `Read` tool (`file_path`).
+- `PreToolUse Bash` - rewrites a model-invoked `vp analyze` command to append `--context-file <path>`: the hook writes the recent conversation (from the handed transcript) to a `0600` tempfile so the model's own command executes with context. Fail-open: any failure leaves the command unchanged.
 
 ```bash
 vp integration install claude-code
@@ -31,6 +32,7 @@ Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and regi
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse Read` - analyzes image reads requested through the `Read` tool (`file_path`).
 - `PreToolUse view_image` - analyzes Codex's native image-view request (`path`) and denies it before Codex reads image bytes, returning the vision description as hook context.
+- `PreToolUse Bash` - rewrites a model-invoked `vp analyze` command to append `--context-file <path>` (same tempfile handoff as Claude Code).
 
 The `Read` matcher remains as a fallback for direct file reads. The `view_image` matcher is Codex-specific; Claude Code keeps its existing `Read` registration.
 
@@ -54,6 +56,7 @@ Installs the `vision-proxy_read.ts` extension into `~/.pi/agent/extensions/`. Th
 - `input` — no-op. Returns immediately so the user's prompt is accepted the instant they press Enter.
 - `context` — appends a static reminder to read each image path referenced in the user text with the `read` tool. It never shells out to `vp analyze`, so sends stay fast. Image attachments are left untouched so the model sees them natively.
 - `tool_result` — the single analysis point. Intercepts `read` tool results on image files and replaces the tool result content with the fenced UNTRUSTED description so no image bytes reach the model.
+- `tool_call` — rewrites a model-invoked `vp analyze` bash command before it executes: appends `--context-file <path>` (context from the session branch, written to a `0600` tempfile) by mutating the tool input in place. The model's own command executes; every failure leaves the input unmutated.
 
 The reminder is appended in the `context` event for every submission Pi assembles for the model, including ones queued via the `streamingBehavior` option while a previous turn is streaming and ones dispatched through `session.steer()` / `session.followUp()` (which route through the same `session.prompt()` path). Repeated events strip the prior reminder before re-appending, so reminder text never duplicates.
 
@@ -85,6 +88,7 @@ Installs the `vision-proxy_read.ts` plugin into `~/.config/opencode/plugins/`.
 The plugin registers hooks for **parity with claude-code/codex**:
 - `chat.message` hook - like `UserPromptSubmit`: extracts image paths from the user text and appends a static reminder to inspect each one with the `read` tool. It never shells out, so message handling stays fast. Attached image parts are left untouched so the model sees them natively.
 - `tool.execute.before` hook (`read`) - like `PreToolUse Read`, the single analysis point: intercepts `read` tool calls on image files, runs `vp analyze`, and denies the read by throwing an error whose message carries the instruction and description.
+- `tool.execute.before` hook (`bash`) - rewrites a model-invoked `vp analyze` command to append `--context-file <path>` (context from the session messages, written to a `0600` tempfile) by mutating the tool args in place. Fail-open: any failure leaves the args unmutated.
 
 No new `analyze_image` tool is registered - the agent uses its native Read tool which the hook intercepts.
 
@@ -134,7 +138,7 @@ node dist/cli.js integration install opencode --dev
 | Symptom | Fix |
 |---------|-----|
 | Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
-| Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks. opencode: verify the plugin's `chat.message` and `tool.execute.before` hooks via `opencode plugin list`. |
+| Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks (including the `Bash` matcher for model-invoked `vp analyze`). opencode: verify the plugin's `chat.message` and `tool.execute.before` hooks via `opencode plugin list`. |
 | Hook script not found (`npx tsx ...vision-proxy_read.ts` fails) | Re-run `vp integration install <agent>` to regenerate the script, ensure `npx`/`tsx` is available, and ensure `vp` is on PATH (or set `VP_BIN`). |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |

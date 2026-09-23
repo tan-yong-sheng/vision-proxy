@@ -164,6 +164,111 @@ function buildAnalyzeArgs(
 	return { command: prefix.command, args: args, stdin: stdin };
 }
 
+/**
+ * Cap (bytes) on a `--context-file` payload written by a hook. Mirrors
+ * MAX_ANALYZE_STDIN_BYTES in src/command-runner.ts so what the CLI accepts
+ * and what hooks write stay in sync.
+ *
+ * @tags integrations, runtime
+ */
+var CONTEXT_FILE_MAX_BYTES = 256 * 1024;
+
+/**
+ * True when a shell command string invokes `vp analyze` without already
+ * carrying a `--context-file` reference.
+ *
+ * Token-aware: matches the `vp`/`vision-proxy` binary (optionally via a
+ * path or `npx`) followed by the `analyze` subcommand, honoring quoting
+ * and `=`-joined flags so a flagged command is never double-appended
+ * (which would loop the rewrite on re-fire).
+ *
+ * @param command The shell command string to inspect.
+ * @returns True for an unflagged analyze invocation, false otherwise.
+ *
+ * @tags integrations, runtime
+ */
+function isUnflaggedAnalyzeCommand(command: unknown): boolean {
+	if (typeof command !== "string" || !command) return false;
+	var rawTokens = command.match(/'[^']*'|"[^"]*"|\S+/g);
+	if (!rawTokens) return false;
+	var words: string[] = [];
+	var w = "";
+	var first = "";
+	var last = "";
+	var ti = 0;
+	for (ti = 0; ti < rawTokens.length; ti++) {
+		w = rawTokens[ti];
+		if (w.length >= 2) {
+			first = w.charAt(0);
+			last = w.charAt(w.length - 1);
+			if ((first === "'" && last === "'") || (first === '"' && last === '"')) {
+				w = w.slice(1, -1);
+			}
+		}
+		words.push(w);
+	}
+	var idx = -1;
+	var parts: string[] = [];
+	var base = "";
+	var j = 0;
+	var nextParts: string[] = [];
+	var cand = "";
+	var tok = "";
+	var i = 0;
+	for (i = 0; i < words.length; i++) {
+		parts = words[i].split("/");
+		base = parts[parts.length - 1] || "";
+		if (base === "npx") {
+			j = i + 1;
+			while (j < words.length && words[j].charAt(0) === "-") j++;
+			nextParts = (words[j] || "").split("/");
+			cand = nextParts[nextParts.length - 1] || "";
+			if (cand !== "vp" && cand !== "vision-proxy") continue;
+			i = j;
+			base = cand;
+		}
+		if (base === "vp" || base === "vision-proxy") {
+			if (words[i + 1] === "analyze") {
+				idx = i;
+				break;
+			}
+			return false;
+		}
+	}
+	if (idx === -1) return false;
+	var k = 0;
+	for (k = idx + 2; k < words.length; k++) {
+		tok = words[k] || "";
+		if (
+			tok === "--context-file" ||
+			tok === "--contextFile" ||
+			tok.indexOf("--context-file=") === 0 ||
+			tok.indexOf("--contextFile=") === 0
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Append a `--context-file <path>` reference to an analyze command.
+ *
+ * The caller quotes the path (each adapter owns its host's quoting via
+ * the shared quote helper); this helper only joins the tokens so every
+ * host appends the same flag spelling.
+ *
+ * @param command The original shell command.
+ * @param quotedPath The already-quoted tempfile path.
+ * @returns The rewritten command.
+ *
+ * @tags integrations, runtime
+ */
+function appendContextFileArg(command: string, quotedPath: string): string {
+	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+	return command + " --context-file " + quotedPath;
+}
+
 // ── Standalone conversation-context formatter ─────────────────────────────
 //
 // Mirrors buildConversationContext/truncateContext in src/core.ts so the
@@ -175,6 +280,28 @@ function buildAnalyzeArgs(
 // content is a string or an array of blocks; only text blocks count. Each
 // host adapter maps its native message shape (Pi entries, opencode
 // info/parts, CC transcript lines, Codex rollout items) before calling.
+
+/**
+ * Quote an argv value for the generated shell artifacts.
+ *
+ * Single source for the POSIX single-quote escaping shared by the hook
+ * script, the Pi extension, and the opencode plugin when they append
+ * `--context-file <path>` to a model-invoked command. Kept in the
+ * canonical runtime so the tested implementation and the shipped source
+ * cannot drift; composed into HOOK_RUNTIME_SOURCE like every other
+ * shared helper.
+ *
+ * @param p The path to quote.
+ * @returns The shell-safe quoted path.
+ *
+ * @tags integrations, runtime
+ */
+function quoteShellArg(p: string): string {
+	if (p === "") return "''";
+	if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(p)) return p;
+	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+	return "'" + p.replace(/'/g, "'\\''") + "'";
+}
 
 /**
  * True when a content item is a plain text block (type "text" with string text).
@@ -388,8 +515,10 @@ function readReminder(
 export {
 	ANALYZE_STDIN_MARKER,
 	ASSISTANT_TRUNCATE_CHARS,
+	appendContextFileArg,
 	buildAnalyzeArgs,
 	buildConversationContext,
+	CONTEXT_FILE_MAX_BYTES,
 	CONTEXT_MAX_CHARS,
 	DEFAULT_HOOK_TIMEOUT_MS,
 	DEFAULT_MAX_OUTPUT_TOKENS,
@@ -398,6 +527,7 @@ export {
 	hookTimeoutMs,
 	IMAGE_EXT,
 	isImagePath,
+	isUnflaggedAnalyzeCommand,
 	MAX_BUFFER_BYTES,
 	MAX_HOOK_TIMEOUT_MS,
 	MAX_MAX_OUTPUT_TOKENS,
@@ -405,6 +535,7 @@ export {
 	MIN_MAX_OUTPUT_TOKENS,
 	maxOutputTokens,
 	parsePositiveInt,
+	quoteShellArg,
 	RECENT_MESSAGE_COUNT,
 	REMINDER_MARKER,
 	readReminder,
@@ -461,12 +592,15 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	constLine("RECENT_MESSAGE_COUNT", RECENT_MESSAGE_COUNT),
 	constLine("ASSISTANT_TRUNCATE_CHARS", ASSISTANT_TRUNCATE_CHARS),
 	constLine("CONTEXT_MAX_CHARS", CONTEXT_MAX_CHARS),
+	constLine("CONTEXT_FILE_MAX_BYTES", CONTEXT_FILE_MAX_BYTES),
 	parsePositiveInt.toString(),
 	hookTimeoutMs.toString(),
 	maxOutputTokens.toString(),
 	vpEntryToSpawn.toString(),
 	resolveVpBin.toString(),
 	buildAnalyzeArgs.toString(),
+	isUnflaggedAnalyzeCommand.toString(),
+	appendContextFileArg.toString(),
 	isTextBlock.toString(),
 	extractText.toString(),
 	truncateConversationContext.toString(),
@@ -476,4 +610,5 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	extractImagePaths.toString(),
 	withImageInstruction.toString(),
 	readReminder.toString(),
+	quoteShellArg.toString(),
 ].join("\n\n");

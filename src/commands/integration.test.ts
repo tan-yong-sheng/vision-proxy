@@ -26,6 +26,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -200,7 +201,7 @@ async function loadPiExtension(source: string, home: string) {
 	});
 	const eventNames = Object.keys(events);
 	assert.ok(!eventNames.includes("registerTool"), "must not register analyze_image tool");
-	for (const required of ["input", "context", "tool_result"]) {
+	for (const required of ["input", "context", "tool_call", "tool_result"]) {
 		assert.ok(eventNames.includes(required), `must register ${required} handler`);
 	}
 	return { events, dir, calls, setNextResult };
@@ -582,8 +583,8 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 	})) as any;
 	assert.ok(reminded?.messages, "context reminder must fire even when vp fails");
 
-	// mode off -> input is a no-op, context returns undefined, tool_result
-	// returns undefined.
+	// mode off -> input is a no-op, context returns undefined, tool_call
+	// leaves input unmutated, tool_result returns undefined.
 	process.env.VP_MODE = "off";
 	setNextResult({ status: 0, stdout: "@@FENCE desc@@" });
 	const inputDisabled = await events.input[0]({
@@ -605,6 +606,22 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		isError: false,
 	});
 	assert.equal(toolDisabled, undefined);
+	const callDisabledInput = { command: "vp analyze /tmp/diagram.png" };
+	const callDisabled = await events.tool_call[0](
+		{
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "call-1",
+			input: callDisabledInput,
+		},
+		{ sessionManager: { getBranch: () => [] } },
+	);
+	assert.equal(callDisabled, undefined);
+	assert.equal(
+		callDisabledInput.command,
+		"vp analyze /tmp/diagram.png",
+		"mode off must leave the command unmutated",
+	);
 	delete process.env.VP_MODE;
 	reset();
 });
@@ -723,6 +740,93 @@ test("pi tool_result strips own reminder blocks from analyze context", async (t)
 		"must analyze once",
 	);
 	reset();
+});
+
+test("pi tool_call appends a context file to model-invoked analyze", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const { events } = await loadPiExtension(
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
+		home,
+	);
+	process.env.VP_MODE = "always";
+	const branch = [
+		{
+			type: "message",
+			message: { role: "user", content: [{ type: "text", text: "Which shape is this?" }] },
+		},
+		{
+			type: "message",
+			message: { role: "assistant", content: [{ type: "text", text: "A square." }] },
+		},
+	];
+	const input = { command: "vp analyze /tmp/diagram.png" };
+	const result = await events.tool_call[0](
+		{
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "call-2",
+			input,
+		},
+		{ sessionManager: { getBranch: () => branch } },
+	);
+	assert.equal(result, undefined, "mutation carries the rewrite; no block result");
+	assert.match(input.command, /^vp analyze \/tmp\/diagram\.png --context-file /);
+	assert.ok(!input.command.includes("Which shape"), "context must not leak onto argv");
+	const filePath = input.command.slice(input.command.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	const saved = readFileSync(unquoted, "utf8");
+	assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
+	rmSync(unquoted);
+});
+
+test("pi tool_call leaves flagged, non-bash, and context-less calls alone", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const { events } = await loadPiExtension(
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
+		home,
+	);
+	process.env.VP_MODE = "always";
+	const emptyCtx = { sessionManager: { getBranch: () => [] } };
+	for (const event of [
+		{
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "call-3",
+			input: { command: "vp analyze /tmp/a.png --context-file /tmp/ctx.txt" },
+		},
+		{
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "call-4",
+			input: { command: "ls /tmp" },
+		},
+		{
+			type: "tool_call",
+			toolName: "read",
+			toolCallId: "call-5",
+			input: { path: "/tmp/diagram.png" },
+		},
+	]) {
+		const before = JSON.stringify(event.input);
+		const result = await events.tool_call[0](event, emptyCtx);
+		assert.equal(result, undefined);
+		assert.equal(JSON.stringify(event.input), before, "input must stay unmutated");
+	}
 });
 
 test("pi extension analyzes a rewritten file fresh on every tool_result read", async (t) => {
@@ -1248,16 +1352,78 @@ test("opencode tool.execute.before denies image reads and fails open", async (t)
 	// vp failure -> fail-open: no throw, the original read proceeds.
 	setNextResult({ status: 1, stdout: "", stderr: "boom" });
 	await hooks["tool.execute.before"]({ tool: "read" }, { args: { path: imagePath } });
-
-	// Non-image reads and other tools pass through untouched (no vp spawn).
-	const callsBeforePassthrough = calls.length;
-	await hooks["tool.execute.before"](
-		{ tool: "read" },
-		{ args: { path: join(testDir, "notes.txt") } },
-	);
-	await hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "ls" } });
-	assert.equal(calls.length, callsBeforePassthrough, "non-image reads must not spawn vp");
 	reset();
+});
+
+test("opencode tool.execute.before rewrites model-invoked analyze with a context file", async (t) => {
+	t.after(() => {
+		delete process.env.VP_BIN;
+		delete process.env.VP_HOOK_TIMEOUT_MS;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const { hooksWithClient } = await loadOpencodePlugin(
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
+		home,
+	);
+	const sessionClient = {
+		session: {
+			messages: async () => ({
+				data: [
+					{
+						info: { role: "user" },
+						parts: [{ type: "text", text: "Which shape is this?" }],
+					},
+					{
+						info: { role: "assistant" },
+						parts: [{ type: "text", text: "A square." }],
+					},
+				],
+			}),
+		},
+	};
+	const clientHooks = await hooksWithClient(sessionClient);
+	const args = { command: "vp analyze /tmp/diagram.png" };
+	await clientHooks["tool.execute.before"]({ tool: "bash", sessionID: "sess-1" }, { args });
+	assert.match(args.command, /^vp analyze \/tmp\/diagram\.png --context-file /);
+	assert.ok(!args.command.includes("Which shape"), "context must not leak onto argv");
+	const filePath = args.command.slice(args.command.indexOf("--context-file ") + 15).trim();
+	const unquoted =
+		filePath.startsWith("'") && filePath.endsWith("'")
+			? filePath.slice(1, -1).replace(/'\\''/g, "'")
+			: filePath;
+	const saved = readFileSync(unquoted, "utf8");
+	assert.ok(saved.includes("Which shape is this?"), "tempfile must carry the context");
+	rmSync(unquoted);
+});
+
+test("opencode tool.execute.before leaves flagged and non-analyze shell commands alone", async (t) => {
+	// Sibling of the parent read test (un-nested): owns its own fixtures.
+	t.after(() => {
+		delete process.env.VP_BIN;
+		delete process.env.VP_HOOK_TIMEOUT_MS;
+		delete process.env.VP_MAX_OUTPUT_TOKENS;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "opencode", dir);
+	const { hooks } = await loadOpencodePlugin(
+		readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"),
+		home,
+	);
+	for (const command of [
+		"vp analyze /tmp/a.png --context-file /tmp/ctx.txt",
+		"vp config get",
+		"ls /tmp/a.png",
+	]) {
+		const args = { command };
+		await hooks["tool.execute.before"]({ tool: "bash", sessionID: "sess-1" }, { args });
+		assert.equal(args.command, command, `must leave ${command} unmutated`);
+	}
 });
 
 test("install pi is idempotent (no error on re-install)", async () => {
@@ -1284,8 +1450,11 @@ test("install claude-code writes a tsx hook script and metadata-free settings.js
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
-	assert.equal(cfg.hooks.PreToolUse[0].matcher, "Read");
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
+	assert.deepEqual(
+		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
+		["Read", "Bash"],
+	);
 	const expected = `npx tsx ${script}`;
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
@@ -1317,10 +1486,10 @@ test("install codex writes its hook script under ~/.codex and registers it in ho
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 2);
+	assert.equal(cfg.hooks.PreToolUse.length, 3);
 	assert.deepEqual(
 		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
-		["Read", "view_image"],
+		["Read", "view_image", "Bash"],
 	);
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
@@ -1355,7 +1524,7 @@ test("re-install does not duplicate hooks or scripts", async () => {
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
 	reset();
 });
@@ -1367,7 +1536,7 @@ test("install is idempotent (no duplicate blocks) for claude-code", async () => 
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(process.env.HOME!, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	reset();
 });
 
@@ -1396,7 +1565,7 @@ test("install claude-code replaces legacy vp hook entries", async () => {
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
 	assert.equal(existsSync(claudeHookPath(home)), true);
@@ -1490,7 +1659,7 @@ test("uninstall claude-code removes only the vision-proxy registrations and leav
 	assert.equal(existsSync(claudeHookPath(home)), true);
 	let cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
-	assert.equal(cfg.hooks.PreToolUse.length, 1);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	const r = await runIntegration("uninstall", "claude-code");
 	assert.equal(r.ok, true);
 	cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));

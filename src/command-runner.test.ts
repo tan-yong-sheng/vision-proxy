@@ -8,7 +8,7 @@
  * routing is pinned without stream capture.
  */
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import * as cli from "./cli.ts";
 import {
@@ -240,6 +240,38 @@ describe("command-runner seam", () => {
 			);
 			assert.equal(existsSync(pending), false, "pending must be deleted after read");
 		} finally {
+			rmSync(pending, { force: true });
+		}
+	});
+
+	it("explicit --context-file suppresses the pending fallback", async () => {
+		// Isolation wall of the dual path (CodeRabbit command-runner.ts:1024,
+		// CWE-359): an empty/invalid explicit file must stay no-context and
+		// never fall back to a stranger's pending file, and the pending file
+		// must survive untouched. The mtime is refreshed so a parallel
+		// full-suite run cannot age it past the freshness TTL mid-test.
+		const dir = hookContextFileDir();
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const handoff = `${dir}/vp-context-suppress.txt`;
+		const pending = pendingContextFilePath();
+		writeFileSync(pending, "stranger-context");
+		const now = new Date();
+		utimesSync(pending, now, now);
+		try {
+			const res = await runCommand(["analyze", "--context-file", handoff, "/tmp/img.png"], {
+				env: { ...process.env, CLAUDECODE: "1" },
+				// Empty explicit content: invalid handoff stays no-context.
+				readContextFile: (p) => (p === handoff ? "   " : readFileSync(p, "utf8")),
+			});
+			assert.equal(existsSync(handoff), false, "explicit handoff consumed");
+			assert.equal(
+				existsSync(pending),
+				true,
+				"pending must survive an explicit invocation untouched",
+			);
+			assert.ok(res !== undefined);
+		} finally {
+			rmSync(handoff, { force: true });
 			rmSync(pending, { force: true });
 		}
 	});

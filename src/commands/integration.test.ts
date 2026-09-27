@@ -1522,6 +1522,11 @@ test("re-install does not duplicate hooks or scripts", async () => {
 	await runIntegration("install", "claude-code");
 	const first = await runIntegration("install", "claude-code");
 	assert.equal(first.ok, true);
+	assert.match(
+		first.message,
+		new RegExp(`claude-code integration already up to date \\(${VERSION.replace(/\./g, "\\.")}\\)`),
+		"identical reinstall must say so instead of claiming a fresh install",
+	);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 2);
@@ -1529,6 +1534,43 @@ test("re-install does not duplicate hooks or scripts", async () => {
 	reset();
 });
 
+test("reinstall over a stale artifact reports the replaced version", async () => {
+	const home = isolate();
+	await runIntegration("install", "claude-code");
+	const script = claudeHookPath(home);
+	// Simulate drift (e.g. an older release or an unreleased-branch edit):
+	// same install, older marker plus one changed byte.
+	writeFileSync(
+		script,
+		readFileSync(script, "utf8")
+			.replace(
+				new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`),
+				"__VP_VERSION__:0.0.9",
+			)
+			.replace("vision-proxy", "vision-proxx"),
+	);
+	const r = await runIntegration("install", "claude-code");
+	assert.equal(r.ok, true);
+	assert.match(
+		r.message,
+		/reinstalled claude-code integration \(replaced 0\.0\.9 with /,
+		"reinstall must warn that it overwrote a differing artifact",
+	);
+	// The artifact is refreshed to the generated content.
+	assert.match(
+		readFileSync(script, "utf8"),
+		new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`),
+	);
+	reset();
+});
+
+test("fresh install still reports an install lead", async () => {
+	isolate();
+	const r = await runIntegration("install", "pi");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /installed pi extension ->/);
+	reset();
+});
 test("install is idempotent (no duplicate blocks) for claude-code", async () => {
 	isolate();
 	await runIntegration("install", "claude-code");

@@ -277,8 +277,15 @@ describe("command-runner seam", () => {
 	});
 
 	it("pending fallback wins when no explicit --context-file is given", async () => {
+		// Uses a unique pending payload per run: the full suite runs test
+		// files in parallel processes sharing one $TMPDIR slot, so a fixed
+		// payload cannot distinguish our write from a parallel test's.
 		const pending = pendingContextFilePath();
-		writeFileSync(pending, "  pending-trimmed  ");
+		mkdirSync(hookContextFileDir(), { recursive: true, mode: 0o700 });
+		const marker = `pending-trimmed-${process.pid}`;
+		writeFileSync(pending, `  ${marker}  `);
+		const now = new Date();
+		utimesSync(pending, now, now);
 		try {
 			const res = await runCommand(["analyze", "/tmp/img.png"], {
 				env: { ...process.env, CLAUDECODE: "1" },

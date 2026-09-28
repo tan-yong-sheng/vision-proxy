@@ -362,6 +362,47 @@ describe("resolveConfig baseUrl", () => {
 	});
 });
 
+describe("resolveConfig VP_PROVIDER / VP_PHASH aliases", () => {
+	it("applies a standalone VP_PROVIDER override", () => {
+		const cfg = resolveConfig({ VP_PROVIDER: "openai" } as NodeJS.ProcessEnv);
+		assert.equal(cfg.provider, "openai");
+	});
+
+	it("lets VP_MODEL win over VP_PROVIDER when both are set", () => {
+		const cfg = resolveConfig({
+			VP_PROVIDER: "openai",
+			VP_MODEL: "anthropic/claude-sonnet-4-5",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.provider, "anthropic");
+		assert.equal(cfg.modelId, "claude-sonnet-4-5");
+	});
+
+	it("ignores an invalid VP_PROVIDER", () => {
+		const cfg = resolveConfig({ VP_PROVIDER: "bogus!!" } as NodeJS.ProcessEnv);
+		assert.equal(cfg.provider, DEFAULT_CONFIG.provider);
+	});
+
+	it("applies the canonical VP_PHASH_SIMILARITY_THRESHOLD", () => {
+		const cfg = resolveConfig({
+			VP_PHASH_SIMILARITY_THRESHOLD: "0.95",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.pHashSimilarityThreshold, 0.95);
+	});
+
+	it("keeps the legacy VP_PHASH_THRESHOLD alias working", () => {
+		const cfg = resolveConfig({ VP_PHASH_THRESHOLD: "0.9" } as NodeJS.ProcessEnv);
+		assert.equal(cfg.pHashSimilarityThreshold, 0.9);
+	});
+
+	it("prefers VP_PHASH_SIMILARITY_THRESHOLD over the legacy alias", () => {
+		const cfg = resolveConfig({
+			VP_PHASH_SIMILARITY_THRESHOLD: "0.95",
+			VP_PHASH_THRESHOLD: "0.5",
+		} as NodeJS.ProcessEnv);
+		assert.equal(cfg.pHashSimilarityThreshold, 0.95);
+	});
+});
+
 describe("sanitize baseUrl", () => {
 	it("defaults to empty string for non-string baseUrl", () => {
 		const cfg = resolveConfig({} as NodeJS.ProcessEnv, {

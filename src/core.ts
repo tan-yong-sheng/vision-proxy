@@ -413,6 +413,13 @@ function parseModeOverride(value: string | undefined): ProxyMode | undefined {
 	return undefined;
 }
 
+function parseProviderOverride(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	const v = value.trim();
+	if (!v || !PROVIDER_PATTERN.test(v)) return undefined;
+	return v;
+}
+
 function parseModelOverride(
 	value: string | undefined,
 ): { provider: string; modelId: string } | undefined {
@@ -474,6 +481,9 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 	const overrides: Partial<VisionConfig> = {};
 
 	assignIfDefined(overrides, "mode", parseModeOverride(env.VP_MODE));
+	// Standalone provider override (VP_MODEL's "provider/modelId" form wins
+	// when both are set, mirroring --provider/--model precedence).
+	assignIfDefined(overrides, "provider", parseProviderOverride(env.VP_PROVIDER));
 	const modelOverride = parseModelOverride(env.VP_MODEL);
 	if (modelOverride) {
 		assignIfDefined(overrides, "provider", modelOverride.provider);
@@ -493,10 +503,12 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 		"cacheMaxAgeDays",
 		parseIntOverride(env.VP_CACHE_MAX_AGE_DAYS, 0, 3650),
 	);
+	// VP_PHASH_SIMILARITY_THRESHOLD is canonical; VP_PHASH_THRESHOLD stays as a
+	// compat alias (canonical wins when both are set).
 	assignIfDefined(
 		overrides,
 		"pHashSimilarityThreshold",
-		parseFloatOverride(env.VP_PHASH_THRESHOLD, 0, 1),
+		parseFloatOverride(env.VP_PHASH_SIMILARITY_THRESHOLD ?? env.VP_PHASH_THRESHOLD, 0, 1),
 	);
 	assignIfDefined(overrides, "baseUrl", parseBaseUrlOverride(env.VP_BASE_URL));
 
@@ -1239,32 +1251,6 @@ export function describeReadReason(reason: ReadImageReason, bytes?: number): str
 	return READ_REASON_MESSAGES[reason];
 }
 
-export function stripImagePaths(text: string, paths: readonly string[]): string {
-	if (paths.length === 0) return text;
-
-	const sorted = [...paths].sort((a, b) => b.length - a.length);
-	const tokens = new Map<string, string>();
-	let result = text;
-	for (const p of sorted) {
-		const token = `__VP_IMG_${++_phCounter}__`;
-		tokens.set(token, p);
-		const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-		result = result.replace(new RegExp(escaped, "g"), token);
-	}
-
-	for (const [token, p] of tokens) {
-		result = result.replace(token, `[ImagePath:${p}]`);
-	}
-
-	return result;
-}
-
-export function splitSubcommand(arg: string): { sub: string; value: string } {
-	const match = arg.match(/^(\S+)(?:\s+([\s\S]*))?$/);
-	if (!match) return { sub: "", value: "" };
-	return { sub: match[1]!.toLowerCase(), value: (match[2] ?? "").trim() };
-}
-
 const FENCE_TAG_RE = /<\/?vision_proxy_(?:description|analysis|joint_description)\b[^>]*>/gi;
 
 export function fenceUntrusted(text: string): string {
@@ -1769,6 +1755,3 @@ export function buildJointDescriptionFence(
 
 	return `<vision_proxy_joint_description ${parts.join(" ")}>\n${fenceUntrusted(description)}\n</vision_proxy_joint_description>`;
 }
-
-// Global path counter for stripImagePaths tokenization.
-let _phCounter = 0;

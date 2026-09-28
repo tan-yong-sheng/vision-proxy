@@ -32,7 +32,7 @@ import { runBackgroundCheck, runUpdate } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
 import type { GroundingFormat } from "./core.ts";
 import { ANALYZE_STDIN_MARKER } from "./integrations/runtime.ts";
-import { isKnownProvider } from "./provider.ts";
+import { isKnownProvider, listProviders } from "./provider.ts";
 import { VERSION } from "./version.ts";
 
 export interface FlagParse {
@@ -359,6 +359,31 @@ export function isHookContextFile(path: string | undefined): boolean {
 }
 
 /**
+ * Cap a consumed context-file payload at the stdin byte budget.
+ *
+ * Shared tail of readAnalyzeContextFile / readPendingContextFile: both
+ * hand back undefined (fail open to no context) on oversize or empty
+ * payloads, warning on stderr for the oversize case.
+ *
+ * @tags cli, runner
+ */
+export function finalizeContextContent(content: string): string | undefined {
+	if (Buffer.byteLength(content, "utf8") > MAX_ANALYZE_STDIN_BYTES) {
+		try {
+			process.stderr.write(
+				"[vision-proxy] analyze context file exceeds " +
+					`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
+			);
+		} catch {
+			// ignore: stderr may be torn down in tests
+		}
+		return undefined;
+	}
+	const trimmed = content.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+/**
  * Read one `--context-file` payload for `vp analyze` (U1).
  *
  * Hooks persist last-16 conversation context to a `0600` tempfile and
@@ -394,19 +419,7 @@ export function readAnalyzeContextFile(
 		}
 	}
 	if (content === null || content === undefined) return undefined;
-	if (Buffer.byteLength(content, "utf8") > MAX_ANALYZE_STDIN_BYTES) {
-		try {
-			process.stderr.write(
-				"[vision-proxy] analyze context file exceeds " +
-					`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
-			);
-		} catch {
-			// ignore: stderr may be torn down in tests
-		}
-		return undefined;
-	}
-	const trimmed = content.trim();
-	return trimmed ? trimmed : undefined;
+	return finalizeContextContent(content);
 }
 
 /** True when an agent host marker is present — gates pending auto-read.
@@ -480,19 +493,7 @@ export function readPendingContextFile(
 		}
 	}
 	if (content === null || content === undefined) return undefined;
-	if (Buffer.byteLength(content, "utf8") > MAX_ANALYZE_STDIN_BYTES) {
-		try {
-			process.stderr.write(
-				"[vision-proxy] analyze context file exceeds " +
-					`${MAX_ANALYZE_STDIN_BYTES} bytes; ignoring context file\n`,
-			);
-		} catch {
-			// ignore
-		}
-		return undefined;
-	}
-	const trimmed = content.trim();
-	return trimmed ? trimmed : undefined;
+	return finalizeContextContent(content);
 }
 
 function defaultReadContextFile(path: string): string | null {
@@ -632,6 +633,18 @@ integration options:
 `;
 
 /**
+ * Provider ids for `--provider` help, generated from the registry so the
+ * help text never drifts from the supported set.
+ *
+ * @tags cli, runner
+ */
+function providerHelpNames(): string {
+	return listProviders()
+		.map((p) => p.id)
+		.join(", ");
+}
+
+/**
  * Per-subcommand help blocks. Keyed by the command path (e.g. "config" or
  * "config init"). `renderHelp` resolves the most specific block, falling back
  * to the parent command, then the top-level HELP.
@@ -652,8 +665,7 @@ Options:
   --format <name>      grounding format: plain (default) | qwen_pixels |
                        molmo_points | deepseek_bbox | internvl_pixels |
                        gemini_normalized_1000
-  --provider <name>    override the configured provider (openai, anthropic,
-                       or google)
+  --provider <name>    override the configured provider (${providerHelpNames()})
   --model <id>         override the configured model id
   --joint              force a joint multi-image batch
   --crop <i:form>      crop image <index> before analysis (repeatable),

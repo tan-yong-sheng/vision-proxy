@@ -110,6 +110,28 @@ function rejectUnknownAgent(agent: string): IntegrationResult {
 	};
 }
 
+/**
+ * Resolve the install target and host-config path for an agent.
+ *
+ * Shared preamble of integrationInstall / integrationUninstall: returns
+ * the spec plus its resolved target and config path, or the
+ * unknown-agent result when the id is not in the catalog.
+ *
+ * @tags integration, lifecycle
+ */
+export function resolveAgentTarget(
+	agent: string,
+	opts: IntegrationInstallOptions = {},
+): { spec: AgentSpec; target: string; cfgPath: string } | { result: IntegrationResult } {
+	const spec = specFor(agent);
+	if (!spec) return { result: rejectUnknownAgent(agent) };
+	return {
+		spec,
+		target: spec.target({ installDir: opts.installDir }),
+		cfgPath: spec.configPath(),
+	};
+}
+
 // fallow-ignore-next-line unused-export
 /**
  * Install the generated artifact and register it with the host.
@@ -123,10 +145,9 @@ export async function integrationInstall(
 	agent: string,
 	opts: IntegrationInstallOptions = {},
 ): Promise<IntegrationResult> {
-	const spec = specFor(agent);
-	if (!spec) return rejectUnknownAgent(agent);
-	const target = spec.target({ installDir: opts.installDir });
-	const cfgPath = spec.configPath();
+	const resolved = resolveAgentTarget(agent, opts);
+	if ("result" in resolved) return resolved.result;
+	const { spec, target, cfgPath } = resolved;
 	const defaultVpBin = opts.dev ? currentCliEntryPoint() : undefined;
 	if (opts.dev && !defaultVpBin) {
 		return {
@@ -362,10 +383,9 @@ export async function integrationUninstall(
 	agent: string,
 	opts: IntegrationInstallOptions = {},
 ): Promise<IntegrationResult> {
-	const spec = specFor(agent);
-	if (!spec) return rejectUnknownAgent(agent);
-	const target = spec.target({ installDir: opts.installDir });
-	const cfgPath = spec.configPath();
+	const resolved = resolveAgentTarget(agent, opts);
+	if ("result" in resolved) return resolved.result;
+	const { spec, target, cfgPath } = resolved;
 	let configRemoved = false;
 	if (cfgPath && existsSync(cfgPath)) {
 		const { raw } = spec.readConfig();

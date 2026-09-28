@@ -408,12 +408,18 @@ export function readAnalyzeContextFile(
 /** True when an agent host marker is present — gates pending auto-read.
  * PI_CODING_AGENT is Pi's documented child-process detection signal
  * (Pi sets PI_CODING_AGENT=true for LLM-callable shell tools); without it
- * a Pi-spawned bare launcher never reaches the pending fallback. */
+ * a Pi-spawned bare launcher never reaches the pending fallback.
+ * CODEX_SESSION_ID/CODEX_THREAD_ID are what Codex actually injects into
+ * model-spawned shells (CODEX_HOME is a config root Codex itself reads, not
+ * a child-process signal); without them a Codex-spawned bare launcher is
+ * likewise marker-less. */
 export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
 	return (
 		!!env.CLAUDECODE ||
 		!!env.CLAUDE_CODE_ENTRY ||
 		!!env.CODEX_HOME ||
+		!!env.CODEX_SESSION_ID ||
+		!!env.CODEX_THREAD_ID ||
 		!!env.PI_DEBUG ||
 		!!env.PI_CODING_AGENT ||
 		!!env.OPENCODE ||

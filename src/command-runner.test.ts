@@ -8,8 +8,18 @@
  * routing is pinned without stream capture.
  */
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import * as cli from "./cli.ts";
 import {
 	HELP,
@@ -31,6 +41,32 @@ import { ANALYZE_STDIN_MARKER } from "./integrations/runtime.ts";
 import { VERSION } from "./version.ts";
 
 describe("command-runner seam", () => {
+	// The context-file handoff dir derives from the live TMPDIR/TMP/TEMP,
+	// so tests touching it must run against an isolated temp root: the
+	// full suite runs test files in parallel processes sharing one TMPDIR,
+	// and the well-known __pending__.txt slot would otherwise race between
+	// files (this flaked CI once: a parallel writer replaced the pending
+	// this test had just written). Save + restore the temp vars per test.
+	const ORIG_TMPDIR = process.env.TMPDIR;
+	const ORIG_TMP = process.env.TMP;
+	const ORIG_TEMP = process.env.TEMP;
+	let sandbox = "";
+	beforeEach(() => {
+		sandbox = mkdtempSync(join(tmpdir(), "vp-ctxfile-test-"));
+		process.env.TMPDIR = sandbox;
+		delete process.env.TMP;
+		delete process.env.TEMP;
+	});
+	afterEach(() => {
+		if (ORIG_TMPDIR === undefined) delete process.env.TMPDIR;
+		else process.env.TMPDIR = ORIG_TMPDIR;
+		if (ORIG_TMP === undefined) delete process.env.TMP;
+		else process.env.TMP = ORIG_TMP;
+		if (ORIG_TEMP === undefined) delete process.env.TEMP;
+		else process.env.TEMP = ORIG_TEMP;
+		if (sandbox) rmSync(sandbox, { recursive: true, force: true });
+		sandbox = "";
+	});
 	it("keeps the cli.ts compatibility surface by identity", () => {
 		assert.equal(cli.parseFlags, parseFlags);
 	});

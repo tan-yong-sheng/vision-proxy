@@ -11,6 +11,12 @@ This page describes every config key and shows copy-paste JSON examples.
 4. Environment variables (`VP_*` and provider env vars)
 5. Built-in defaults
 
+## Project overrides user: warning
+
+When `.vision-proxy.json` in the current directory sets `baseUrl`, `systemPrompt`, or `apiKey` to a value that differs from the user-level file (`~/.vision-proxy/config.json`), `vp` prints a `WARNING` line to stderr naming the key and the project file. Values are never printed. No user file means nothing is overridden, so no warning. An explicit `--config <path>` file is exempt: passing it is explicit consent, so no warning is emitted.
+
+Planned follow-up: in a later release, project-level `baseUrl` and `apiKey` will be ignored entirely (fail-closed); `systemPrompt` keeps the warn-only behavior. This release only warns (non-breaking).
+
 ## Full schema
 
 ```typescript

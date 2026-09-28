@@ -28,6 +28,31 @@ function projectConfigPath(cwd: string): string {
 	return path.join(cwd, ".vision-proxy.json");
 }
 
+/** Keys that warn when a project file overrides the user-level value. */
+const PROJECT_OVERRIDE_WARN_KEYS = ["baseUrl", "systemPrompt", "apiKey"] as const;
+
+/**
+ * Emit one stderr warning per key where the project file overrides a
+ * differing user-level value. Explicit --config files are exempt (explicit
+ * user action = consent). Values are never printed (apiKey is secret).
+ */
+function warnOnProjectOverrides(
+	user: Partial<VisionConfig>,
+	project: Partial<VisionConfig>,
+	projectPath: string,
+): void {
+	for (const key of PROJECT_OVERRIDE_WARN_KEYS) {
+		const userVal = (user as Record<string, unknown>)[key];
+		const projectVal = (project as Record<string, unknown>)[key];
+		if (userVal === undefined || projectVal === undefined) continue;
+		if (userVal === projectVal) continue;
+		process.stderr.write(
+			`[vision-proxy] WARNING: project config "${projectPath}" overrides user-level "${key}". ` +
+				`Project values take precedence for this run.\n`,
+		);
+	}
+}
+
 export async function readJsonFile(file: string): Promise<Partial<VisionConfig> | null> {
 	try {
 		const raw = await fs.readFile(file, "utf8");
@@ -57,14 +82,15 @@ export async function loadConfig(
 		}
 	} else {
 		const user = await readPersistentFile();
-		const project = await readJsonFile(projectConfigPath(cwd));
-		if (user && Object.keys(user).length > 0) {
+		const project = (await readJsonFile(projectConfigPath(cwd))) ?? {};
+		if (Object.keys(user).length > 0) {
 			fileConfig = { ...fileConfig, ...user };
 			resolvedFrom = "user:~/.vision-proxy/config.json";
 		}
-		if (project && Object.keys(project).length > 0) {
+		if (Object.keys(project).length > 0) {
 			fileConfig = { ...fileConfig, ...project };
 			resolvedFrom = "project:.vision-proxy.json";
+			warnOnProjectOverrides(user, project, projectConfigPath(cwd));
 		}
 	}
 

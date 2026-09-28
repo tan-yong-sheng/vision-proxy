@@ -180,7 +180,9 @@ function runAnalyze(images: string[], extras): string | null {
     maxBuffer: MAX_BUFFER_BYTES,
   };
   if (invocation.stdin) opts.input = invocation.stdin;
-  var result = spawnSync(invocation.command, invocation.args, opts) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown };
+  var result = spawnSync(invocation.command, invocation.args, opts) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown; stderr?: unknown };
+  var childStderr = String(result.stderr == null ? "" : result.stderr);
+  if (childStderr) process.stderr.write(childStderr);
   if (result.error) {
     if (result.error.code === "ENOENT") {
       process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");

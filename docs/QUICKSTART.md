@@ -98,7 +98,7 @@ vp analyze screenshot.png
 vp integration install claude-code
 ```
 
-See [INTEGRATIONS.md](./INTEGRATIONS.md) for Claude Code, Codex, Pi, and opencode.
+See [INTEGRATIONS.md](./INTEGRATIONS.md) for Claude Code, Codex, and Pi (opencode paused while its v2 API stabilizes).
 
 ## Next steps
 

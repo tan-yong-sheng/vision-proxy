@@ -307,7 +307,7 @@ test("readReminder keeps each host's historical submit-time phrasing", () => {
 			"vision-proxy intercepts image reads and supplies a vision-model description as context. " +
 			"Do not answer about an image without reading it first.",
 	);
-	// Pi context and opencode chat.message: message subject, read tool word, marker.
+	// Pi context: message subject, read tool word, marker.
 	assert.equal(
 		readReminder(["/a/b.png"], "[vision-proxy:read-reminder]", "message", "read"),
 		"[vision-proxy:read-reminder] The user message references the following image file(s):\n" +

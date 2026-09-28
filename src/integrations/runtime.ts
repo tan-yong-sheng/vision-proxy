@@ -2,7 +2,7 @@
  * Canonical standalone hook runtime.
  *
  * Single home for the analysis policy shared by every generated host artifact
- * (Claude/Codex stdio hook script, Pi extension, opencode plugin): image path
+ * (Claude/Codex stdio hook script, Pi extension): image path
  * classification, path extraction, env parsing, reminder and instruction
  * rendering, vp command resolution, and analyze argument construction. Each
  * host adapter calls into this policy and owns only its lifecycle translation:
@@ -10,8 +10,7 @@
  * sync/async executors, and deny/output shapes.
  *
  * Standalone constraint: the generated artifacts must run with no
- * vision-proxy package present (plain npx tsx, Pi jiti, opencode plugin
- * loader), so this module ships its policy in two shapes from one source of
+ * vision-proxy package present (plain npx tsx, Pi jiti), so this module ships its policy in two shapes from one source of
  * truth:
  *
  * - real functions below, which repo unit tests exercise directly
@@ -41,7 +40,7 @@ const IMAGE_EXT = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif", "i
 
 /**
  * Marker prefix on injected reminders. Hosts whose lifecycle re-fires for the
- * same message (Pi context, opencode chat.message) strip their own prior
+ * same message (Pi context) strip their own prior
  * reminders by this prefix so context never stacks duplicates.
  */
 const REMINDER_MARKER = "[vision-proxy:read-reminder]";
@@ -278,14 +277,14 @@ function appendContextFileArg(command: string, quotedPath: string): string {
 // unbounded per-message in both (only the 3000-char total cap applies).
 // The input is host-agnostic: an array of { role, content } messages where
 // content is a string or an array of blocks; only text blocks count. Each
-// host adapter maps its native message shape (Pi entries, opencode
-// info/parts, CC transcript lines, Codex rollout items) before calling.
+// host adapter maps its native message shape (Pi entries,
+// CC transcript lines, Codex rollout items) before calling.
 
 /**
  * Quote an argv value for the generated shell artifacts.
  *
  * Single source for the POSIX single-quote escaping shared by the hook
- * script, the Pi extension, and the opencode plugin when they append
+ * script and the Pi extension when they append
  * `--context-file <path>` to a model-invoked command. Kept in the
  * canonical runtime so the tested implementation and the shipped source
  * cannot drift; composed into HOOK_RUNTIME_SOURCE like every other
@@ -467,7 +466,7 @@ function withImageInstruction(
 	marker?: string,
 	toolWord: string = "Read",
 ): string {
-	// Hosts whose lifecycle re-fires (opencode) pass the shared marker so the
+	// Hosts whose lifecycle re-fires (Pi context) pass the shared marker so the
 	// injected text stays recognizable; single-fire hosts pass none and keep
 	// their historical marker-free deny shape.
 	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
@@ -493,7 +492,7 @@ function readReminder(
 ): string {
 	// Pure string work, never shells out. Subject and tool wording stay
 	// parameters so each host keeps its exact historical phrasing: the stdio
-	// script reminds with prompt/Read while Pi and opencode use message/read.
+	// script reminds with prompt/Read while Pi uses message/read.
 	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
 	var prefix = marker ? marker + " " : "";
 	// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.

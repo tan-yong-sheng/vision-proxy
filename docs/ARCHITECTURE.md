@@ -13,14 +13,13 @@ boundary below.
 by every generated host artifact: image path classification, path
 extraction, env parsing, reminder/instruction rendering, `vp` command
 resolution, and analyze argument construction. Each host adapter
-(`src/integrations/hook-script.ts` for Claude Code/Codex, `src/integrations/pi-extension.ts`,
-`src/integrations/opencode-plugin.ts`) calls into this policy and owns only its
+(`src/integrations/hook-script.ts` for Claude Code/Codex,
+`src/integrations/pi-extension.ts`) calls into this policy and owns only its
 lifecycle translation (event shapes, image-cache refs, mode gating,
 executors, deny/output shapes).
 
 Standalone constraint: generated artifacts must run with no
-vision-proxy package present (plain `npx tsx`, Pi jiti, opencode plugin
-loader), so the module ships its policy in two shapes from one source
+vision-proxy package present (plain `npx tsx`, Pi jiti), so the module ships its policy in two shapes from one source
 of truth: real functions (exercised directly by `src/integrations/runtime.test.ts`)
 plus `HOOK_RUNTIME_SOURCE`, composed from those same functions via
 `toString` and inlined into each emitted file at `generate()` time.
@@ -32,8 +31,8 @@ tests over the final artifacts (`src/integrations/generated-sources.test.ts`).
 ## Integration catalog and lifecycle
 
 `src/integrations/` splits host knowledge from orchestration, with the
-embedded host sources (`hook-script.ts`, `pi-extension.ts`,
-`opencode-plugin.ts`) and the shared hook runtime living in the same
+embedded host sources (`hook-script.ts`, `pi-extension.ts`)
+and the shared hook runtime living in the same
 module:
 
 - `catalog.ts` owns every host-specific fact: artifact/config paths,
@@ -42,7 +41,7 @@ module:
   stay metadata-free (standard keys only). Installed artifacts use the
   feature-suffix naming scheme (`vision-proxy_read.ts`); a marker-stamped
   legacy `vision-proxy.ts` in the install dir is auto-removed on
-  install/uninstall so auto-loading hosts (pi/opencode) never double-load.
+  install/uninstall so the auto-loading Pi host never double-loads.
 - `lifecycle.ts` owns install/show/list/status/uninstall orchestration:
   artifact writes, config registration, empty-dir cleanup, version
   reporting, unknown-agent handling.

@@ -355,8 +355,8 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     var invocation = buildAnalyzeArgs(images, maxTokens, extras);
     var command = invocation.command;
     var args = invocation.args;
-    // Sensitive text travels on stdin (CWE-214), like the stdio hook and the
-    // opencode plugin. Nothing sensitive is appended to the command line.
+    // Sensitive text travels on stdin (CWE-214), like the stdio hook.
+    // Nothing sensitive is appended to the command line.
     var stdinText = invocation.stdin;
     var vp = resolveVpBin();
     let settled = false;

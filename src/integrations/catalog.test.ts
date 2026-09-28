@@ -18,14 +18,12 @@ import {
 	codexConfigPath,
 	codexHookScriptPath,
 	generateHookScript,
-	generateOpencodePlugin,
 	generatePiExtension,
 	getHomeDir,
 	legacyArtifactPath,
 	legacyArtifactPresent,
 	legacyMarkerPath,
 	makeTsHookCommand,
-	opencodePluginsDir,
 	piExtensionsDir,
 	quotePath,
 	removeLegacyArtifact,
@@ -47,8 +45,9 @@ function reset() {
 	else process.env.HOME = ORIG_HOME;
 }
 
-test("SUPPORTED lists the four hosts and specFor resolves each", () => {
-	assert.deepEqual(SUPPORTED, ["pi", "claude-code", "codex", "opencode"]);
+test("SUPPORTED lists the three hosts and specFor resolves each", () => {
+	// opencode paused while its v2 plugin API stabilizes.
+	assert.deepEqual(SUPPORTED, ["pi", "claude-code", "codex"]);
 	for (const agent of SUPPORTED) {
 		const spec = specFor(agent);
 		assert.ok(spec, `${agent} must resolve a spec`);
@@ -60,7 +59,7 @@ test("SUPPORTED lists the four hosts and specFor resolves each", () => {
 test("generated sources embed the rendered version marker", () => {
 	const marker = renderVersionMarker();
 	assert.ok(marker.includes(VERSION));
-	for (const generate of [generateHookScript, generatePiExtension, generateOpencodePlugin]) {
+	for (const generate of [generateHookScript, generatePiExtension]) {
 		const source = generate();
 		assert.ok(source.includes(marker), "generated source must carry the version marker");
 		assert.ok(!source.includes("__VP_VERSION__PLACEHOLDER__"), "placeholder must render away");
@@ -69,7 +68,7 @@ test("generated sources embed the rendered version marker", () => {
 
 test("development-generated sources default to the local CLI entry point", () => {
 	const localCli = "/work/vision-proxy/dist/cli.js";
-	for (const generate of [generateHookScript, generatePiExtension, generateOpencodePlugin]) {
+	for (const generate of [generateHookScript, generatePiExtension]) {
 		const source = generate(localCli);
 		assert.match(source, new RegExp(`var DEFAULT_VP_BIN = ${JSON.stringify(localCli)}`));
 	}
@@ -123,11 +122,8 @@ test("file integration status tolerates a non-file target", () => {
 	const home = isolate();
 	try {
 		const piDir = join(home, "pi");
-		const opencodeDir = join(home, "opencode");
 		mkdirSync(join(piDir, "vision-proxy.ts"), { recursive: true });
-		mkdirSync(join(opencodeDir, "vision-proxy.ts"), { recursive: true });
 		assert.equal(specFor("pi")!.installedVersion({ installDir: piDir }), undefined);
-		assert.equal(specFor("opencode")!.installedVersion({ installDir: opencodeDir }), undefined);
 	} finally {
 		reset();
 	}
@@ -142,7 +138,6 @@ test("catalog paths honor process.env.HOME", () => {
 		assert.equal(claudeCodeConfigPath(), join(home, ".claude", "settings.json"));
 		assert.equal(codexConfigPath(), join(home, ".codex", "hooks.json"));
 		assert.equal(piExtensionsDir(), join(home, ".pi", "agent", "extensions"));
-		assert.equal(opencodePluginsDir(), join(home, ".config", "opencode", "plugins"));
 		assert.equal(legacyMarkerPath("claude-code"), join(home, ".claude", "vision-proxy.hook.json"));
 		assert.equal(legacyMarkerPath("codex"), join(home, ".codex", "vision-proxy.hook.json"));
 	} finally {
@@ -177,11 +172,8 @@ test("file-agent specs treat the artifact as the install signal", () => {
 	const home = isolate();
 	try {
 		assert.equal(specFor("pi")!.configPath(), "");
-		assert.equal(specFor("opencode")!.configPath(), "");
 		assert.equal(specFor("pi")!.hookCommand(), "");
-		assert.equal(specFor("opencode")!.hookCommand(), "");
 		assert.ok(specFor("pi")!.target({}).startsWith(home));
-		assert.ok(specFor("opencode")!.target({}).startsWith(home));
 	} finally {
 		reset();
 	}

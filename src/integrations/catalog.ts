@@ -14,19 +14,21 @@ import { dirname, join } from "node:path";
 import { extractMarkerVersion, renderVersionMarker } from "../version.ts";
 import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
 import { applyHooks, hooksInstalled, removeHooks } from "./hooks-config.ts";
-import { OPENCODE_PLUGIN_SOURCE } from "./opencode-plugin.ts";
 import { PI_EXTENSION_SOURCE } from "./pi-extension.ts";
 import type { AgentSpec } from "./types.ts";
 
-/** Every agent `vp integration` knows how to install. */
-export const SUPPORTED = ["pi", "claude-code", "codex", "opencode"];
+/** Every agent `vp integration` knows how to install.
+ * opencode was removed while its v2 plugin API stabilizes: the v1 plugin
+ * this repo shipped does not load under v2 (SchemaError on V1-style
+ * exports), and developing against both APIs at once is churn. Revisit
+ * once v2 stabilizes; see docs/INTEGRATIONS.md. */
+export const SUPPORTED = ["pi", "claude-code", "codex"];
 
 /** Installed host artifact name (feature-suffix convention: the Read-time analyze hooks). */
 export const ARTIFACT_FILENAME = "vision-proxy_read.ts";
 const PI_EXTENSION_FILENAME = ARTIFACT_FILENAME;
 const CLAUDE_HOOK_FILENAME = ARTIFACT_FILENAME;
 const CODEX_HOOK_FILENAME = ARTIFACT_FILENAME;
-const OPENCODE_PLUGIN_FILENAME = ARTIFACT_FILENAME;
 
 /** Legacy artifact name used before the feature-suffix naming. */
 export const LEGACY_ARTIFACT_FILENAME = "vision-proxy.ts";
@@ -74,11 +76,6 @@ export function claudeHookScriptPath(): string {
  */
 export function codexHookScriptPath(): string {
 	return join(getHomeDir(), ".codex", "hooks", CODEX_HOOK_FILENAME);
-}
-
-/** Absolute path to the opencode plugins directory. */
-export function opencodePluginsDir(): string {
-	return join(getHomeDir(), ".config", "opencode", "plugins");
 }
 
 /** Legacy marker file left by older installs (version used to live outside the config). */
@@ -164,15 +161,6 @@ export function stampSubmitToolWord(source: string, toolWord: string): string {
  */
 export function generatePiExtension(defaultVpBin?: string): string {
 	return renderGeneratedSource(PI_EXTENSION_SOURCE, defaultVpBin);
-}
-
-/**
- * Render the opencode plugin source with the current version marker embedded.
- *
- * @tags integration, catalog
- */
-export function generateOpencodePlugin(defaultVpBin?: string): string {
-	return renderGeneratedSource(OPENCODE_PLUGIN_SOURCE, defaultVpBin);
 }
 
 /**
@@ -285,29 +273,6 @@ function makeHookAgentSpec(opts: {
 	};
 }
 
-const opencodeSpec: AgentSpec = {
-	id: "opencode",
-	target: ({ installDir }) => join(installDir ?? opencodePluginsDir(), OPENCODE_PLUGIN_FILENAME),
-	locationLabel: ({ installDir }) =>
-		join(installDir ?? opencodePluginsDir(), OPENCODE_PLUGIN_FILENAME),
-	generate: generateOpencodePlugin,
-	readConfig: () => ({ raw: "" }),
-	configPath: () => "",
-	hookCommand: () => "",
-	apply: (raw) => raw,
-	remove: (raw) => ({ raw, removed: false }),
-	isInstalled: () => existsSync(opencodeSpec.target({})),
-	installedVersion: ({ installDir }) => {
-		const path = opencodeSpec.target({ installDir });
-		if (!existsSync(path)) return undefined;
-		try {
-			return extractMarkerVersion(readFileSync(path, "utf8"));
-		} catch {
-			return undefined;
-		}
-	},
-};
-
 const claudeCode: AgentSpec = makeHookAgentSpec({
 	id: "claude-code",
 	scriptPath: claudeHookScriptPath,
@@ -385,8 +350,8 @@ export interface LegacyCleanupResult {
 }
 
 /**
- * Remove the generated legacy artifact next to `target` (pi/opencode dirs
- * auto-load every file in their dirs, so a stale legacy file would double-load).
+ * Remove the generated legacy artifact next to `target` (the Pi dir
+ * auto-loads every file in it, so a stale legacy file would double-load).
  * Only marker-stamped files we generated are ever removed; the marker gate is
  * what protects user-authored files and the shared hook dirs (claude/codex).
  *
@@ -416,7 +381,6 @@ export function removeLegacyArtifact(target: string): LegacyCleanupResult {
  */
 export function specFor(agent: string): AgentSpec | undefined {
 	if (agent === "pi") return piSpec;
-	if (agent === "opencode") return opencodeSpec;
 	if (agent === "claude-code") return claudeCode;
 	if (agent === "codex") return codex;
 	return undefined;

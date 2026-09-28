@@ -3,7 +3,7 @@
  *
  * The `AgentSpec` interface is the installer-side seam: hook agents
  * (Claude Code, Codex) translate a generated script plus a JSON hooks config,
- * while file agents (Pi, opencode) treat the generated file as the install
+ * while the Pi file agent treats the generated file as the install
  * signal. Host quirks stay in the catalog; lifecycle policy stays in
  * `lifecycle.ts`; command wiring stays in `src/commands/integration.ts`.
  */

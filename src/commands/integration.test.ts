@@ -1623,12 +1623,32 @@ test("uninstall opencode honors the installDir override", async () => {
 	mkdirSync(dir, { recursive: true });
 	const legacy = join(dir, "vision-proxy_read.ts");
 	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	// A same-named file in the real home-relative plugins dir must survive:
+	// the override scopes both enumeration and deletion to `dir`.
+	const homePlugins = legacyOpencodeDir(home);
+	mkdirSync(homePlugins, { recursive: true });
+	const homeLegacy = join(homePlugins, "vision-proxy_read.ts");
+	writeFileSync(homeLegacy, `__VP_VERSION__:0.0.9\n`);
 	const r = await runIntegration("uninstall", "opencode", dir);
 	assert.equal(r.ok, true);
 	assert.match(r.message, /uninstalled opencode integration/);
 	assert.equal(existsSync(legacy), false);
-	// The real home-relative plugins dir is untouched by the override.
-	assert.equal(existsSync(join(legacyOpencodeDir(home), "vision-proxy_read.ts")), false);
+	assert.equal(
+		existsSync(homeLegacy),
+		true,
+		"home-relative file must survive an override uninstall",
+	);
+	reset();
+});
+
+test("status names the inspected dir in the uninstall hint for installDir callers", async () => {
+	const home = isolate();
+	const dir = join(home, "ext");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "vision-proxy_read.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "", dir);
+	assert.equal(r.ok, true);
+	assert.match(r.message, /uninstall with the same installDir/);
 	reset();
 });
 

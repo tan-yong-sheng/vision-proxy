@@ -125,7 +125,16 @@ function rejectUnknownAgent(agent: string): IntegrationResult {
  */
 async function uninstallLegacyOpencode(installDir?: string): Promise<IntegrationResult> {
 	const dir = installDir ?? legacyOpencodePluginsDir();
-	const files = legacyOpencodePluginFiles(dir);
+	let files: string[];
+	try {
+		files = legacyOpencodePluginFiles(dir);
+	} catch {
+		return {
+			ok: false,
+			message: `failed to read ${dir}`,
+			code: 1,
+		};
+	}
 	if (files.length === 0) {
 		return {
 			ok: true,
@@ -134,20 +143,26 @@ async function uninstallLegacyOpencode(installDir?: string): Promise<Integration
 			code: 0,
 		};
 	}
+	const removed: string[] = [];
+	const failures: string[] = [];
 	for (const file of files) {
 		try {
 			rmSync(file);
-		} catch {
-			return {
-				ok: false,
-				message: `failed to remove ${file}`,
-				code: 1,
-			};
+			removed.push(file);
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code !== "ENOENT") failures.push(file);
 		}
+	}
+	if (failures.length > 0) {
+		return {
+			ok: false,
+			message: `failed to remove ${failures.join(", ")}`,
+			code: 1,
+		};
 	}
 	return {
 		ok: true,
-		message: `uninstalled opencode integration (removed ${files.join(", ")})`,
+		message: `uninstalled opencode integration (removed ${removed.join(", ")})`,
 		code: 0,
 	};
 }
@@ -344,14 +359,28 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 	let outdated = 0;
 	let installedCount = 0;
 	const legacyOpencodeDir = installDir ?? legacyOpencodePluginsDir();
-	const legacyOpencodeFiles = legacyOpencodePluginFiles(legacyOpencodeDir);
+	let legacyOpencodeFiles: string[];
+	try {
+		legacyOpencodeFiles = legacyOpencodePluginFiles(legacyOpencodeDir);
+	} catch {
+		return {
+			ok: false,
+			message: `failed to read ${legacyOpencodeDir}`,
+			code: 1,
+		};
+	}
 	if (legacyOpencodeFiles.length > 0) {
 		// Orphaned v1 plugin: no spec and no install path, but opencode
 		// auto-loads every file in its plugins dir, so a stale file is a
 		// live legacy install — count it as installed and out of date.
 		// installDir (when set) stands in for the whole home-relative dir.
+		// installDir callers inspect a non-default dir, so the remediation
+		// names it: the bare command would clean the default dir instead.
+		const uninstallHint = installDir
+			? `uninstall with the same installDir (${legacyOpencodeDir})`
+			: "run: vp integration uninstall opencode";
 		for (const file of legacyOpencodeFiles) {
-			lines.push(`! opencode  legacy install at ${file} - run: vp integration uninstall opencode`);
+			lines.push(`! opencode  legacy install at ${file} - ${uninstallHint}`);
 		}
 		// One agent, one count: both filenames present still means a single
 		// legacy opencode integration (detail lines above list each file).

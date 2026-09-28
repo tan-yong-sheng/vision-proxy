@@ -26,7 +26,6 @@ interface VisionConfig {
   maxBatch: number;
   cacheSize: number;
   cacheMaxAgeDays: number;
-  pHashSimilarityThreshold: number;
   groundingModels: Record<string, { format: string }>;
   /** Base URL override for the active provider. */
   baseUrl: string;
@@ -49,7 +48,6 @@ interface VisionConfig {
 | `maxBatch` | number | `4` | **Deprecated.** One-release alias for `maxImagesPerCall`. Set `maxImagesPerCall` instead. |
 | `cacheSize` | number | `50` | Max number of cached descriptions. |
 | `cacheMaxAgeDays` | number | `30` | Days before a cache entry is considered stale. |
-| `pHashSimilarityThreshold` | number | `0.8` | pHash similarity threshold for cache hits. |
 | `groundingModels` | object | `google/gemini-2.5-pro` + `google/gemini-3-pro` (both `gemini_normalized_1000`) | Per-model grounding format overrides, keyed by exact case-sensitive `${provider}/${modelId}`. Add your own keys (e.g. `openai/...` for gateway routing) via config file; `--format` overrides per call. |
 | `baseUrl` | string | `""` | Base URL override for the active provider, e.g. `"http://localhost:8000/v1"`. Provider `*_BASE_URL` env vars still take precedence. `VP_BASE_URL` also works. |
 | `apiKey` | string | `""` | Provider API key persisted as plain text in config. Prefer `vp provider store-key` for OS keyring storage. |
@@ -105,12 +103,15 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_MAX_BATCH` | `maxBatch` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL`. |
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
-| `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` (canonical; legacy `VP_PHASH_THRESHOLD` alias still works, canonical wins when both are set) |
 | `VP_BASE_URL` | `baseUrl` | `VP_BASE_URL=http://localhost:8000/v1` |
 | `VP_DOWNLOAD_TIMEOUT` | - | `VP_DOWNLOAD_TIMEOUT=30000` |
 | `VP_STRICT_MIME` | - | `VP_STRICT_MIME=1` |
 | `VP_NO_UPDATE_NOTIFIER` | - | `VP_NO_UPDATE_NOTIFIER=1` disables the background update check and notice. |
 | `VP_CLAUDE_CONFIG_DIR` | - | `VP_CLAUDE_CONFIG_DIR=/custom/.claude` |
+
+### Removed keys
+
+`pHashSimilarityThreshold` (env: `VP_PHASH_SIMILARITY_THRESHOLD`, legacy alias `VP_PHASH_THRESHOLD`) was removed: the cache is exact-hash only (`buildToolCacheKey`), so the threshold had no consumers. Config files or environments still setting it are ignored — delete the key.
 
 ### Update notifier
 

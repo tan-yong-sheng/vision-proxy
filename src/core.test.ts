@@ -362,7 +362,7 @@ describe("resolveConfig baseUrl", () => {
 	});
 });
 
-describe("resolveConfig VP_PROVIDER / VP_PHASH aliases", () => {
+describe("resolveConfig VP_PROVIDER aliases", () => {
 	// Standalone-provider default-model resolution needs the registry lookup
 	// (production wires getProvider via loadConfig in config.ts).
 	const probeDefaults = (id: string): string | undefined =>
@@ -414,26 +414,6 @@ describe("resolveConfig VP_PROVIDER / VP_PHASH aliases", () => {
 	it("ignores an invalid VP_PROVIDER", () => {
 		const cfg = resolveConfig({ VP_PROVIDER: "bogus!!" } as NodeJS.ProcessEnv);
 		assert.equal(cfg.provider, DEFAULT_CONFIG.provider);
-	});
-
-	it("applies the canonical VP_PHASH_SIMILARITY_THRESHOLD", () => {
-		const cfg = resolveConfig({
-			VP_PHASH_SIMILARITY_THRESHOLD: "0.95",
-		} as NodeJS.ProcessEnv);
-		assert.equal(cfg.pHashSimilarityThreshold, 0.95);
-	});
-
-	it("keeps the legacy VP_PHASH_THRESHOLD alias working", () => {
-		const cfg = resolveConfig({ VP_PHASH_THRESHOLD: "0.9" } as NodeJS.ProcessEnv);
-		assert.equal(cfg.pHashSimilarityThreshold, 0.9);
-	});
-
-	it("prefers VP_PHASH_SIMILARITY_THRESHOLD over the legacy alias", () => {
-		const cfg = resolveConfig({
-			VP_PHASH_SIMILARITY_THRESHOLD: "0.95",
-			VP_PHASH_THRESHOLD: "0.5",
-		} as NodeJS.ProcessEnv);
-		assert.equal(cfg.pHashSimilarityThreshold, 0.95);
 	});
 });
 

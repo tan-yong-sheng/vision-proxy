@@ -59,7 +59,14 @@ test("hook script keeps its stdio adapter: image-cache refs, spawnSync, deny sha
 	assert.ok(HOOK_SCRIPT_SOURCE.includes("image-cache"), "must keep image-cache ref resolution");
 	assert.ok(HOOK_SCRIPT_SOURCE.includes("IMAGE_REF_RE"), "must keep the [Image #N] pattern");
 	assert.ok(HOOK_SCRIPT_SOURCE.includes("spawnSync"), "must keep the sync executor");
-	assert.ok(!HOOK_SCRIPT_SOURCE.includes("getMode"), "must stay unconditional (no Pi mode gating)");
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes("isAnalysisDisabled(process.env.VP_MODE)"),
+		"must gate on the shared off-switch (VP_MODE=off stops the hook like Pi)",
+	);
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes("resolveHookTimeout(process.env.VP_HOOK_TIMEOUT_MS)"),
+		"must read the timeout live through the shared resolver",
+	);
 	assert.ok(
 		HOOK_SCRIPT_SOURCE.includes("hookSpecificOutput"),
 		"must keep the hookSpecificOutput deny shape",
@@ -78,6 +85,18 @@ test("hook script keeps its stdio adapter: image-cache refs, spawnSync, deny sha
 test("pi extension keeps its lifecycle adapter: mode gating, abort handling, context shape", () => {
 	assert.ok(PI_EXTENSION_SOURCE.includes("getMode()"), "must keep Pi mode gating");
 	assert.ok(PI_EXTENSION_SOURCE.includes("cachedConfigMode"), "must keep the cached config lookup");
+	assert.ok(
+		PI_EXTENSION_SOURCE.includes("isAnalysisDisabled(envMode)"),
+		"must decide the off-switch through the shared check",
+	);
+	assert.ok(
+		PI_EXTENSION_SOURCE.includes("currentTimeoutMs()"),
+		"must resolve the timeout live per invocation (no frozen module-load const)",
+	);
+	assert.ok(
+		!PI_EXTENSION_SOURCE.includes("var TIMEOUT_MS = hookTimeoutMs"),
+		"must not freeze the timeout at startup",
+	);
 	assert.ok(PI_EXTENSION_SOURCE.includes("SIGTERM"), "must keep the AbortSignal executor");
 	assert.ok(PI_EXTENSION_SOURCE.includes("SIGKILL"), "must keep the force-stop executor");
 	assert.ok(PI_EXTENSION_SOURCE.includes('pi.on("input"'), "must keep the input handler");

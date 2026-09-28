@@ -82,256 +82,11 @@ import { homedir, tmpdir } from "node:os";
 `;
 
 const PI_EXTENSION_ADAPTER = String.raw`
-var TIMEOUT_MS = hookTimeoutMs(process.env.VP_HOOK_TIMEOUT_MS);
-
-var CONTEXT_FILE_PREFIX = "vp-context-";
-// Stale-file TTL: handoffs older than this are pruned before each write.
-var CONTEXT_FILE_TTL_MS = 10 * 60 * 1000;
-
-function contextFileDir(): string {
-  var base = "";
-  try {
-    var tmp = process.env.TMPDIR || process.env.TMP || process.env.TEMP;
-    if (tmp && tmp.trim()) base = tmp.trim();
-  } catch {
-    base = "";
-  }
-  if (!base) {
-    try {
-      base = tmpdir();
-    } catch {
-      base = "";
-    }
-  }
-  if (!base) base = "/tmp";
-  return join(base, "vision-proxy-context");
-}
-
-/**
- * True when an existing context directory is safe to use: not a symlink,
- * owned by the current user, and (unless lax modes are being repaired)
- * mode 0700 with no group/world access (POSIX only; on Windows the mode
- * check is skipped and privacy relies on per-user temp ACL inheritance).
- * Fail-closed on any stat failure so callers abort rather than write into
- * an untrusted directory.
- */
-function isSafeContextDir(dir: string, allowLaxMode?: boolean): boolean {
-  var st = null;
-  try {
-    st = lstatSync(dir);
-  } catch {
-    return false;
-  }
-  if (!st) return false;
-  try {
-    if (st.isSymbolicLink()) return false;
-  } catch {
-    return false;
-  }
-  try {
-    if (typeof process.getuid === "function" && st.uid !== process.getuid()) return false;
-  } catch {
-    return false;
-  }
-  // Windows has no POSIX owner/group/other bits: mkdir ignores mode and
-  // chmod only toggles the read-only flag, so the bit check is skipped
-  // there and privacy relies on the per-user temp directory ACL
-  // inheritance. Ownership and symlink checks always apply where available.
-  // Lax group/world bits are tolerated only on the pre-repair pass: an
-  // existing 0755 directory owned by us is repaired to 0700 below, then
-  // rechecked strictly.
-  if (!allowLaxMode && process.platform !== "win32") {
-    try {
-      if ((st.mode & 0o077) !== 0) return false;
-    } catch {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Ensure the context directory exists as a private directory: create with
- * mode 0700 when missing, then always validate (fresh or reused) before
- * use. A recursive mkdir that succeeds on an existing directory must not
- * bypass the ownership/permission checks, so validation runs on both
- * paths; lax modes are repaired with chmod 0700 and rechecked. Returns
- * false on any failure (fail open: the caller leaves the tool input
- * unmutated).
- */
-function ensurePrivateContextDir(dir: string): boolean {
-  try {
-    try {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-    } catch {
-      // Exists already or raced creation: fall through to validation.
-    }
-    // Never trust a fresh-or-reused directory without validating: a
-    // pre-created directory may carry permissive modes, wrong ownership,
-    // or be a symlink, and recursive mkdir succeeds on it silently.
-    // Ownership/symlink are checked first so only our own lax directory
-    // reaches the chmod repair; the strict recheck then enforces 0700
-    // (POSIX; on Windows the mode bits are not meaningful and ACL
-    // inheritance is relied upon).
-    if (!isSafeContextDir(dir, true)) return false;
-    try {
-      chmodSync(dir, 0o700);
-    } catch {
-      // Non-fatal: the strict recheck below still enforces the mode.
-    }
-    // Recheck after the repair attempt so a failed chmod cannot leave a
-    // lax directory in use (POSIX; skipped on Windows where chmod is a
-    // read-only-flag no-op).
-    return isSafeContextDir(dir);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Best-effort prune of stale vp-context-*.txt files older than the TTL.
- * Fail-open: every failure is swallowed so pruning never blocks the
- * handoff. Runs before each write so rejected or interrupted handoffs
- * cannot accumulate forever.
- */
-function pruneStaleContextFiles(dir: string): void {
-  var entries = null;
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-  if (!entries) return;
-  var now = Date.now();
-  for (var i = 0; i < entries.length; i++) {
-    var name = entries[i] || "";
-    // Sweep the random explicit handoffs plus a stale pending fallback:
-    // a pending file no agent invocation ever reads would otherwise linger
-    // past its TTL with nobody to delete-on-read it.
-    var isPending = name === PENDING_CONTEXT_FILE_NAME;
-    if (!isPending && name.indexOf(CONTEXT_FILE_PREFIX) !== 0) continue;
-    if (name.slice(-4) !== ".txt") continue;
-    var full = join(dir, name);
-    var age = -1;
-    try {
-      age = now - statSync(full).mtimeMs;
-    } catch {
-      continue;
-    }
-    // Pending uses the shorter reader TTL so a never-read slot cannot
-    // outlive the window in which any analyze call would accept it.
-    var ttl = isPending ? PENDING_CONTEXT_TTL_MS : CONTEXT_FILE_TTL_MS;
-    if (age < 0 || age <= ttl) continue;
-    try {
-      rmSync(full, { force: true });
-    } catch {
-      // ignore: best-effort cleanup
-    }
-  }
-}
-
-var PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
-// Pending freshness window, mirroring the CLI reader TTL
-// (src/command-runner.ts PENDING_CONTEXT_TTL_MS): a pending file no agent
-// invocation ever reads must not linger past the window in which any
-// analyze call would accept it.
-var PENDING_CONTEXT_TTL_MS = 60 * 1000;
-
-function pendingContextFilePath(): string {
-  return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
-}
-
-function writePendingContextFile(context: string): string | null {
-  if (!context) return null;
-  if (typeof Buffer !== "undefined" && Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
-  var dir = contextFileDir();
-  try {
-    if (!ensurePrivateContextDir(dir)) return null;
-    pruneStaleContextFiles(dir);
-    var path = pendingContextFilePath();
-    try { rmSync(path, { force: true }); } catch { /* ignore */ }
-    var fd2 = -1;
-    try { fd2 = openSync(path, "wx", 0o600); } catch { return null; }
-    try { writeFileSync(fd2, context, { encoding: "utf8" }); } catch {
-      try { closeSync(fd2); } catch { /* ignore */ }
-      fd2 = -1;
-      try { rmSync(path, { force: true }); } catch { /* ignore */ }
-      return null;
-    } finally { if (fd2 !== -1) { try { closeSync(fd2); } catch { /* ignore */ } } }
-    try { chmodSync(path, 0o600); } catch { /* ignore */ }
-    return path;
-  } catch { return null; }
-}
-
-/**
- * Persist context text to a 0600 tempfile for context-file handoff.
- * Returns the path, or null on any failure (fail open: the caller leaves
- * the tool input unmutated so the original command runs unchanged).
- */
-function writeContextFile(context: string): string | null {
-  if (!context) return null;
-  if (typeof Buffer !== "undefined" && Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
-  var dir = contextFileDir();
-  try {
-    if (!ensurePrivateContextDir(dir)) return null;
-    pruneStaleContextFiles(dir);
-    var fd = -1;
-    var file = "";
-    var attempts = 0;
-    while (fd === -1 && attempts < 5) {
-      attempts++;
-      // 128-bit random entropy: unlinkable without directory listing.
-      // Pi may run without process.pid, so no pid component is assumed.
-      var name = CONTEXT_FILE_PREFIX + randomBytes(16).toString("hex") + ".txt";
-      file = join(dir, name);
-      try {
-        // O_EXCL: fail when the path already exists instead of following
-        // a pre-created symlink or overwriting another process's file.
-        fd = openSync(file, "wx", 0o600);
-      } catch {
-        fd = -1;
-        file = "";
-      }
-    }
-    if (fd === -1 || !file) return null;
-    try {
-      writeFileSync(fd, context, { encoding: "utf8" });
-    } catch {
-      // A failed write may leave a partial file at its final path with no
-      // later prune guaranteed. Close first: unlinking an open descriptor
-      // fails on platforms such as Windows, and the finally below would
-      // then only close without retrying the removal.
-      try {
-        closeSync(fd);
-      } catch {
-        // ignore: descriptor cleanup is best-effort
-      }
-      fd = -1;
-      try {
-        rmSync(file, { force: true });
-      } catch {
-        // ignore: best-effort failure cleanup
-      }
-      return null;
-    } finally {
-      // fd is -1 when the catch above already closed it.
-      if (fd !== -1) {
-        try {
-          closeSync(fd);
-        } catch {
-          // ignore: descriptor cleanup is best-effort
-        }
-      }
-    }
-    try {
-      chmodSync(file, 0o600);
-    } catch {
-      // ignore: creation mode already requested 0600
-    }
-    return file;
-  } catch {
-    return null;
-  }
+/** Live timeout read (Q3): resolved per invocation, not frozen at startup.
+ * Changing VP_HOOK_TIMEOUT_MS needs no Pi restart — same rationale as the
+ * live off-switch below. Canonical parser lives in the shared runtime. */
+function currentTimeoutMs(): number {
+  return resolveHookTimeout(process.env.VP_HOOK_TIMEOUT_MS);
 }
 
 /** Session-branch messages formatted for the analyze context value.
@@ -363,7 +118,8 @@ function sessionBranchContext(ctx: unknown): string {
 async function runAnalyze(images: string[], extras, signal?: unknown): Promise<string | null> {
   return new Promise((resolve) => {
     if (!images || images.length === 0) return resolve(null);
-    var maxTokens = maxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
+    var timeoutMs = currentTimeoutMs();
+    var maxTokens = resolveMaxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
     var invocation = buildAnalyzeArgs(images, maxTokens, extras);
     var command = invocation.command;
     var args = invocation.args;
@@ -420,7 +176,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
       try { if (child) child.kill("SIGKILL"); } catch { /* ignore */ }
       process.stderr.write("[vision-proxy] vp analyze timed out\n");
       finish(null);
-    }, TIMEOUT_MS);
+    }, timeoutMs);
     if (signal && (signal as AbortSignal).addEventListener) {
       const onAbort = () => {
         // Settle immediately so the context handler does not hang until the hard
@@ -443,12 +199,16 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
 // vp config get --json subprocess, which is wasteful to repeat on every event.
 let cachedConfigMode: "always" | "off" | null = null;
 
-/** Read mode from VP_MODE (honored live) or vp config get --json (cached). Returns "always" | "off". */
+/** Read mode from VP_MODE (honored live) or vp config get --json (cached). Returns "always" | "off".
+ * The off-switch decision itself lives in the shared isAnalysisDisabled;
+ * this adapter keeps only the lookup (env-live plus the cached config-file
+ * fallback a long-lived Pi process needs). */
 function getMode(): "always" | "off" {
   // VP_MODE is a cheap, runtime-overridable env var; always honor it live so a
   // session can switch modes without restarting.
   const envMode = process.env.VP_MODE;
-  if (envMode === "always" || envMode === "off") return envMode;
+  if (isAnalysisDisabled(envMode)) return "off";
+  if (envMode === "always") return envMode;
   if (cachedConfigMode) return cachedConfigMode;
   let mode: "always" | "off" = "always";
   try {

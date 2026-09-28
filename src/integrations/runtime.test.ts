@@ -19,21 +19,32 @@ import {
 	buildConversationContext,
 	CONTEXT_FILE_MAX_BYTES,
 	CONTEXT_MAX_CHARS,
+	contextFileDir,
+	ensurePrivateContextDir,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
+	HOST_ENV,
 	hookTimeoutMs,
+	isAnalysisDisabled,
 	isImagePath,
+	isSafeContextDir,
 	isUnflaggedAnalyzeCommand,
 	maxOutputTokens,
 	parsePositiveInt,
+	pendingContextFilePath,
+	pruneStaleContextFiles,
 	quoteShellArg,
 	RECENT_MESSAGE_COUNT,
 	readReminder,
+	resolveHookTimeout,
 	resolveImagePath,
+	resolveMaxOutputTokens,
 	resolveVpBin,
 	truncateConversationContext,
 	vpEntryToSpawn,
 	withImageInstruction,
+	writeContextFile,
+	writePendingContextFile,
 } from "./runtime.ts";
 
 test("isImagePath matches the shared extension list case-insensitively", () => {
@@ -380,16 +391,64 @@ test("quoteShellArg matches the catalog quotePath POSIX branch", () => {
 	assert.equal(quoteShellArg(""), "''");
 });
 
+test("isAnalysisDisabled keeps one off-switch rule for both hosts", () => {
+	assert.equal(isAnalysisDisabled("off"), true);
+	assert.equal(isAnalysisDisabled("always"), false);
+	assert.equal(isAnalysisDisabled(undefined), false);
+	assert.equal(isAnalysisDisabled(""), false);
+	assert.equal(isAnalysisDisabled("OFF"), false, "exact match only, like Pi before");
+	assert.equal(isAnalysisDisabled(0), false);
+});
+
+test("resolveHookTimeout and resolveMaxOutputTokens read live through the shared parsers", () => {
+	assert.equal(resolveHookTimeout(undefined), 30000);
+	assert.equal(resolveHookTimeout("5000"), 5000);
+	assert.equal(resolveHookTimeout("not-a-number"), 30000);
+	assert.equal(resolveMaxOutputTokens(undefined), 2000);
+	assert.equal(resolveMaxOutputTokens("4096"), 4096);
+	assert.equal(resolveMaxOutputTokens("0"), 2000);
+});
+
+test("HOST_ENV tables the four hook settings with defaults and ranges", () => {
+	const names = HOST_ENV.map((s) => s.name);
+	assert.deepEqual(names, ["VP_HOOK_TIMEOUT_MS", "VP_MAX_OUTPUT_TOKENS"]);
+	for (const spec of HOST_ENV) {
+		assert.ok(
+			Number.isFinite(spec.fallback) && Number.isFinite(spec.min) && Number.isFinite(spec.max),
+			`${spec.name} must carry finite fallback/min/max`,
+		);
+		assert.ok(spec.min <= spec.fallback && spec.fallback <= spec.max);
+	}
+});
+
+test("HOOK_RUNTIME_SOURCE inlines the HOST_ENV table verbatim", () => {
+	const expected = ["var HOST_ENV = ", JSON.stringify(HOST_ENV)].join("");
+	assert.ok(
+		HOOK_RUNTIME_SOURCE.includes(expected),
+		"runtime source must inline the HOST_ENV table without edits",
+	);
+});
+
 test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 	for (const fn of [
 		parsePositiveInt,
 		hookTimeoutMs,
 		maxOutputTokens,
+		isAnalysisDisabled,
+		resolveHookTimeout,
+		resolveMaxOutputTokens,
 		vpEntryToSpawn,
 		resolveVpBin,
 		buildAnalyzeArgs,
 		isUnflaggedAnalyzeCommand,
 		appendContextFileArg,
+		contextFileDir,
+		isSafeContextDir,
+		ensurePrivateContextDir,
+		pruneStaleContextFiles,
+		pendingContextFilePath,
+		writePendingContextFile,
+		writeContextFile,
 		quoteShellArg,
 		isImagePath,
 		resolveImagePath,
@@ -408,5 +467,13 @@ test("HOOK_RUNTIME_SOURCE is safe to embed with String.raw", () => {
 	assert.equal(HOOK_RUNTIME_SOURCE.includes("`"), false, "no backticks allowed");
 	assert.equal(HOOK_RUNTIME_SOURCE.includes("${"), false, "no ${ allowed");
 	assert.ok(HOOK_RUNTIME_SOURCE.includes('"jpg"'), "extension list must be inlined");
+	assert.ok(
+		HOOK_RUNTIME_SOURCE.includes('var CONTEXT_FILE_PREFIX = "vp-context-"'),
+		"pipeline constants must be inlined",
+	);
+	assert.ok(
+		HOOK_RUNTIME_SOURCE.includes('var PENDING_CONTEXT_FILE_NAME = "__pending__.txt"'),
+		"pending constants must be inlined",
+	);
 	assert.ok(HOOK_RUNTIME_SOURCE.includes("[vision-proxy:read-reminder]"), "marker must be inlined");
 });

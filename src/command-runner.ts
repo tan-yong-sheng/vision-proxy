@@ -405,7 +405,10 @@ export function readAnalyzeContextFile(
 	return trimmed ? trimmed : undefined;
 }
 
-/** True when an agent host marker is present — gates pending auto-read. */
+/** True when an agent host marker is present — gates pending auto-read.
+ * PI_CODING_AGENT is Pi's documented child-process detection signal
+ * (Pi sets PI_CODING_AGENT=true for LLM-callable shell tools); without it
+ * a Pi-spawned bare launcher never reaches the pending fallback. */
 export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
 	return (
 		!!env.CLAUDECODE ||
@@ -413,6 +416,7 @@ export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
 		!!env.CURSOR_AGENT ||
 		!!env.CODEX_HOME ||
 		!!env.PI_DEBUG ||
+		!!env.PI_CODING_AGENT ||
 		!!env.OPENCODE ||
 		!!env.VP_AUTO_CONTEXT
 	);

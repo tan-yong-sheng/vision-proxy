@@ -219,6 +219,9 @@ describe("command-runner seam", () => {
 		// must not steal agent context.
 		assert.equal(hasAgentMarker({}), false);
 		assert.equal(hasAgentMarker({ CLAUDECODE: "1" }), true);
+		// Pi's documented child-process signal (Orca probe 2026-09-28:
+		// Pi tool env carries PI_CODING_AGENT=true with no PI_DEBUG).
+		assert.equal(hasAgentMarker({ PI_CODING_AGENT: "true" }), true);
 		// Outside agent: pending file exists but marker absent → not consumed.
 		const dir = hookContextFileDir();
 		mkdirSync(dir, { recursive: true, mode: 0o700 });

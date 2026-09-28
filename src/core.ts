@@ -51,7 +51,6 @@ export interface VisionConfig {
 	maxBatch: number;
 	cacheSize: number;
 	cacheMaxAgeDays: number;
-	pHashSimilarityThreshold: number;
 	groundingModels: Record<string, GroundingModelEntry>;
 	/** Base URL override for the active provider, e.g. "http://localhost:8000/v1". */
 	baseUrl: string;
@@ -313,7 +312,6 @@ export const DEFAULT_CONFIG: VisionConfig = {
 	maxBatch: 4,
 	cacheSize: 50,
 	cacheMaxAgeDays: 30,
-	pHashSimilarityThreshold: 0.8,
 	groundingModels: {
 		"google/gemini-2.5-pro": { format: "gemini_normalized_1000" },
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
@@ -340,7 +338,6 @@ const PERSISTED_CONFIG_KEYS = new Set([
 	"maxBatch",
 	"cacheSize",
 	"cacheMaxAgeDays",
-	"pHashSimilarityThreshold",
 	"groundingModels",
 	"baseUrl",
 	"apiKey",
@@ -457,17 +454,6 @@ function parseIntOverride(value: string | undefined, min: number, max: number): 
 	return n;
 }
 
-function parseFloatOverride(
-	value: string | undefined,
-	min: number,
-	max: number,
-): number | undefined {
-	if (value === undefined) return undefined;
-	const n = parseFloat(value);
-	if (isOutOfRange(n, min, max)) return undefined;
-	return n;
-}
-
 function parseBaseUrlOverride(value: string | undefined): string | undefined {
 	if (value === undefined) return undefined;
 	if (!value) return undefined;
@@ -503,13 +489,6 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 		overrides,
 		"cacheMaxAgeDays",
 		parseIntOverride(env.VP_CACHE_MAX_AGE_DAYS, 0, 3650),
-	);
-	// VP_PHASH_SIMILARITY_THRESHOLD is canonical; VP_PHASH_THRESHOLD stays as a
-	// compat alias (canonical wins when both are set).
-	assignIfDefined(
-		overrides,
-		"pHashSimilarityThreshold",
-		parseFloatOverride(env.VP_PHASH_SIMILARITY_THRESHOLD ?? env.VP_PHASH_THRESHOLD, 0, 1),
 	);
 	assignIfDefined(overrides, "baseUrl", parseBaseUrlOverride(env.VP_BASE_URL));
 
@@ -616,12 +595,6 @@ export function sanitize(config: VisionConfig): VisionConfig {
 		0,
 		3650,
 		DEFAULT_CONFIG.cacheMaxAgeDays,
-	);
-	safe.pHashSimilarityThreshold = fallbackRange(
-		safe.pHashSimilarityThreshold,
-		0,
-		1,
-		DEFAULT_CONFIG.pHashSimilarityThreshold,
 	);
 	safe.groundingModels = fallbackGroundingModels(safe.groundingModels);
 	safe.baseUrl = fallbackBaseUrl(safe.baseUrl);

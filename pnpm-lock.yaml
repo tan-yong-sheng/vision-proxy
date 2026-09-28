@@ -23,9 +23,6 @@ importers:
       image-size:
         specifier: ^2.0.2
         version: 2.0.2
-      imghash:
-        specifier: ^1.1.4
-        version: 1.1.4
       sharp:
         specifier: ^0.35.3
         version: 0.35.3(@types/node@26.2.0)
@@ -145,29 +142,6 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
-
-  '@canvas/image-data@1.1.0':
-    resolution: {integrity: sha512-QdObRRjRbcXGmM1tmJ+MrHcaz1MftF2+W7YI+MsphnsCrmtyfS0d5qJbk0MeSbUeyM/jCb0hmnkXPsy026L7dA==}
-
-  '@canvas/image@2.0.0':
-    resolution: {integrity: sha512-DQKEftZ5M4eM8Rzhv8FFZGdOsO8bVjzPC/9pBF+P//HjQM/Xf+PvQRTv97mVpsHt+Pejs1V7ooK6xf+dYgDNpw==}
-    engines: {node: '>=10'}
-
-  '@cwasm/jpeg-turbo@0.1.3':
-    resolution: {integrity: sha512-FkZxwwC6r4zhzlqM0nYGaMj/MDSrZPxLOdPdM6ySlgsMfOpNAZcLQkpNF4jP+DmsuUvRoeUD0YSMBvg3jYfK6w==}
-
-  '@cwasm/lodepng@0.1.9':
-    resolution: {integrity: sha512-vb2H7/jTxnqJi7hHiEgtFm3smIqVpeY417vN+8cwsq3iTNrHzwnMzFXbeCf2H9Dl13Vh64qgUUcC2mxf6TPODA==}
-    engines: {node: '>=8.0.0'}
-
-  '@cwasm/nsbmp@0.1.3':
-    resolution: {integrity: sha512-APiz9Rj2E049rBapTtwnCGqQeqJjmC85busDQ44UCaujU+LoggUm06NuS1WIBAZcDMRbJOgCFcRWc0tMT2kpfg==}
-
-  '@cwasm/nsgif@0.1.2':
-    resolution: {integrity: sha512-LOD5HlL0O5jpnIAl+dLSZcB3v0RBNBjtoaymdCEPe2kyKzaP20BF+jy/QUyOZogQsgMVjusZES3tgwwoiiJ2rA==}
-
-  '@cwasm/webp@0.1.5':
-    resolution: {integrity: sha512-ceIZQkyxK+s7mmItNcWqqHdOBiJAxYxTnrnPNgUNjldB1M9j+Bp/3eVIVwC8rUFyN/zoFwuT0331pyY3ackaNA==}
 
   '@emnapi/runtime@1.11.3':
     resolution: {integrity: sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==}
@@ -594,21 +568,6 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  blockhash-core@0.1.0:
-    resolution: {integrity: sha512-Cv7BgBo0jjVPaeuel4cvxf9LqIGsYNIPz9DAGvvrF9LRlEq9Q3HXu+S8bklPCae0sCxAXic4HGMoImf3FeO3Nw==}
-
-  decode-bmp@0.2.1:
-    resolution: {integrity: sha512-NiOaGe+GN0KJqi2STf24hfMkFitDUaIoUU3eKvP/wAbLe8o6FuW5n/x7MHPR0HKvBokp6MQY/j7w8lewEeVCIA==}
-    engines: {node: '>=8.6.0'}
-
-  decode-ico@0.4.1:
-    resolution: {integrity: sha512-69NZfbKIzux1vBOd31al3XnMnH+2mqDhEgLdpygErm4d60N+UwA5Sq5WFjmEDQzumgB9fElojGwWG0vybVfFmA==}
-    engines: {node: '>=8.6'}
-
-  decompress-response@6.0.0:
-    resolution: {integrity: sha512-aW35yZM6Bb/4oJlZncMH2LCoZtJXTRxES17vE3hoRiowU2kWHaJKFkSBDnDR+cm9J+9QhXmREyIfv0pji9ejCQ==}
-    engines: {node: '>=10'}
-
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -627,34 +586,10 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  fast-base64-decode@1.0.0:
-    resolution: {integrity: sha512-qwaScUgUGBYeDNRnbc/KyllVU88Jk1pRHPStuF/lO7B0/RTRLj7U0lkdTAutlBblY08rwZDff6tNU9cjv6j//Q==}
-
-  fast-base64-encode@1.0.0:
-    resolution: {integrity: sha512-z2XCzVK4fde2cuTEHu2QGkLD6BPtJNKJPn0Z7oINvmhq/quUuIIVPYKUdN0gYeZqOyurjJjBH/bUzK5gafyHvw==}
-
-  fast-base64-length@1.0.0:
-    resolution: {integrity: sha512-MV+/ioblHx6SMjc/1l4EAnRJyAku6+6DxZ6RW0FoFCF1Aol/Ldb6FqwE3Kn3Ju1aam2m1KCIVoCljhgcG+Umzg==}
-
-  file-type@10.11.0:
-    resolution: {integrity: sha512-uzk64HRpUZyTGZtVuvrjP0FYxzQrBf4rojot6J65YMEbwBLB0CWm0CLojVpwpmFmxcE/lkvYICgfcGozbBq6rw==}
-    engines: {node: '>=6'}
-
   image-size@2.0.2:
     resolution: {integrity: sha512-IRqXKlaXwgSMAMtpNzZa1ZAe8m+Sa1770Dhk8VkSsP9LS+iHD62Zd8FQKs8fbPiagBE7BzoFX23cxFnwshpV6w==}
     engines: {node: '>=16.x'}
     hasBin: true
-
-  image-type@4.1.0:
-    resolution: {integrity: sha512-CFJMJ8QK8lJvRlTCEgarL4ro6hfDQKif2HjSvYCdQZESaIPV4v9imrf7BQHK+sQeTeNeMpWciR9hyC/g8ybXEg==}
-    engines: {node: '>=6'}
-
-  imghash@1.1.4:
-    resolution: {integrity: sha512-atRI6S7rwrdZlr8pBsuk0NfBfeuPzyna98ugz2Sodj1P8SOZJLVYuqWnUrUFg2YnFTxtdbdSq4Ucn1osLFQ+qA==}
-    engines: {node: '>=20'}
-
-  jpeg-js@0.4.4:
-    resolution: {integrity: sha512-WZzeDOEtTOBK4Mdsar0IqEU5sMr3vSV2RqkAIzUEV2BHnUfKGyswWFPFwK5EeDo93K3FohSHbLAjj0s1Wzd+dg==}
 
   json-schema@0.4.0:
     resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
@@ -713,13 +648,6 @@ packages:
     resolution: {integrity: sha512-K7mM4WoqMwqfXYK11EHy+lSH1uW8XHni3Yn/bSqyerPkUPygGdf3xn18JoV5HyA06xuQL3ofGAOjG01QX9oJ4w==}
     hasBin: true
 
-  mimic-response@3.1.0:
-    resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
-    engines: {node: '>=10'}
-
-  once@1.4.0:
-    resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
-
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
     engines: {node: '>=10'}
@@ -733,15 +661,6 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
-
-  simple-concat@1.0.1:
-    resolution: {integrity: sha512-cSFtAPtRhljv69IK0hTVZQ+OfE9nePi/rtJmw5UjHeVyVroEqJXP1sFztKUy1qU+xvz3u/sfYJLa947b7nAN2Q==}
-
-  simple-get@4.0.1:
-    resolution: {integrity: sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==}
-
-  to-data-view@1.1.0:
-    resolution: {integrity: sha512-1eAdufMg6mwgmlojAx3QeMnzB/BTVp7Tbndi3U7ftcT2zCZadjxkkmLmd97zmaxWi+sgGcgWrokmpEoy0Dn0vQ==}
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
@@ -762,9 +681,6 @@ packages:
   undici@7.29.0:
     resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
-
-  wrappy@1.0.2:
-    resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
@@ -843,42 +759,6 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.5.8':
     optional: true
-
-  '@canvas/image-data@1.1.0': {}
-
-  '@canvas/image@2.0.0':
-    dependencies:
-      '@canvas/image-data': 1.1.0
-      '@cwasm/jpeg-turbo': 0.1.3
-      '@cwasm/lodepng': 0.1.9
-      '@cwasm/nsbmp': 0.1.3
-      '@cwasm/nsgif': 0.1.2
-      '@cwasm/webp': 0.1.5
-      decode-ico: 0.4.1
-      fast-base64-decode: 1.0.0
-      fast-base64-encode: 1.0.0
-      fast-base64-length: 1.0.0
-      simple-get: 4.0.1
-
-  '@cwasm/jpeg-turbo@0.1.3':
-    dependencies:
-      '@canvas/image-data': 1.1.0
-
-  '@cwasm/lodepng@0.1.9':
-    dependencies:
-      '@canvas/image-data': 1.1.0
-
-  '@cwasm/nsbmp@0.1.3':
-    dependencies:
-      '@canvas/image-data': 1.1.0
-
-  '@cwasm/nsgif@0.1.2':
-    dependencies:
-      '@canvas/image-data': 1.1.0
-
-  '@cwasm/webp@0.1.5':
-    dependencies:
-      '@canvas/image-data': 1.1.0
 
   '@emnapi/runtime@1.11.3':
     dependencies:
@@ -1144,23 +1024,6 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.27(zod@4.4.3)
       zod: 4.4.3
 
-  blockhash-core@0.1.0: {}
-
-  decode-bmp@0.2.1:
-    dependencies:
-      '@canvas/image-data': 1.1.0
-      to-data-view: 1.1.0
-
-  decode-ico@0.4.1:
-    dependencies:
-      '@canvas/image-data': 1.1.0
-      decode-bmp: 0.2.1
-      to-data-view: 1.1.0
-
-  decompress-response@6.0.0:
-    dependencies:
-      mimic-response: 3.1.0
-
   detect-libc@2.1.2: {}
 
   eventsource-parser@3.1.1: {}
@@ -1184,28 +1047,7 @@ snapshots:
       '@fallow-cli/win32-x64-msvc': 3.16.0
       fallow-type-aware: 3.16.0
 
-  fast-base64-decode@1.0.0: {}
-
-  fast-base64-encode@1.0.0: {}
-
-  fast-base64-length@1.0.0: {}
-
-  file-type@10.11.0: {}
-
   image-size@2.0.2: {}
-
-  image-type@4.1.0:
-    dependencies:
-      file-type: 10.11.0
-
-  imghash@1.1.4:
-    dependencies:
-      '@canvas/image': 2.0.0
-      blockhash-core: 0.1.0
-      image-type: 4.1.0
-      jpeg-js: 0.4.4
-
-  jpeg-js@0.4.4: {}
 
   json-schema@0.4.0: {}
 
@@ -1252,12 +1094,6 @@ snapshots:
       lefthook-windows-arm64: 2.1.10
       lefthook-windows-x64: 2.1.10
 
-  mimic-response@3.1.0: {}
-
-  once@1.4.0:
-    dependencies:
-      wrappy: 1.0.2
-
   semver@7.8.5: {}
 
   sharp@0.35.3(@types/node@26.2.0):
@@ -1293,16 +1129,6 @@ snapshots:
       '@img/sharp-win32-x64': 0.35.3
       '@types/node': 26.2.0
 
-  simple-concat@1.0.1: {}
-
-  simple-get@4.0.1:
-    dependencies:
-      decompress-response: 6.0.0
-      once: 1.4.0
-      simple-concat: 1.0.1
-
-  to-data-view@1.1.0: {}
-
   tslib@2.8.1:
     optional: true
 
@@ -1335,7 +1161,5 @@ snapshots:
   undici-types@8.3.0: {}
 
   undici@7.29.0: {}
-
-  wrappy@1.0.2: {}
 
   zod@4.4.3: {}

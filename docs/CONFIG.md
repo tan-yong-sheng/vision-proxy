@@ -96,7 +96,7 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `OPENAI_BASE_URL` | `baseUrl` | Override OpenAI endpoint. |
 | `ANTHROPIC_BASE_URL` | `baseUrl` | Override Anthropic endpoint. |
 | `GOOGLE_BASE_URL` | `baseUrl` | Override Google endpoint. |
-| `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` (standalone override; `VP_MODEL=openai/gpt-4o` also sets it and wins when both are set) |
+| `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` (standalone override; switches the model to the provider default unless a model is pinned — `VP_MODEL=openai/gpt-4o` also sets it and wins when both are set) |
 | `VP_MODEL` | `provider` + `modelId` | `VP_MODEL=openai/gpt-4o` (sets both; wins over `VP_PROVIDER` for the provider) |
 | `VP_MODE` | `mode` | `VP_MODE=always` |
 | `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=false` disables sending the last-16 conversation slice (`--context`) to the vision provider. The current prompt (`--question`) is still sent. |
@@ -131,7 +131,7 @@ Deleting `~/.vision-proxy/update-check.json` is safe; it is recreated on the nex
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-VP_PROVIDER=openai VP_MODEL=gpt-4o vp analyze screenshot.png
+VP_PROVIDER=openai VP_MODEL=openai/gpt-4o vp analyze screenshot.png
 ```
 
 ### URL input and content sniffing

@@ -273,6 +273,11 @@ describe("command-runner seam", () => {
 		const dir = hookContextFileDir();
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
 		writeFileSync(pending, "pending-ctx-value");
+		// Refresh mtime like the sibling tests: the full suite runs test
+		// files in parallel processes sharing one $TMPDIR slot, so another
+		// file's writer could otherwise replace this pending file (or age
+		// it past the freshness TTL) before the inside-agent read below.
+		utimesSync(pending, new Date(), new Date());
 		try {
 			const reader = (p: string): string | null => readFileSync(p, "utf8");
 			const envOutside: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv;

@@ -91,8 +91,9 @@ a rewrite, not a rename. Developing against both APIs while v2 is still
 moving is churn, so `vp integration install opencode` now reports the
 pause instead of installing.
 
-What still works: bare `vp analyze` calls under opencode still pick up
-pending context via the `OPENCODE` marker in the CLI reader. Revisit a
+What still works: the CLI reader can consume a fresh pending context file
+when `OPENCODE` is set, but opencode v2 does not currently provide an
+integration that writes that file. Revisit a
 native v2 plugin once the API stabilizes.
 
 ## Local integration development

@@ -96,8 +96,8 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `OPENAI_BASE_URL` | `baseUrl` | Override OpenAI endpoint. |
 | `ANTHROPIC_BASE_URL` | `baseUrl` | Override Anthropic endpoint. |
 | `GOOGLE_BASE_URL` | `baseUrl` | Override Google endpoint. |
-| `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` |
-| `VP_MODEL` | `modelId` | `VP_MODEL=gpt-4o` |
+| `VP_PROVIDER` | `provider` | `VP_PROVIDER=openai` (standalone override; `VP_MODEL=openai/gpt-4o` also sets it and wins when both are set) |
+| `VP_MODEL` | `provider` + `modelId` | `VP_MODEL=openai/gpt-4o` (sets both; wins over `VP_PROVIDER` for the provider) |
 | `VP_MODE` | `mode` | `VP_MODE=always` |
 | `VP_INCLUDE_CONTEXT` | `includeContext` | `VP_INCLUDE_CONTEXT=false` disables sending the last-16 conversation slice (`--context`) to the vision provider. The current prompt (`--question`) is still sent. |
 | `VP_TOOL` | `tool` | `VP_TOOL=off` |
@@ -105,7 +105,7 @@ Most config keys can be overridden by a `VP_*` environment variable. Provider en
 | `VP_MAX_BATCH` | `maxBatch` | **Deprecated.** Alias for `VP_MAX_IMAGES_PER_CALL`. |
 | `VP_CACHE_SIZE` | `cacheSize` | `VP_CACHE_SIZE=50` |
 | `VP_CACHE_MAX_AGE_DAYS` | `cacheMaxAgeDays` | `VP_CACHE_MAX_AGE_DAYS=7` |
-| `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` |
+| `VP_PHASH_SIMILARITY_THRESHOLD` | `pHashSimilarityThreshold` | `VP_PHASH_SIMILARITY_THRESHOLD=0.95` (canonical; legacy `VP_PHASH_THRESHOLD` alias still works, canonical wins when both are set) |
 | `VP_BASE_URL` | `baseUrl` | `VP_BASE_URL=http://localhost:8000/v1` |
 | `VP_DOWNLOAD_TIMEOUT` | - | `VP_DOWNLOAD_TIMEOUT=30000` |
 | `VP_STRICT_MIME` | - | `VP_STRICT_MIME=1` |

@@ -412,7 +412,10 @@ export function readAnalyzeContextFile(
  * CODEX_SESSION_ID/CODEX_THREAD_ID are what Codex actually injects into
  * model-spawned shells (CODEX_HOME is a config root Codex itself reads, not
  * a child-process signal); without them a Codex-spawned bare launcher is
- * likewise marker-less. */
+ * likewise marker-less.
+ * OPENCODE is kept although the opencode plugin is paused for v2: bare
+ * `vp analyze` calls under opencode still pick up pending context.
+ */
 export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
 	return (
 		!!env.CLAUDECODE ||
@@ -613,7 +616,7 @@ update options:
   --beta                     install the latest pre-release instead of stable
 
 integration options:
-  install <agent>            install vision-proxy for pi | claude-code | codex | opencode
+  install <agent>            install vision-proxy for pi | claude-code | codex
   show <agent>               print what install would generate
   list                       show which agents have vision-proxy installed
   status                     show installed version markers per agent
@@ -874,7 +877,6 @@ Agents:
   pi                 Pi coding agent (global extensions directory)
   claude-code        Claude Code agent (npx tsx hook script + hooks)
   codex              Codex agent (npx tsx hook script + hooks)
-  opencode           opencode v1 agent (local TypeScript plugin)
 
 Options:
   -h, --help         show this help`,
@@ -887,7 +889,9 @@ Usage:
   vp integration install <agent> [--dev]
 
 Arguments:
-  <agent>            supported agent id: pi | claude-code | codex | opencode
+  <agent>            supported agent id: pi | claude-code | codex
+
+(opencode support is paused while its v2 plugin API stabilizes.)
 
 Options:
   --dev              default generated artifacts to this CLI entry point`,
@@ -900,7 +904,7 @@ Usage:
   vp integration show <agent>
 
 Arguments:
-  <agent>            supported agent id: pi | claude-code | codex | opencode`,
+  <agent>            supported agent id: pi | claude-code | codex`,
 
 	"integration uninstall": `vp integration uninstall <agent>
 
@@ -910,7 +914,7 @@ Usage:
   vp integration uninstall <agent>
 
 Arguments:
-  <agent>            supported agent id: pi | claude-code | codex | opencode`,
+  <agent>            supported agent id: pi | claude-code | codex`,
 
 	"integration list": `vp integration list
 

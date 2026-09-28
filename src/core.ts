@@ -515,10 +515,10 @@ function parseFloatOverride(
  * (NaN coerces to ~0, killing analysis) and the `--max-output-tokens` argument
  * passed to `vp analyze`.
  *
- * Shared by the Claude/Codex hook and the opencode plugin so every harness
+ * Shared by the Claude/Codex hook so every harness
  * resolves `VP_HOOK_TIMEOUT_MS` and `VP_MAX_OUTPUT_TOKENS` identically. (The Pi
- * extension and opencode plugin embed their own copy of this helper because they
- * are written verbatim to external extension directories and cannot import this
+ * extension embeds its own copy of this helper because it is
+ * written verbatim to an external extension directory and cannot import this
  * module at runtime.)
  */
 export function readPositiveIntEnv(

@@ -5,19 +5,16 @@
  * host: artifact writes, config registration, empty-dir cleanup, version
  * reporting, and unknown-agent handling. Host-specific facts (paths, generated
  * sources, legacy cleanups) come from `catalog.ts`; the hooks-JSON shape comes
- * from `hooks-config.ts`. The only host-specific display branch is opencode's
- * plugin summary; the Codex TOML cleanup is catalog-owned.
+ * from `hooks-config.ts`. The Codex TOML cleanup is catalog-owned.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { extractMarkerVersion, VERSION } from "../version.ts";
 import {
-	ARTIFACT_FILENAME,
 	getLegacyArtifactState,
 	legacyArtifactPath,
 	legacyArtifactPresent,
 	legacyMarkerPath,
-	opencodePluginsDir,
 	removeLegacyArtifact,
 	removeLegacyCodexConfigToml,
 	SUPPORTED,
@@ -77,7 +74,7 @@ function hasControlChars(s: string): boolean {
 
 /**
  * Whether an agent counts as installed: hook agents need their config block
- * present, while Pi/opencode treat the generated file as the install signal.
+ * present, while Pi treats the generated file as the install signal.
  */
 function isAgentInstalled(spec: AgentSpec, installDir?: string): boolean {
 	const cfgPath = spec.configPath();
@@ -85,7 +82,7 @@ function isAgentInstalled(spec: AgentSpec, installDir?: string): boolean {
 	if (cfgPath) {
 		return existsSync(cfgPath) && spec.isInstalled(spec.readConfig().raw);
 	}
-	// Pi and opencode have no host config; the extension file is the install signal.
+	// Pi has no host config; the extension file is the install signal.
 	return existsSync(spec.target({ installDir }));
 }
 
@@ -95,7 +92,17 @@ function currentCliEntryPoint(): string | undefined {
 	return resolve(entry);
 }
 
+/** opencode support is paused while its v2 plugin API stabilizes. */
+const OPENCODE_PAUSED_MESSAGE =
+	"opencode support is paused while its v2 plugin API stabilizes: " +
+	"the v1 plugin does not load under v2. Revisit after v2 stabilizes; " +
+	"bare `vp analyze` calls under opencode still pick up pending context " +
+	"via the OPENCODE marker.";
+
 function rejectUnknownAgent(agent: string): IntegrationResult {
+	if (agent === "opencode") {
+		return { ok: false, message: OPENCODE_PAUSED_MESSAGE, code: 1 };
+	}
 	return {
 		ok: false,
 		message: `unknown agent "${agent}". Supported: ${SUPPORTED.join(", ")}`,
@@ -180,7 +187,7 @@ export async function integrationInstall(
 	// stale TOML block so it can't shadow the new JSON registration.
 	if (agent === "codex") removeLegacyCodexConfigToml();
 	// Remove the pre-feature-suffix legacy artifact from the same install dir:
-	// pi/opencode auto-load every file in their dirs, so a stale legacy file
+	// Pi auto-loads every file in its dir, so a stale legacy file
 	// would double-load our hooks on top of the new one. The tri-state result
 	// says directly whether cleanup failed, without a redundant re-probe.
 	const legacyCleanup = removeLegacyArtifact(target);
@@ -198,7 +205,7 @@ export async function integrationInstall(
 				code: 0,
 			};
 		}
-		// File agents (pi/opencode) auto-load every file in their dirs: a
+		// The Pi dir auto-loads every file in it: a
 		// surviving legacy artifact would double-load our hooks next to the
 		// freshly installed one, so fail visibly instead of shipping both.
 		return {
@@ -224,35 +231,7 @@ export async function integrationInstall(
  */
 export async function integrationShow(agent: string): Promise<IntegrationResult> {
 	const spec = specFor(agent);
-	if (!spec) {
-		return {
-			ok: false,
-			message: `unknown agent "${agent}". Supported: ${SUPPORTED.join(", ")}`,
-			code: 1,
-		};
-	}
-
-	// opencode: keep the friendly summary but also render the generated source
-	// so the user can review what `vp integration install opencode` writes
-	// (mirrors the pi branch below, which appends spec.generate()).
-	if (agent === "opencode") {
-		const pluginPath = opencodePluginsDir();
-		return {
-			ok: true,
-			message:
-				`opencode plugin: ${ARTIFACT_FILENAME}\n\nInstall location: ${pluginPath}/\n\n` +
-				`The plugin registers hooks for parity with claude-code/codex:\n` +
-				`- chat.message -> like UserPromptSubmit (appends a static reminder to read prompt image paths; attached image parts are left untouched)\n` +
-				`- tool.execute.before (read) -> like PreToolUse Read (intercepts reads on images)\n` +
-				`- tool.execute.before (bash) -> rewrites model-invoked vp analyze with --context-file\n\n` +
-				`Configuration via environment variables:\n` +
-				`- VP_MAX_OUTPUT_TOKENS (default: 2000)\n` +
-				`- VP_BIN (default: vp on PATH)\n` +
-				`- VP_HOOK_TIMEOUT_MS (default: 30000)\n\n` +
-				`Generated plugin source:\n${spec.generate()}`,
-			code: 0,
-		};
-	}
+	if (!spec) return rejectUnknownAgent(agent);
 
 	const command = spec.hookCommand();
 	const { raw } = spec.readConfig();
@@ -292,7 +271,7 @@ export async function integrationList(installDir?: string): Promise<IntegrationR
 
 /**
  * Report install status per agent, annotated with the vp version embedded in
- * each installed hook script or Pi/opencode extension marker, so the user can see which
+ * each installed hook script or Pi extension marker, so the user can see which
  * integrations predate the installed `vp` and should be refreshed with
  * `vp integration install`.
  */
@@ -307,8 +286,8 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 		if (!installed) {
 			const target = spec.target({ installDir });
 			if (legacyArtifactPresent(target)) {
-				// Legacy-only integration: file-agent dirs auto-load every file
-				// in them, so a surviving stamped legacy artifact is an active
+				// Legacy-only integration: the Pi dir auto-loads every file
+				// in it, so a surviving stamped legacy artifact is an active
 				// pre-migration integration - count it as installed and out of
 				// date instead of reporting it "not installed".
 				lines.push(
@@ -338,8 +317,8 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 				);
 			} else {
 				// Legacy is live: a legacy-only registration still executes the
-				// legacy file (hook agent), or the dir auto-loads every file so
-				// a surviving legacy would double-load pi/opencode hooks next to
+				// legacy file (hook agent), or the Pi dir auto-loads every file so
+				// a surviving legacy would double-load pi hooks next to
 				// a current one. Re-installing fixes both states.
 				lines.push(
 					`! ${agent}  legacy artifact at ${legacyPath} - re-run: vp integration install ${agent}`,
@@ -420,13 +399,13 @@ export async function integrationUninstall(
 	// Remove the legacy Codex config.toml block defensively on uninstall too.
 	if (agent === "codex") removeLegacyCodexConfigToml();
 	// Uninstall also clears a legacy-named artifact from the same dir so an
-	// auto-loading host (pi/opencode) never resurrects our hooks. This also
+	// auto-loading host (pi) never resurrects our hooks. This also
 	// covers the legacy-only state (new target absent) that skipped the early
 	// return above, so uninstalling a pre-migration install cleans up fully.
 	const legacyCleanup = removeLegacyArtifact(target);
 	// Mirror the install path: the tri-state result says directly whether a
 	// stamped legacy file survived the cleanup attempt. A surviving one on an
-	// auto-loading host (pi/opencode, no cfgPath) would keep double-loading
+	// auto-loading host (pi, no cfgPath) would keep double-loading
 	// our hooks after uninstall, so fail visibly instead of reporting
 	// success; hook agents only get a warning because their config no longer
 	// references any script (the leftover is inert).

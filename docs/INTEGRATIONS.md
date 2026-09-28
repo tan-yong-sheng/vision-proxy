@@ -81,43 +81,19 @@ Configuration options (via environment variables):
 - `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
 - `VP_BIN` - Path to vp binary (default: "vp"; a `.js` entry point is run with the current Node executable)
 
-## opencode (v1)
+## opencode (paused while v2 stabilizes)
 
-Installs the `vision-proxy_read.ts` plugin into `~/.config/opencode/plugins/`.
+opencode support is currently paused. The v1 plugin this repo shipped
+(`chat.message` + `tool.execute.before` hooks) does not load under
+opencode v2 — V1-style plugin exports fail with `SchemaError`, and the
+v2 API (`Plugin.define` + `setup(ctx)` with domain-registered hooks) is
+a rewrite, not a rename. Developing against both APIs while v2 is still
+moving is churn, so `vp integration install opencode` now reports the
+pause instead of installing.
 
-The plugin registers hooks for **parity with claude-code/codex**:
-- `chat.message` hook - like `UserPromptSubmit`: extracts image paths from the user text and appends a static reminder to inspect each one with the `read` tool. It never shells out, so message handling stays fast. Attached image parts are left untouched so the model sees them natively.
-- `tool.execute.before` hook (`read`) - like `PreToolUse Read`, the single analysis point: intercepts `read` tool calls on image files, runs `vp analyze`, and denies the read by throwing an error whose message carries the instruction and description.
-- `tool.execute.before` hook (`bash`) - rewrites a model-invoked `vp analyze` command to append `--context-file <path>` (context from the session messages, written to a `0600` tempfile) by mutating the tool args in place. Fail-open: any failure leaves the args unmutated.
-
-No new `analyze_image` tool is registered - the agent uses its native Read tool which the hook intercepts.
-
-Image-read routing is **unconditional by design**, matching the claude-code/codex hooks: the plugin never inspects the chat model's modality. Installing the plugin is the explicit opt-in to route every image read through vision-proxy; multimodal models receive the fenced description instead of raw image bytes. To restore native image input, uninstall the plugin. Injected reminders carry a stable `[vision-proxy:read-reminder]` marker so prior injections are stripped if the hook ever re-fires for the same message.
-
-If `vp analyze` fails, the plugin fails open: the original message parts and tool calls proceed unchanged.
-
-```bash
-vp integration install opencode
-vp integration status
-```
-
-Uninstall:
-
-```bash
-vp integration uninstall opencode
-```
-
-The plugin requires:
-- opencode v1 CLI installed
-- An opencode build that loads TypeScript plugins from `~/.config/opencode/plugins/` (this plugin is plain TypeScript with no build step; on a `.js`-only build the file is written but silently ignored)
-- `vp` binary on PATH (or set `VP_BIN` environment variable)
-
-When installed with `--dev`, the generated plugin points at this checkout's `dist/cli.js`. Because OpenCode runs plugins under Bun, vision-proxy launches that JavaScript entry point with `node` rather than OpenCode's own executable. Restart OpenCode after reinstalling so the plugin and launcher behavior are reloaded.
-
-Configuration options (via environment variables):
-- `VP_MAX_OUTPUT_TOKENS` - Max output tokens for `vp analyze` (default: 2000)
-- `VP_HOOK_TIMEOUT_MS` - Timeout for vp analyze in milliseconds (default: 30000)
-- `VP_BIN` - Path to vp binary (default: "vp"; a `.js` entry point is run with the current Node executable)
+What still works: bare `vp analyze` calls under opencode still pick up
+pending context via the `OPENCODE` marker in the CLI reader. Revisit a
+native v2 plugin once the API stabilizes.
 
 ## Local integration development
 
@@ -128,7 +104,6 @@ npm run build
 node dist/cli.js integration install pi --dev
 node dist/cli.js integration install claude-code --dev
 node dist/cli.js integration install codex --dev
-node dist/cli.js integration install opencode --dev
 ```
 
 `--dev` embeds the current CLI entry-point path in the generated artifact. `VP_BIN` still takes precedence at runtime. Re-run the command if the checkout moves. Normal installations should continue using `vp integration install <agent>`; they default to `vp` on `PATH` and are unaffected by development installs.
@@ -137,10 +112,9 @@ node dist/cli.js integration install opencode --dev
 
 | Symptom | Fix |
 |---------|-----|
-| Agent CLI not found | Install Claude Code, Codex, Pi, or opencode first. |
-| Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks (including the `Bash` matcher for model-invoked `vp analyze`). opencode: verify the plugin's `chat.message` and `tool.execute.before` hooks via `opencode plugin list`. |
+| Agent CLI not found | Install Claude Code, Codex, or Pi first (opencode paused while its v2 API stabilizes). |
+| Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks (including the `Bash` matcher for model-invoked `vp analyze`). Pi: check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |
 | Hook script not found (`npx tsx ...vision-proxy_read.ts` fails) | Re-run `vp integration install <agent>` to regenerate the script, ensure `npx`/`tsx` is available, and ensure `vp` is on PATH (or set `VP_BIN`). |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |
 | Pi images not described | Check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |
-| opencode plugin not loading | Run `opencode plugin list` to verify installation; restart opencode after installing. |

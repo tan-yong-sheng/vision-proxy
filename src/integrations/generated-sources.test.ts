@@ -14,14 +14,13 @@ import { test } from "node:test";
 import { renderVersionMarker } from "../version.ts";
 import { generateHookScript, stampSubmitToolWord } from "./catalog.ts";
 import { HOOK_SCRIPT_SOURCE } from "./hook-script.ts";
-import { OPENCODE_PLUGIN_SOURCE } from "./opencode-plugin.ts";
 import { PI_EXTENSION_SOURCE } from "./pi-extension.ts";
 import { HOOK_RUNTIME_SOURCE, standaloneViolations } from "./runtime.ts";
 
+// opencode removed while its v2 plugin API stabilizes.
 const HOSTS: Array<{ name: string; source: string }> = [
 	{ name: "claude/codex hook script", source: HOOK_SCRIPT_SOURCE },
 	{ name: "pi extension", source: PI_EXTENSION_SOURCE },
-	{ name: "opencode plugin", source: OPENCODE_PLUGIN_SOURCE },
 ];
 
 test("every generated artifact inlines the canonical runtime verbatim", () => {
@@ -94,30 +93,6 @@ test("pi extension keeps its lifecycle adapter: mode gating, abort handling, con
 	assert.ok(!PI_EXTENSION_SOURCE.includes("image-cache"), "must not gain image-cache refs");
 });
 
-test("opencode plugin keeps its factory adapter: throw-to-deny, synthetic parts, no gating", () => {
-	assert.ok(
-		OPENCODE_PLUGIN_SOURCE.includes("tool.execute.before"),
-		"must keep the tool.execute.before hook",
-	);
-	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("chat.message"), "must keep the chat.message hook");
-	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("throw new Error("), "must keep throw-to-deny");
-	assert.ok(
-		OPENCODE_PLUGIN_SOURCE.includes("isUnflaggedAnalyzeCommand"),
-		"must keep the analyze-command rewrite detector",
-	);
-	assert.ok(
-		OPENCODE_PLUGIN_SOURCE.includes("synthetic: true"),
-		"must keep synthetic reminder parts",
-	);
-	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("prt-vp-"), "must keep the prt- part id scheme");
-	assert.ok(OPENCODE_PLUGIN_SOURCE.includes("execFile"), "must keep the execFile executor");
-	assert.ok(
-		!OPENCODE_PLUGIN_SOURCE.includes("getMode"),
-		"must stay unconditional (no Pi mode gating)",
-	);
-	assert.ok(!OPENCODE_PLUGIN_SOURCE.includes("image-cache"), "must not gain image-cache refs");
-});
-
 test("generated artifacts preserve the historical reminder and deny wording", () => {
 	// Submit-time wording differs deliberately per host; deny wording is shared.
 	// The hook script composes its reminder via readReminder(..., "prompt",
@@ -151,12 +126,6 @@ test("generated artifacts preserve the historical reminder and deny wording", ()
 		PI_EXTENSION_SOURCE.includes('readReminder(paths, REMINDER_MARKER, "message", "read")'),
 		"pi extension keeps its message/read reminder parameters",
 	);
-	assert.ok(
-		OPENCODE_PLUGIN_SOURCE.includes(
-			'readReminder(uniqueImages, INJECTION_MARKER, "message", "read")',
-		),
-		"opencode plugin keeps its message/read reminder parameters",
-	);
 	for (const host of HOSTS) {
 		assert.match(
 			host.source,
@@ -174,7 +143,7 @@ test("every generated artifact shares the Windows-safe context-dir policy", () =
 	// POSIX mode bits are meaningless on Windows (mkdir ignores mode,
 	// chmod only toggles read-only), so the strict bit check must be
 	// skipped there in every writer; privacy relies on per-user temp ACL
-	// inheritance. Pins the shared policy so the three adapters cannot drift.
+	// inheritance. Pins the shared policy so the two adapters cannot drift.
 	for (const host of HOSTS) {
 		assert.ok(
 			host.source.includes('process.platform !== "win32"'),
@@ -191,8 +160,4 @@ test("generated artifacts keep their fail-open and fence discipline", () => {
 		);
 	}
 	assert.ok(HOOK_SCRIPT_SOURCE.includes("exits 0"), "hook script must document exiting 0 on error");
-	assert.ok(
-		OPENCODE_PLUGIN_SOURCE.includes("allow the original read"),
-		"opencode plugin must document allow-on-failure",
-	);
 });

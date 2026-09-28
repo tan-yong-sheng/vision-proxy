@@ -506,38 +506,6 @@ function parseFloatOverride(
 	return n;
 }
 
-/**
- * Read a positive-integer environment override with a default fallback.
- *
- * Unlike a raw `Number(process.env.X ?? default)`, this never yields NaN: a
- * missing variable, a non-numeric value, or a value outside [min, max] all fall
- * back to `fallback`. This matters because the resolved value feeds `setTimeout`
- * (NaN coerces to ~0, killing analysis) and the `--max-output-tokens` argument
- * passed to `vp analyze`.
- *
- * Shared by the Claude/Codex hook so every harness
- * resolves `VP_HOOK_TIMEOUT_MS` and `VP_MAX_OUTPUT_TOKENS` identically. (The Pi
- * extension embeds its own copy of this helper because it is
- * written verbatim to an external extension directory and cannot import this
- * module at runtime.)
- */
-export function readPositiveIntEnv(
-	env: NodeJS.ProcessEnv,
-	name: string,
-	fallback: number,
-	min: number,
-	max: number,
-): number {
-	const raw = env[name];
-	if (raw === undefined) return fallback;
-	const n = Number.parseInt(raw, 10);
-	if (!Number.isFinite(n) || n < min || n > max) return fallback;
-	return n;
-}
-
-/**
- * Parse `VP_BASE_URL` — a single base URL string for the active provider.
- */
 function parseBaseUrlOverride(value: string | undefined): string | undefined {
 	if (value === undefined) return undefined;
 	if (!value) return undefined;
@@ -579,30 +547,6 @@ export function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): Partial<
 	assignIfDefined(overrides, "baseUrl", parseBaseUrlOverride(env.VP_BASE_URL));
 
 	return overrides;
-}
-
-export function envFlags(env: NodeJS.ProcessEnv = process.env): {
-	mode: boolean;
-	model: boolean;
-	context: boolean;
-	tool: boolean;
-	maxImagesPerCall: boolean;
-	maxBatch: boolean;
-	cacheSize: boolean;
-	cacheMaxAgeDays: boolean;
-	baseUrl: boolean;
-} {
-	return {
-		mode: Boolean(env.VP_MODE),
-		model: Boolean(env.VP_MODEL),
-		context: env.VP_INCLUDE_CONTEXT !== undefined,
-		tool: env.VP_TOOL !== undefined,
-		maxImagesPerCall: env.VP_MAX_IMAGES_PER_CALL !== undefined,
-		maxBatch: env.VP_MAX_BATCH !== undefined,
-		cacheSize: env.VP_CACHE_SIZE !== undefined,
-		cacheMaxAgeDays: env.VP_CACHE_MAX_AGE_DAYS !== undefined,
-		baseUrl: env.VP_BASE_URL !== undefined,
-	};
 }
 
 function isValidModelParts(provider: string, modelId: string): boolean {

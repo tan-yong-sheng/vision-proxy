@@ -147,6 +147,30 @@ test("UserPromptSubmit emits a Read reminder without spawning vp", () => {
 	assert.ok(!("permissionDecision" in out.hookSpecificOutput), "submit reminder must not deny");
 });
 
+test("VP_MODE=off stops the hook on every event (shared off-switch)", () => {
+	const script = writeScript();
+	// UserPromptSubmit with an image path: reminder suppressed, exit 0.
+	const submit = runHook(
+		script,
+		{ hook_event_name: "UserPromptSubmit", prompt: "What is in /tmp/screenshot.png?" },
+		{ VP_MODE: "off" },
+	);
+	assert.equal(submit.status, 0);
+	assert.equal(submit.stdout.trim(), "", "UserPromptSubmit must emit nothing when off");
+	// PreToolUse Read on an image path: no analyze, no deny, exit 0.
+	const pretool = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/screenshot.png" },
+		},
+		{ VP_MODE: "off", VP_BIN: fakeVp() },
+	);
+	assert.equal(pretool.status, 0);
+	assert.equal(pretool.stdout.trim(), "", "PreToolUse must emit nothing when off");
+});
+
 test("UserPromptSubmit with no image paths emits nothing", () => {
 	const script = writeScript();
 	const run = runHook(script, { hook_event_name: "UserPromptSubmit", prompt: "plain text" });

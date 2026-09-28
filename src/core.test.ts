@@ -11,6 +11,7 @@ import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
 	buildAnalyzeResult,
 	buildConversationContext,
@@ -141,7 +142,7 @@ describe("resolveCropEntry", () => {
 describe("intakeImage", () => {
 	let dir: string;
 	const fixturePng = path.join(
-		path.dirname(new URL(import.meta.url).pathname),
+		path.dirname(fileURLToPath(import.meta.url)),
 		"..",
 		"test",
 		"fixtures",

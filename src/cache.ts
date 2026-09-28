@@ -6,8 +6,8 @@
  * which matters for the cache-first `analyze` path inside a 30s hook budget.
  *
  * Cache key semantics mirror `buildToolCacheKey`: the key already folds in
- * image content hash + crop signature + question hash + model ref, so a hit is
- * safe to return verbatim.
+ * image content hash + crop signature + question hash + model ref + effective
+ * grounding format, so a hit is safe to return verbatim.
  */
 
 import { promises as fs } from "node:fs";

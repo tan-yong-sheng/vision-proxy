@@ -1854,45 +1854,6 @@ export function buildToolCacheKey(
 }
 
 // ── Fence builders ────────────────────────────────────────────────────────
-function addImageMetaParts(parts: string[], meta: ImageMeta, crop?: ResolvedCrop): void {
-	const width = crop ? crop.width : meta.width;
-	const height = crop ? crop.height : meta.height;
-	parts.push(`width="${width}"`, `height="${height}"`);
-	if (meta.filename) parts.push(`filename="${escapeAttr(meta.filename)}"`);
-}
-
-function buildFenceParts(hash: string, meta?: ImageMeta, crop?: ResolvedCrop): string[] {
-	const imageAttr = crop ? `${hash}#crop:${cropSignature(crop)}` : hash;
-	const parts: string[] = [`image="${escapeAttr(imageAttr)}"`];
-	if (meta) addImageMetaParts(parts, meta, crop);
-	if (crop) parts.push(`crop_origin="${crop.x},${crop.y}"`);
-	return parts;
-}
-
-export function buildDescriptionFence(
-	hash: string,
-	description: string,
-	meta?: ImageMeta,
-	crop?: ResolvedCrop,
-): string {
-	const parts = buildFenceParts(hash, meta, crop);
-	return `<vision_proxy_description ${parts.join(" ")}>\n${fenceUntrusted(description)}\n</vision_proxy_description>`;
-}
-
-export function buildAnalysisFence(
-	hash: string,
-	analysis: string,
-	meta?: ImageMeta,
-	crop?: ResolvedCrop,
-	groundingFormat?: GroundingFormat,
-): string {
-	const parts = buildFenceParts(hash, meta, crop);
-	if (groundingFormat && groundingFormat !== "none") {
-		parts.push(`grounding_format="${groundingFormat}"`);
-	}
-	return `<vision_proxy_analysis ${parts.join(" ")}>\n${fenceUntrusted(analysis)}\n</vision_proxy_analysis>`;
-}
-
 export function getGroundingFormat(
 	config: VisionConfig,
 	provider: string,
@@ -1900,11 +1861,6 @@ export function getGroundingFormat(
 ): GroundingFormat {
 	const key = `${provider}/${modelId}`;
 	return config.groundingModels[key]?.format ?? "none";
-}
-
-export function effectiveGroundingFormat(config: VisionConfig): GroundingFormat | undefined {
-	const fmt = getGroundingFormat(config, config.provider, config.modelId);
-	return fmt !== "none" ? fmt : undefined;
 }
 
 const GROUNDING_INSTRUCTIONS: Record<GroundingFormat, string> = {

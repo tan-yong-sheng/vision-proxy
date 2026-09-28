@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 import {
 	buildAnalyzeResult,
 	buildConversationContext,
-	buildDescriptionFence,
 	buildJointDescriptionFence,
 	buildToolCacheKey,
 	clampPixels,
@@ -364,15 +363,6 @@ describe("sanitize baseUrl", () => {
 });
 
 describe("fence builders", () => {
-	it("buildDescriptionFence wraps the description and neutralizes nested tags", () => {
-		const f = buildDescriptionFence(
-			"hash123",
-			"<vision_proxy_description>x</vision_proxy_description>",
-		);
-		assert.ok(f.startsWith('<vision_proxy_description image="hash123"'));
-		assert.ok(!f.includes("<vision_proxy_description>x"));
-	});
-
 	it("buildJointDescriptionFence lists all images", () => {
 		const f = buildJointDescriptionFence([{ hash: "h1" }, { hash: "h2" }], "desc");
 		assert.ok(f.includes('images="2"'));

@@ -1515,15 +1515,103 @@ test("unknown agent is rejected", async () => {
 	reset();
 });
 
-test("opencode install is paused with a v2 message", async () => {
-	// opencode removed while its v2 plugin API stabilizes: install, show,
-	// and uninstall must explain the pause instead of acting.
+test("opencode install and show are paused with a v2 message", async () => {
+	// opencode removed while its v2 plugin API stabilizes: install and show
+	// must explain the pause instead of acting. (uninstall is the orphan
+	// cleanup path and is covered below.)
 	isolate();
-	for (const sub of ["install", "show", "uninstall"] as const) {
+	for (const sub of ["install", "show"] as const) {
 		const r = await runIntegration(sub, "opencode");
 		assert.equal(r.ok, false);
 		assert.match(r.message, /opencode support is paused/);
 	}
+	reset();
+});
+
+/** Legacy v1 opencode plugin dir under the isolated HOME. */
+function legacyOpencodeDir(home: string): string {
+	return join(home, ".config", "opencode", "plugins");
+}
+
+test("status reports a legacy opencode plugin file when present", async () => {
+	const home = isolate();
+	const dir = legacyOpencodeDir(home);
+	mkdirSync(dir, { recursive: true });
+	const legacy = join(dir, "vision-proxy_read.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(
+		r.message,
+		/! opencode\s+legacy install at .+vision-proxy_read\.ts - run: vp integration uninstall opencode/,
+	);
+	assert.match(r.message, /out of date/);
+	reset();
+});
+
+test("status reports the pre-suffix legacy opencode plugin file", async () => {
+	const home = isolate();
+	const dir = legacyOpencodeDir(home);
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /! opencode\s+legacy install at .+vision-proxy\.ts/);
+	reset();
+});
+
+test("status omits opencode with no legacy plugin file", async () => {
+	isolate();
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.ok(!r.message.includes("opencode"), "no legacy file means no opencode line");
+	assert.match(r.message, /no integrations installed/);
+	reset();
+});
+
+test("uninstall opencode removes legacy plugin files and reports them", async () => {
+	const home = isolate();
+	const dir = legacyOpencodeDir(home);
+	mkdirSync(dir, { recursive: true });
+	const suffixed = join(dir, "vision-proxy_read.ts");
+	const legacy = join(dir, "vision-proxy.ts");
+	writeFileSync(suffixed, `__VP_VERSION__:0.0.9\n`);
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	// An unrelated plugin must survive the cleanup.
+	const other = join(dir, "other-plugin.ts");
+	writeFileSync(other, "export default {};");
+	const r = await runIntegration("uninstall", "opencode");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /uninstalled opencode integration/);
+	assert.match(r.message, /vision-proxy_read\.ts/);
+	assert.match(r.message, /vision-proxy\.ts/);
+	assert.equal(existsSync(suffixed), false);
+	assert.equal(existsSync(legacy), false);
+	assert.equal(existsSync(other), true);
+	assert.equal(existsSync(dir), true, "shared plugins dir is left in place");
+	reset();
+});
+
+test("uninstall opencode with no legacy file reports absent cleanly", async () => {
+	isolate();
+	const r = await runIntegration("uninstall", "opencode");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /not installed/);
+	reset();
+});
+
+test("uninstall opencode honors the installDir override", async () => {
+	const home = isolate();
+	const dir = join(home, "ext");
+	mkdirSync(dir, { recursive: true });
+	const legacy = join(dir, "vision-proxy_read.ts");
+	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("uninstall", "opencode", dir);
+	assert.equal(r.ok, true);
+	assert.match(r.message, /uninstalled opencode integration/);
+	assert.equal(existsSync(legacy), false);
+	// The real home-relative plugins dir is untouched by the override.
+	assert.equal(existsSync(join(legacyOpencodeDir(home), "vision-proxy_read.ts")), false);
 	reset();
 });
 

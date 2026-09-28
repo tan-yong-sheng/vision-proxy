@@ -8,7 +8,7 @@
  * translation lives here; filesystem orchestration lives in `lifecycle.ts`;
  * the shared hooks-JSON shape lives in `hooks-config.ts`.
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { extractMarkerVersion, renderVersionMarker } from "../version.ts";
@@ -372,6 +372,42 @@ export function removeLegacyArtifact(target: string): LegacyCleanupResult {
 		/* leave the stale legacy artifact if removal fails */
 		return { state: "survives", removed: false };
 	}
+}
+
+/**
+ * Legacy opencode plugins dir (v1 installs only).
+ *
+ * opencode support is paused: there is no opencode spec and it is not in
+ * SUPPORTED, so this path exists solely so status/uninstall can surface and
+ * clean up orphaned v1 installs. Matches the pre-removal layout
+ * (commit 85d2a9f^): `join(home, ".config", "opencode", "plugins")`.
+ *
+ * @tags integration, catalog
+ */
+export function legacyOpencodePluginsDir(): string {
+	return join(getHomeDir(), ".config", "opencode", "plugins");
+}
+
+/**
+ * Orphaned v1 opencode plugin files in `dir`.
+ *
+ * Matches on the `vision-proxy` filename prefix so both the pre-suffix
+ * `vision-proxy.ts` and `vision-proxy_read.ts` are covered. Unlike the
+ * marker-gated legacy cleanup, this is a plain prefix match: the old
+ * plugins dir only ever held our plugin.
+ *
+ * @tags integration, catalog
+ */
+export function legacyOpencodePluginFiles(dir: string): string[] {
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return [];
+	}
+	return entries
+		.filter((name) => name.startsWith("vision-proxy") && name.endsWith(".ts"))
+		.map((name) => join(dir, name));
 }
 
 /**

@@ -391,10 +391,10 @@ export function legacyOpencodePluginsDir(): string {
 /**
  * Orphaned v1 opencode plugin files in `dir`.
  *
- * Matches on the `vision-proxy` filename prefix so both the pre-suffix
- * `vision-proxy.ts` and `vision-proxy_read.ts` are covered. Unlike the
- * marker-gated legacy cleanup, this is a plain prefix match: the old
- * plugins dir only ever held our plugin.
+ * Matches exactly the two filenames we ever shipped (`vision-proxy.ts`
+ * pre-suffix and `vision-proxy_read.ts`): a prefix match would risk
+ * deleting user-authored `vision-proxy-*.ts` plugins that merely share
+ * the prefix.
  *
  * @tags integration, catalog
  */
@@ -402,11 +402,15 @@ export function legacyOpencodePluginFiles(dir: string): string[] {
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
-	} catch {
-		return [];
+	} catch (e) {
+		// Absent dir means no orphans; any other read error (EACCES,
+		// ENOTDIR, …) propagates so status/uninstall never misreport a
+		// present-but-unreadable install as clean.
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw e;
 	}
 	return entries
-		.filter((name) => name.startsWith("vision-proxy") && name.endsWith(".ts"))
+		.filter((name) => name === LEGACY_ARTIFACT_FILENAME || name === ARTIFACT_FILENAME)
 		.map((name) => join(dir, name));
 }
 

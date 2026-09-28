@@ -116,8 +116,8 @@ function rejectUnknownAgent(agent: string): IntegrationResult {
  * Remove orphaned v1 opencode plugin files.
  *
  * opencode has no install spec while its v2 API stabilizes, so this is the
- * only opencode path that acts: it deletes `vision-proxy*.ts` at the old
- * plugins dir and reports what was removed. With no legacy files present it
+ * only opencode path that acts: it deletes the two exact legacy filenames
+ * at the old plugins dir and reports what was removed. With no legacy files present it
  * reports absent instead of failing. The plugins dir itself is shared with
  * the user's own plugins, so it is left in place.
  *
@@ -353,8 +353,10 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 		for (const file of legacyOpencodeFiles) {
 			lines.push(`! opencode  legacy install at ${file} - run: vp integration uninstall opencode`);
 		}
-		installedCount += legacyOpencodeFiles.length;
-		outdated += legacyOpencodeFiles.length;
+		// One agent, one count: both filenames present still means a single
+		// legacy opencode integration (detail lines above list each file).
+		installedCount++;
+		outdated++;
 	}
 	for (const agent of SUPPORTED) {
 		const spec = specFor(agent)!;

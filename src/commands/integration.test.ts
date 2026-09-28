@@ -1549,6 +1549,18 @@ test("status reports a legacy opencode plugin file when present", async () => {
 	reset();
 });
 
+test("status counts a two-file opencode legacy as one integration", async () => {
+	const home = isolate();
+	const dir = legacyOpencodeDir(home);
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "vision-proxy.ts"), `__VP_VERSION__:0.0.9\\n`);
+	writeFileSync(join(dir, "vision-proxy_read.ts"), `__VP_VERSION__:0.0.9\\n`);
+	const r = await runIntegration("status", "");
+	assert.equal(r.ok, true);
+	assert.match(r.message, /1 of 1 integration\(s\) out of date/);
+	reset();
+});
+
 test("status reports the pre-suffix legacy opencode plugin file", async () => {
 	const home = isolate();
 	const dir = legacyOpencodeDir(home);
@@ -1580,6 +1592,10 @@ test("uninstall opencode removes legacy plugin files and reports them", async ()
 	// An unrelated plugin must survive the cleanup.
 	const other = join(dir, "other-plugin.ts");
 	writeFileSync(other, "export default {};");
+	// A user-authored file sharing only the prefix must also survive: only
+	// the two exact legacy filenames are ever removed.
+	const decoy = join(dir, "vision-proxy-notes.ts");
+	writeFileSync(decoy, "export default {};");
 	const r = await runIntegration("uninstall", "opencode");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /uninstalled opencode integration/);
@@ -1588,6 +1604,7 @@ test("uninstall opencode removes legacy plugin files and reports them", async ()
 	assert.equal(existsSync(suffixed), false);
 	assert.equal(existsSync(legacy), false);
 	assert.equal(existsSync(other), true);
+	assert.equal(existsSync(decoy), true);
 	assert.equal(existsSync(dir), true, "shared plugins dir is left in place");
 	reset();
 });

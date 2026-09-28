@@ -558,6 +558,32 @@ test("PreToolUse fails open when vp is missing or exits non-zero", () => {
 	assert.equal(failed.stdout.trim(), "", "failing vp must emit nothing");
 });
 
+test("PreToolUse forwards child stderr so config warnings stay visible", () => {
+	const dir = mkdtempSync(join(tmpdir(), "vp-warn-bin-"));
+	const vp = join(dir, "vp");
+	writeFileSync(
+		vp,
+		"#!/bin/sh\n" +
+			"printf '%s\\n' '[vision-proxy] WARNING: project config overrides user-level baseUrl.' >&2\n" +
+			"printf '%s\\n' '<vision_proxy_description>A red square on white.</vision_proxy_description>'\n",
+	);
+	chmodSync(vp, 0o755);
+	const script = writeScript();
+	const run = runHook(
+		script,
+		{
+			hook_event_name: "PreToolUse",
+			tool_name: "Read",
+			tool_input: { file_path: "/tmp/diagram.png" },
+		},
+		{ VP_BIN: vp },
+	);
+	assert.equal(run.status, 0);
+	const out = parseOutput(run);
+	assert.ok(out, "image Read must emit JSON");
+	assert.match(run.stderr, /WARNING: project config overrides user-level baseUrl/);
+});
+
 test("malformed stdin fails open with exit 0 and no stdout", () => {
 	const script = writeScript();
 	const result = spawnSync(

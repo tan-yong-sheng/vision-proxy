@@ -31,7 +31,6 @@
  *   clean function statement in every engine.
  */
 
-import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
 import {
 	chmodSync,
@@ -69,11 +68,14 @@ const MIN_MAX_OUTPUT_TOKENS = 1;
 const MAX_MAX_OUTPUT_TOKENS = 1000000;
 
 /**
- * One table for the four hook settings (Q4): each row names the env var,
- * its default, its accepted range, and its parser, so the four stop living
- * as scattered constants. The full 20-setting table is a later change, not
- * this one (Q7: not now). Plain data — no backtick, no ${ — so it composes
- * into HOOK_RUNTIME_SOURCE like every other canonical value.
+ * Pilot table for the two numeric hook settings (Q4): each row names the
+ * env var and references its canonical default and accepted range, so the
+ * rows stay aligned with the parsers below. Only the numeric settings fit
+ * this shape (name, fallback, min, max): VP_BIN is a string and VP_MODE is
+ * an enum, so they stay on their own resolvers. The full 20-setting table
+ * is a later change, not this one (Q7: not now). Plain data — no backtick,
+ * no ${ — so it composes into HOOK_RUNTIME_SOURCE like every other
+ * canonical value.
  *
  * @tags integrations, runtime
  */
@@ -84,8 +86,18 @@ interface HostEnvSpec {
 	max: number;
 }
 var HOST_ENV: HostEnvSpec[] = [
-	{ name: "VP_HOOK_TIMEOUT_MS", fallback: 30000, min: 1000, max: 600000 },
-	{ name: "VP_MAX_OUTPUT_TOKENS", fallback: 2000, min: 1, max: 1000000 },
+	{
+		name: "VP_HOOK_TIMEOUT_MS",
+		fallback: DEFAULT_HOOK_TIMEOUT_MS,
+		min: MIN_HOOK_TIMEOUT_MS,
+		max: MAX_HOOK_TIMEOUT_MS,
+	},
+	{
+		name: "VP_MAX_OUTPUT_TOKENS",
+		fallback: DEFAULT_MAX_OUTPUT_TOKENS,
+		min: MIN_MAX_OUTPUT_TOKENS,
+		max: MAX_MAX_OUTPUT_TOKENS,
+	},
 ];
 
 /** Shared cap on captured vp analyze output. */
@@ -254,12 +266,14 @@ var CONTEXT_FILE_MAX_BYTES = 256 * 1024;
  * function below is composed into HOOK_RUNTIME_SOURCE via toString, so it
  * must satisfy the standalone rules (no backtick, no ${, 2-space
  * indent, imports limited to what each generated header provides:
- * node:buffer Buffer, node:crypto randomBytes, node:fs
+ * node:crypto randomBytes, node:fs
  * chmodSync/closeSync/lstatSync/mkdirSync/openSync/readdirSync/rmSync/
  * statSync/writeFileSync, node:os tmpdir, node:path join, and the
  * process global). Consumers must NOT guard with typeof checks on those
  * imports: the generated headers always provide them and the golden
- * tests pin standalone validity.
+ * tests pin standalone validity. The Buffer global is the one exception:
+ * the Pi header provides no node:buffer import, so utf8ByteLength guards
+ * it with typeof and every artifact test pins the guard.
  *
  * @tags integrations, runtime
  */
@@ -436,9 +450,38 @@ function pendingContextFilePath(): string {
 	return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
 }
 
+/**
+ * Byte length of a UTF-8 string without assuming a Buffer global.
+ * The Pi generated header provides no Buffer import, so the canonical
+ * runtime must not throw ReferenceError there: when Buffer is absent the
+ * length check falls back to a 3-bytes-per-char upper bound (never
+ * under-counts, so the cap still enforced) and the write proceeds.
+ * Written with a declared-global indirection because a bare `Buffer?.`
+ * reference still throws ReferenceError when no binding exists.
+ * Standalone-safe: no backtick, no ${.
+ *
+ * @tags integrations, runtime
+ */
+declare const Buffer: { byteLength(text: string, encoding: string): number } | undefined;
+function utf8ByteLength(text: string): number {
+	// The typeof guard is the fix: Buffer?.byteLength alone throws
+	// ReferenceError when no binding exists (the Pi artifact ships no
+	// node:buffer import), so this keeps the two-step shape.
+	const byteLength = typeof Buffer !== "undefined" ? Buffer?.byteLength : undefined;
+	if (typeof byteLength === "function") {
+		try {
+			return byteLength(text, "utf8");
+			// fall through to the estimate below when the call throws
+		} catch {
+			// ignore: fall through
+		}
+	}
+	return text.length * 3;
+}
+
 function writePendingContextFile(context: string): string | null {
 	if (!context) return null;
-	if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+	if (utf8ByteLength(context) > CONTEXT_FILE_MAX_BYTES) return null;
 	var dir = contextFileDir();
 	var path = "";
 	var fd2 = -1;
@@ -502,7 +545,7 @@ function writePendingContextFile(context: string): string | null {
  */
 function writeContextFile(context: string): string | null {
 	if (!context) return null;
-	if (Buffer.byteLength(context, "utf8") > CONTEXT_FILE_MAX_BYTES) return null;
+	if (utf8ByteLength(context) > CONTEXT_FILE_MAX_BYTES) return null;
 	var dir = contextFileDir();
 	var fd = -1;
 	var file = "";
@@ -967,6 +1010,7 @@ export {
 	resolveMaxOutputTokens,
 	resolveVpBin,
 	truncateConversationContext,
+	utf8ByteLength,
 	vpEntryToSpawn,
 	withImageInstruction,
 	writeContextFile,
@@ -1044,6 +1088,7 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	pendingContextFilePath.toString(),
 	writePendingContextFile.toString(),
 	writeContextFile.toString(),
+	utf8ByteLength.toString(),
 	isTextBlock.toString(),
 	extractText.toString(),
 	truncateConversationContext.toString(),

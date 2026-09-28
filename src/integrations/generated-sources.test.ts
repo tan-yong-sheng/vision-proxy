@@ -86,6 +86,14 @@ test("pi extension keeps its lifecycle adapter: mode gating, abort handling, con
 	assert.ok(PI_EXTENSION_SOURCE.includes("getMode()"), "must keep Pi mode gating");
 	assert.ok(PI_EXTENSION_SOURCE.includes("cachedConfigMode"), "must keep the cached config lookup");
 	assert.ok(
+		!PI_EXTENSION_SOURCE.includes('from "node:buffer"'),
+		"must not import node:buffer (canonical runtime guards the missing global)",
+	);
+	assert.ok(
+		PI_EXTENSION_SOURCE.includes("utf8ByteLength"),
+		"must size context through the guarded canonical helper",
+	);
+	assert.ok(
 		PI_EXTENSION_SOURCE.includes("isAnalysisDisabled(envMode)"),
 		"must decide the off-switch through the shared check",
 	);

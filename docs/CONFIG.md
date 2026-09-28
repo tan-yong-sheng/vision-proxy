@@ -47,10 +47,10 @@ interface VisionConfig {
 | `tool` | string | `on` | Enable/disable the tool-mode proxy: `on` or `off`. |
 | `maxImagesPerCall` | number | `4` | Max images a single `vp analyze` call may receive. This is the canonical, single image limit. |
 | `maxBatch` | number | `4` | **Deprecated.** One-release alias for `maxImagesPerCall`. Set `maxImagesPerCall` instead. |
-| `cacheSize` | number | `100` | Max number of cached descriptions. |
+| `cacheSize` | number | `50` | Max number of cached descriptions. |
 | `cacheMaxAgeDays` | number | `30` | Days before a cache entry is considered stale. |
-| `pHashSimilarityThreshold` | number | `0.9` | pHash similarity threshold for cache hits. |
-| `groundingModels` | object | `{}` | Per-model grounding format overrides. |
+| `pHashSimilarityThreshold` | number | `0.8` | pHash similarity threshold for cache hits. |
+| `groundingModels` | object | `google/gemini-2.5-pro` + `google/gemini-3-pro` (both `gemini_normalized_1000`) | Per-model grounding format overrides, keyed by exact case-sensitive `${provider}/${modelId}`. Add your own keys (e.g. `openai/...` for gateway routing) via config file; `--format` overrides per call. |
 | `baseUrl` | string | `""` | Base URL override for the active provider, e.g. `"http://localhost:8000/v1"`. Provider `*_BASE_URL` env vars still take precedence. `VP_BASE_URL` also works. |
 | `apiKey` | string | `""` | Provider API key persisted as plain text in config. Prefer `vp provider store-key` for OS keyring storage. |
 

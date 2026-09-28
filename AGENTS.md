@@ -92,7 +92,7 @@ Runtime requirements:
 - **Do not edit:** `.fallow/cache.bin` - it's fallow binary cache data, not source.
 `.claude/hooks/fallow-gate.sh` - it's a generated hook; edit `src/core.ts` for sanitization/fencing behavior and `src/commands/analyze.ts` for analysis behavior.
 - **Always ask before:** Adding new production dependencies to `package.json` - current deps are minimal and chosen deliberately.
-Changing `VP_*` env var names - they must stay in sync with `src/core.ts`, `src/cache.ts`, `src/keyring.ts`, `src/integrations/hook-script.ts`, and `src/integrations/pi-extension.ts`.
+Changing `VP_*` env var names - they must stay in sync with `src/core.ts`, `src/cache.ts`, `src/keyring.ts`, `src/commands/update.ts`, `src/commands/provider.ts`, `src/command-runner.ts`, `src/provider.ts`, and `src/integrations/hook-script.ts`, `src/integrations/pi-extension.ts`, `src/integrations/runtime.ts`.
 - **Preferred style:** Pure functions in `src/core.ts` and `src/commands/*.ts` with type-only imports from peer deps.
 No side effects at module scope.
 Tests use `node:test` and `node:assert` - no test runner dependency.

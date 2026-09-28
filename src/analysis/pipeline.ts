@@ -92,68 +92,42 @@ export async function runAnalyze(
 	const context = config.includeContext ? truncateContext(flags.context?.trim() ?? "") : "";
 	const promptHash = hashImageData(JSON.stringify([question, context]));
 
-	// Cache-first single-image default path.
-	if (!flags.joint && payloads.length === 1) {
-		const p = payloads[0]!;
-		const cropSig = p.crop ? cropSignature(p.crop) : undefined;
-		const cacheKey = buildToolCacheKey([p.hash], cropSig, promptHash, `${provider}/${modelId}`);
-		const cached = await cacheGet(cacheKey);
-		if (cached !== undefined) {
-			const description = cached;
-			const output = flags.fence
-				? buildAnalyzeResult([p], description, effectiveFormat)
-				: description;
-			return {
-				output,
-				cacheHit: true,
-				records: [{ hash: p.hash, description }],
-			};
-		}
-
-		const resp = await analyzeImpl({
-			imagePayloads: [p],
-			model: modelOutcome.model.model,
-			systemPrompt,
-			question,
-			context: context ? context : undefined,
-			maxOutputTokens: flags.maxOutputTokens,
-		});
-		const description = resp.text;
-		await cacheSet(cacheKey, description);
-		const output = flags.fence
-			? buildAnalyzeResult([p], description, effectiveFormat)
-			: description;
-		return {
-			output,
-			cacheHit: false,
-			records: [{ hash: p.hash, description }],
-		};
+	// Unified cache-first dispatch. The single-image default path and the
+	// joint multi-image path (explicit --joint, or multiple images) differ
+	// only in key formula, fence renderer, and per-image records, so they
+	// share one cache -> analyze -> fence flow. Key shapes (including the
+	// `&f=<format>` segment) are pinned by `src/analysis/cache-keys.test.ts`.
+	const single = !flags.joint && payloads.length === 1;
+	let cropSig: string | undefined;
+	if (single) {
+		const crop = payloads[0]!.crop;
+		cropSig = crop ? cropSignature(crop) : undefined;
+	} else {
+		const perImage = payloads.map((p) => (p.crop ? cropSignature(p.crop) : "full")).join("+");
+		cropSig = flags.joint ? `joint:${perImage}` : perImage;
 	}
-
-	// Joint multi-image path (explicit --joint, or multiple images).
-	const allHashes = payloads.map((p) => p.hash);
-	const cropSig = payloads.map((p) => (p.crop ? cropSignature(p.crop) : "full")).join("+");
-	const jointCacheKey = buildToolCacheKey(
-		allHashes,
-		flags.joint ? `joint:${cropSig}` : cropSig,
+	const cacheKey = buildToolCacheKey(
+		payloads.map((p) => p.hash),
+		cropSig,
 		promptHash,
 		`${provider}/${modelId}`,
+		effectiveFormat,
 	);
-	const cachedJoint = await cacheGet(jointCacheKey);
-	if (cachedJoint !== undefined) {
-		const description = cachedJoint;
-		const output = flags.fence
-			? buildJointDescriptionFence(
+	const fenceDescription = (description: string): string => {
+		if (!flags.fence) return description;
+		return single
+			? buildAnalyzeResult([payloads[0]!], description, effectiveFormat)
+			: buildJointDescriptionFence(
 					payloads.map((p) => ({ hash: p.hash, meta: p.meta })),
 					description,
 					effectiveFormat,
-				)
-			: description;
-		return {
-			output,
-			cacheHit: true,
-			records: payloads.map((p) => ({ hash: p.hash, description })),
-		};
+				);
+	};
+	const toRecords = (description: string) => payloads.map((p) => ({ hash: p.hash, description }));
+
+	const cached = await cacheGet(cacheKey);
+	if (cached !== undefined) {
+		return { output: fenceDescription(cached), cacheHit: true, records: toRecords(cached) };
 	}
 
 	const resp = await analyzeImpl({
@@ -165,18 +139,11 @@ export async function runAnalyze(
 		maxOutputTokens: flags.maxOutputTokens,
 	});
 	const description = resp.text;
-	await cacheSet(jointCacheKey, description);
-	const output = flags.fence
-		? buildJointDescriptionFence(
-				payloads.map((p) => ({ hash: p.hash, meta: p.meta })),
-				description,
-				effectiveFormat,
-			)
-		: description;
+	await cacheSet(cacheKey, description);
 	return {
-		output,
+		output: fenceDescription(description),
 		cacheHit: false,
-		records: payloads.map((p) => ({ hash: p.hash, description })),
+		records: toRecords(description),
 	};
 }
 

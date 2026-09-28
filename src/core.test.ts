@@ -236,14 +236,21 @@ describe("getGroundingFormat", () => {
 });
 
 describe("buildToolCacheKey", () => {
-	it("folds hashes, crop signature, question hash, and model", () => {
+	it("folds hashes, crop signature, question hash, model, and format", () => {
 		const key = buildToolCacheKey(["h1", "h2"], "0,0,10,10", "qhash", "openai/gpt-4o");
-		assert.equal(key, "h1+h2#crop:0,0,10,10?q=qhash&m=openai/gpt-4o");
+		assert.equal(key, "h1+h2#crop:0,0,10,10?q=qhash&m=openai/gpt-4o&f=none");
 	});
 
 	it("omits crop signature when absent", () => {
 		const key = buildToolCacheKey(["h1"], undefined, "qhash", "openai/gpt-4o");
-		assert.equal(key, "h1?q=qhash&m=openai/gpt-4o");
+		assert.equal(key, "h1?q=qhash&m=openai/gpt-4o&f=none");
+	});
+
+	it("keys different formats apart so fenced renders do not collide", () => {
+		const a = buildToolCacheKey(["h1"], undefined, "qhash", "openai/gpt-4o", "none");
+		const b = buildToolCacheKey(["h1"], undefined, "qhash", "openai/gpt-4o", "qwen_pixels");
+		assert.equal(a, "h1?q=qhash&m=openai/gpt-4o&f=none");
+		assert.equal(b, "h1?q=qhash&m=openai/gpt-4o&f=qwen_pixels");
 	});
 });
 

@@ -77,13 +77,6 @@ export interface ImagePayload {
 	crop?: ResolvedCrop;
 }
 
-/** Result of a single-image vision analysis. */
-export interface AnalysisResult {
-	hash: string;
-	description: string | null;
-	error?: string;
-}
-
 export type ImageContent = {
 	type: "image";
 	data: string;
@@ -220,21 +213,6 @@ export class LRUCache<K, V> {
 		return this.map.size;
 	}
 }
-
-export interface DescriptionEntry {
-	hash: string;
-	description: string;
-}
-
-export interface LegacyImage {
-	source?: { data?: string; mediaType?: string };
-}
-
-// ── Constants ──────────────────────────────────────────────────────────────
-export const CUSTOM_TYPE_CONFIG = "vision-proxy-config";
-export const CUSTOM_TYPE_DESCRIPTION = "vision-proxy-description";
-export const CUSTOM_TYPE_JOINT = "vision-proxy-joint-description";
-export const CUSTOM_TYPE_COMMAND = "vision-proxy-command";
 
 /** Valid grounding format identifiers. */
 export const VALID_GROUNDING_FORMATS: GroundingFormat[] = [
@@ -670,47 +648,8 @@ export function resolveConfig(
 }
 
 // ── Image helpers ──────────────────────────────────────────────────────────
-function isModernImageContent(img: ImageContent | LegacyImage): img is ImageContent {
-	if (!("data" in img)) return false;
-	if (typeof img.data !== "string") return false;
-	if (typeof (img as ImageContent).mimeType !== "string") return false;
-	return true;
-}
-
-function legacyImageSource(img: ImageContent | LegacyImage): LegacyImage["source"] | undefined {
-	return (img as LegacyImage).source;
-}
-
-function isLegacySource(
-	source: LegacyImage["source"] | undefined,
-): source is { data: string; mediaType: string } {
-	if (!source) return false;
-	if (!source.data) return false;
-	if (!source.mediaType) return false;
-	return true;
-}
-
-export function toImageContent(img: ImageContent | LegacyImage): ImageContent {
-	if (isModernImageContent(img)) {
-		return {
-			type: "image",
-			data: img.data,
-			mimeType: img.mimeType,
-		};
-	}
-	const legacy = legacyImageSource(img);
-	if (isLegacySource(legacy)) {
-		return { type: "image", data: legacy.data ?? "", mimeType: legacy.mediaType ?? "image/png" };
-	}
-	throw new Error("Unsupported image content shape");
-}
-
 export function hashImageData(data: string): string {
 	return createHash("sha256").update(data).digest("hex").slice(0, HASH_HEX_LEN);
-}
-
-export function pluralImages(n: number): string {
-	return n === 1 ? "1 image" : `${n} images`;
 }
 
 // ── File-path image detection ──────────────────────────────────────────────
@@ -1767,66 +1706,14 @@ async function applyCropToPayload(
 	}
 }
 
-// ── Perceptual hashing (imghash) ────────────────────────────────────────────
-type ImghashModule = {
-	default?: {
-		hash: (input: string | Buffer, bits?: number | null, format?: string) => Promise<string>;
-	};
-};
-let _imghash:
-	| ((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>)
-	| null = null;
-let _imghashLoadAttempted = false;
-
-async function loadImghash(): Promise<
-	((input: string | Buffer, bits?: number | null, format?: string) => Promise<string>) | null
-> {
-	if (_imghash) return _imghash;
-	if (_imghashLoadAttempted) return null;
-	_imghashLoadAttempted = true;
-	try {
-		const mod = (await import("imghash")) as unknown as ImghashModule;
-		_imghash =
-			mod.default?.hash ??
-			(mod as unknown as (
-				input: string | Buffer,
-				bits?: number | null,
-				format?: string,
-			) => Promise<string>);
-		return _imghash;
-	} catch {
-		return null;
-	}
-}
-
-export async function computePHash(imageBytes: Buffer): Promise<string | null> {
-	const imghash = await loadImghash();
-	if (!imghash) return null;
-	try {
-		return await imghash(imageBytes);
-	} catch {
-		return null;
-	}
-}
-
-export function hammingDistance(a: string | null, b: string | null): number {
-	if (!a || !b) return Infinity;
-	let dist = 0;
-	const len = Math.min(a.length, b.length);
-	for (let i = 0; i < len; i++) {
-		const xor = parseInt(a[i]!, 16) ^ parseInt(b[i]!, 16);
-		dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
-	}
-	return dist;
-}
-
 export function buildToolCacheKey(
 	sortedHashes: readonly string[],
 	cropSig: string | undefined,
 	questionHash: string,
 	modelId: string,
+	effectiveFormat: GroundingFormat = "none",
 ): string {
-	return `${sortedHashes.join("+")}${cropSig ? `#crop:${cropSig}` : ""}?q=${questionHash}&m=${modelId}`;
+	return `${sortedHashes.join("+")}${cropSig ? `#crop:${cropSig}` : ""}?q=${questionHash}&m=${modelId}&f=${effectiveFormat}`;
 }
 
 // ── Fence builders ────────────────────────────────────────────────────────
@@ -1881,85 +1768,6 @@ export function buildJointDescriptionFence(
 	}
 
 	return `<vision_proxy_joint_description ${parts.join(" ")}>\n${fenceUntrusted(description)}\n</vision_proxy_joint_description>`;
-}
-
-export function extractVersion(filename: string): { prefix: string; version: number } | null {
-	const base = basename(filename, extname(filename));
-	const match = base.match(/^(.*?)(\d+(?:\.\d+)?)$/);
-	if (!match) return null;
-	const prefix = match[1]!;
-	if (!prefix) return null;
-	return { prefix, version: parseFloat(match[2]!) };
-}
-
-function hasPrefixName(basenames: string[], prefix: string): boolean {
-	const re = new RegExp(`^${prefix}[^a-z]`);
-	return basenames.some((b) => re.test(b) || b === prefix);
-}
-
-function buildVersionGroups(filenames: string[]): Map<string, number[]> {
-	const groups = new Map<string, number[]>();
-	for (const f of filenames) {
-		const v = extractVersion(basename(f).toLowerCase());
-		if (!v) continue;
-		const arr = groups.get(v.prefix) ?? [];
-		arr.push(v.version);
-		groups.set(v.prefix, arr);
-	}
-	return groups;
-}
-
-function hasVersionedSequence(groups: Map<string, number[]>): boolean {
-	for (const [, vers] of groups) {
-		if (vers.length >= 2 && new Set(vers).size >= 2) return true;
-	}
-	return false;
-}
-
-function hasNumberedSequence(basenames: string[], pattern: RegExp): boolean {
-	return basenames.every((b) => pattern.test(b)) && basenames.length >= 2;
-}
-
-function hasDateSequence(basenames: string[], pattern: RegExp): boolean {
-	return basenames.filter((b) => pattern.test(b)).length >= 2;
-}
-
-const FILENAME_PAIRS: [string, string, string][] = [
-	["before", "after", "before/after pair"],
-	["old", "new", "old/new pair"],
-];
-
-function pushPairHints(hints: string[], basenames: string[]): void {
-	for (const [a, b, label] of FILENAME_PAIRS) {
-		if (hasPrefixName(basenames, a) && hasPrefixName(basenames, b)) {
-			hints.push(label);
-		}
-	}
-}
-
-function hasAnyNumberedSequence(basenames: string[], patterns: RegExp[]): boolean {
-	for (const pattern of patterns) {
-		if (hasNumberedSequence(basenames, pattern)) return true;
-	}
-	return false;
-}
-
-function pushSequenceHints(hints: string[], basenames: string[], filenames: string[]): void {
-	if (hasVersionedSequence(buildVersionGroups(filenames))) hints.push("versioned sequence");
-	const numberedPatterns = [/^.*_(\d+)(\.[a-z]+)?$/, /^.*-(\d+)(\.[a-z]+)?$/];
-	if (hasAnyNumberedSequence(basenames, numberedPatterns)) hints.push("numbered sequence");
-	if (hasDateSequence(basenames, /^\d{4}-\d{2}-\d{2}[_ ].*\.[a-z]+$/))
-		hints.push("time-ordered sequence");
-}
-
-export function generateFilenameHints(filenames: string[]): string[] {
-	if (filenames.length < 2) return [];
-
-	const basenames = filenames.map((f) => basename(f).toLowerCase());
-	const hints: string[] = [];
-	pushPairHints(hints, basenames);
-	pushSequenceHints(hints, basenames, filenames);
-	return hints;
 }
 
 // Global path counter for stripImagePaths tokenization.

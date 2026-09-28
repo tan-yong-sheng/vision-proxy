@@ -216,13 +216,22 @@ describe("parseModelString", () => {
 describe("getGroundingFormat", () => {
 	it("returns the configured format for a known model", () => {
 		assert.equal(
-			getGroundingFormat(DEFAULT_CONFIG, "Qwen", "Qwen2.5-VL-7B-Instruct"),
-			"qwen_pixels",
+			getGroundingFormat(DEFAULT_CONFIG, "google", "gemini-2.5-pro"),
+			"gemini_normalized_1000",
 		);
 	});
 
 	it("returns none when not configured", () => {
 		assert.equal(getGroundingFormat(DEFAULT_CONFIG, "anthropic", "claude-sonnet-4-5"), "none");
+	});
+
+	it("returns none for unreachable-style keys unless user-configured", () => {
+		assert.equal(getGroundingFormat(DEFAULT_CONFIG, "Qwen", "Qwen2.5-VL-7B-Instruct"), "none");
+		const custom = {
+			...DEFAULT_CONFIG,
+			groundingModels: { "Qwen/Qwen2.5-VL-7B-Instruct": { format: "qwen_pixels" as const } },
+		};
+		assert.equal(getGroundingFormat(custom, "Qwen", "Qwen2.5-VL-7B-Instruct"), "qwen_pixels");
 	});
 });
 

@@ -236,14 +236,6 @@ export const CUSTOM_TYPE_DESCRIPTION = "vision-proxy-description";
 export const CUSTOM_TYPE_JOINT = "vision-proxy-joint-description";
 export const CUSTOM_TYPE_COMMAND = "vision-proxy-command";
 
-/** Models explicitly excluded from grounding. */
-const GROUNDING_EXCLUDED_MODELS = [
-	"anthropic/claude",
-	"openai/gpt-4o",
-	"openai/gpt-5",
-	"meta/llama",
-];
-
 /** Valid grounding format identifiers. */
 export const VALID_GROUNDING_FORMATS: GroundingFormat[] = [
 	"qwen_pixels",
@@ -252,11 +244,6 @@ export const VALID_GROUNDING_FORMATS: GroundingFormat[] = [
 	"internvl_pixels",
 	"gemini_normalized_1000",
 ];
-
-export function isGroundingExcluded(providerModel: string): boolean {
-	const lower = providerModel.toLowerCase();
-	return GROUNDING_EXCLUDED_MODELS.some((ex) => lower.startsWith(ex));
-}
 
 export function parseGroundingFormat(raw: string): GroundingFormat | null {
 	if ((VALID_GROUNDING_FORMATS as readonly string[]).includes(raw)) return raw as GroundingFormat;
@@ -350,17 +337,6 @@ export const DEFAULT_CONFIG: VisionConfig = {
 	cacheMaxAgeDays: 30,
 	pHashSimilarityThreshold: 0.8,
 	groundingModels: {
-		"Qwen/Qwen2.5-VL-3B-Instruct": { format: "qwen_pixels" },
-		"Qwen/Qwen2.5-VL-7B-Instruct": { format: "qwen_pixels" },
-		"Qwen/Qwen2.5-VL-32B-Instruct": { format: "qwen_pixels" },
-		"Qwen/Qwen2.5-VL-72B-Instruct": { format: "qwen_pixels" },
-		"Qwen/Qwen3-VL-7B": { format: "qwen_pixels" },
-		"allenai/Molmo2-8B": { format: "molmo_points" },
-		"allenai/Molmo2-72B": { format: "molmo_points" },
-		"deepseek-ai/deepseek-vl2-tiny": { format: "deepseek_bbox" },
-		"deepseek-ai/deepseek-vl2-small": { format: "deepseek_bbox" },
-		"deepseek-ai/deepseek-vl2-base": { format: "deepseek_bbox" },
-		"OpenGVLab/InternVL3-8B": { format: "internvl_pixels" },
 		"google/gemini-2.5-pro": { format: "gemini_normalized_1000" },
 		"google/gemini-3-pro": { format: "gemini_normalized_1000" },
 	},

@@ -1107,6 +1107,23 @@ function imageSizeReason(content: Buffer): ReadImageResult["reason"] | undefined
 	return undefined;
 }
 
+/**
+ * Reject images whose declared dimensions exceed the decode-bomb cap.
+ *
+ * Same cap the crop path (`isOversized` inside `safeCropImage`) and the
+ * cache-metadata store path (`safeDimensions` via `storeNewImageMeta`)
+ * already enforce, applied here at the intake gate so a small-file image
+ * declaring huge dimensions never reaches dispatch as base64.
+ * Unparseable dimensions pass through: downstream handlers (crop, meta
+ * store, providers) already treat absent dimensions as unknown.
+ */
+function imageDimensionReason(content: Buffer): ReadImageResult["reason"] | undefined {
+	const dims = safeDimensions(content);
+	if (dims) return undefined;
+	if (extractDimensions(content)) return "unreadable";
+	return undefined;
+}
+
 async function readImageBytes(filePath: string): Promise<ReadBytesResult> {
 	try {
 		await access(filePath);
@@ -1149,6 +1166,13 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 		const sizeReason = imageSizeReason(content);
 		if (sizeReason) {
 			return { image: null, reason: sizeReason, bytes: content.length, filename };
+		}
+
+		// Enforce the decode-bomb dimension cap at intake, matching the
+		// local-file branch below.
+		const urlDimensionReason = imageDimensionReason(content);
+		if (urlDimensionReason) {
+			return { image: null, reason: urlDimensionReason, bytes: content.length, filename };
 		}
 
 		// Content sniffing on downloaded content
@@ -1207,6 +1231,18 @@ export async function readImageFileWithReason(rawPath: string): Promise<ReadImag
 	}
 
 	const content = bytesResult.content;
+
+	// Enforce the decode-bomb dimension cap at intake (after the byte-cap
+	// check, before dispatch), matching the crop and metadata paths.
+	const dimensionReason = imageDimensionReason(content);
+	if (dimensionReason) {
+		return {
+			image: null,
+			reason: dimensionReason,
+			bytes: content.length,
+			filename: basename(filePath),
+		};
+	}
 
 	// Content-sniff the actual format via sharp to detect extension/mime mismatches.
 	const detectedMimeType = await sniffMimeType(content);

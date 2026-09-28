@@ -223,9 +223,11 @@ describe("command-runner seam", () => {
 		// Pi tool env carries PI_CODING_AGENT=true with no PI_DEBUG).
 		assert.equal(hasAgentMarker({ PI_CODING_AGENT: "true" }), true);
 		// Codex injects CODEX_SESSION_ID/CODEX_THREAD_ID into model-spawned
-		// shells (CODEX_HOME is a config root, not a child signal).
+		// shells. CODEX_HOME is a config root, not a child signal, and must
+		// not unlock agent context on its own.
 		assert.equal(hasAgentMarker({ CODEX_SESSION_ID: "sess-1" }), true);
 		assert.equal(hasAgentMarker({ CODEX_THREAD_ID: "thread-1" }), true);
+		assert.equal(hasAgentMarker({ CODEX_HOME: "/home/u/.codex" }), false);
 		// The gate covers exactly the supported hosts (pi, claude-code,
 		// codex, opencode) plus the manual VP_AUTO_CONTEXT override: an
 		// unrelated agent env (e.g. Cursor, which has no integration) must

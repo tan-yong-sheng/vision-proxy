@@ -341,6 +341,30 @@ test("isUnflaggedAnalyzeCommand detects model-invoked analyze without the flag",
 	assert.equal(isUnflaggedAnalyzeCommand('vp analyze "/tmp/my pic.png"'), true);
 });
 
+test("isUnflaggedAnalyzeCommand rejects compounds and non-binary mentions", () => {
+	// Appending the flag to a compound string would land it on the wrong
+	// process, so only standalone invocations match. Quoted operators stay
+	// quoted (e.g. "echo 'vp analyze &&'"), but a bare operator anywhere
+	// in the string disqualifies it.
+	for (const command of [
+		"vp analyze /tmp/a.png && echo done",
+		"vp analyze /tmp/a.png; echo done",
+		"vp analyze /tmp/a.png | cat",
+		"vp analyze /tmp/a.png > out.txt",
+		"vp analyze /tmp/a.png || true",
+		"(vp analyze /tmp/a.png)",
+		"echo vp analyze /tmp/a.png",
+		"echo 'vp analyze'",
+		"sudo vp analyze /tmp/a.png",
+		"time vp analyze /tmp/a.png",
+		"VAR=1 vp analyze /tmp/a.png",
+	]) {
+		assert.equal(isUnflaggedAnalyzeCommand(command), false, `must reject ${command}`);
+	}
+	// npx unwrapping and absolute paths are still standalone invocations.
+	assert.equal(isUnflaggedAnalyzeCommand("npx -y vp analyze /tmp/a.png"), true);
+});
+
 test("appendContextFileArg joins the flag spelling every host shares", () => {
 	assert.equal(
 		appendContextFileArg("vp analyze /tmp/a.png", "'/tmp/ctx.txt'"),

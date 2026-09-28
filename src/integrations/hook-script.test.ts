@@ -440,16 +440,45 @@ test("PreToolUse Bash passes through flagged and non-analyze commands silently",
 		"vp analyze /tmp/a.png --context-file /tmp/ctx.txt",
 		"vp config get",
 		"ls /tmp/a.png",
-		// Compound/nested commands are rejected standalone-only: the
-		// append-only rewrite would land the flag on the wrong command.
-		"vp analyze /tmp/a.png && echo done",
-		"vp analyze /tmp/a.png; echo done",
-		"echo vp analyze /tmp/a.png",
 	]) {
 		const run = runHook(
 			script,
 			{ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } },
 			env,
+		);
+		assert.equal(run.status, 0);
+		assert.equal(run.stdout.trim(), "", `must stay silent for ${command}`);
+	}
+});
+
+test("PreToolUse Bash leaves compound and non-binary commands unrewritten", () => {
+	// Regression: these used to pass only because no transcript_path meant an
+	// early return before the detector. With context present the detector
+	// itself must reject them: appending the flag to a compound string would
+	// land it on the wrong process.
+	const script = writeScript();
+	const transcript = writeTranscript([
+		{
+			type: "user",
+			message: { role: "user", content: "Which shape is this?" },
+		},
+	]);
+	for (const command of [
+		"vp analyze /tmp/a.png && echo done",
+		"vp analyze /tmp/a.png; echo done",
+		"vp analyze /tmp/a.png | cat",
+		"echo vp analyze /tmp/a.png",
+		"sudo vp analyze /tmp/a.png",
+	]) {
+		const run = runHook(
+			script,
+			{
+				hook_event_name: "PreToolUse",
+				tool_name: "Bash",
+				tool_input: { command },
+				transcript_path: transcript,
+			},
+			{ VP_BIN: fakeVp() },
 		);
 		assert.equal(run.status, 0);
 		assert.equal(run.stdout.trim(), "", `must stay silent for ${command}`);

@@ -801,7 +801,33 @@ test("pi tool_call leaves flagged, non-bash, and context-less calls alone", asyn
 		home,
 	);
 	process.env.VP_MODE = "always";
+	const branchCtx = {
+		sessionManager: {
+			getBranch: () => [
+				{
+					type: "message",
+					message: { role: "user", content: [{ type: "text", text: "Which shape?" }] },
+				},
+			],
+		},
+	};
 	const emptyCtx = { sessionManager: { getBranch: () => [] } };
+	// Compound and non-binary commands carry context yet must stay
+	// unmutated: the detector rejects them (flag would land on the wrong
+	// process), and the pending fallback must not fire for them either.
+	for (const command of [
+		"vp analyze /tmp/a.png && echo done",
+		"vp analyze /tmp/a.png; echo done",
+		"echo vp analyze /tmp/a.png",
+	]) {
+		const input = { command };
+		const result = await events.tool_call[0](
+			{ type: "tool_call", toolName: "bash", toolCallId: "call-x", input },
+			branchCtx,
+		);
+		assert.equal(result, undefined);
+		assert.equal(input.command, command, `must leave ${command} unmutated`);
+	}
 	for (const event of [
 		{
 			type: "tool_call",

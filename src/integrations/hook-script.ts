@@ -284,7 +284,11 @@ function pruneStaleContextFiles(dir: string): void {
   var now = Date.now();
   for (var i = 0; i < entries.length; i++) {
     var name = entries[i] || "";
-    if (name.indexOf(CONTEXT_FILE_PREFIX) !== 0) continue;
+    // Sweep the random explicit handoffs plus a stale pending fallback:
+    // a pending file no agent invocation ever reads would otherwise linger
+    // past its TTL with nobody to delete-on-read it.
+    var isPending = name === PENDING_CONTEXT_FILE_NAME;
+    if (!isPending && name.indexOf(CONTEXT_FILE_PREFIX) !== 0) continue;
     if (name.slice(-4) !== ".txt") continue;
     var full = join(dir, name);
     var age = -1;
@@ -293,7 +297,10 @@ function pruneStaleContextFiles(dir: string): void {
     } catch {
       continue;
     }
-    if (age < 0 || age <= CONTEXT_FILE_TTL_MS) continue;
+    // Pending uses the shorter reader TTL so a never-read slot cannot
+    // outlive the window in which any analyze call would accept it.
+    var ttl = isPending ? PENDING_CONTEXT_TTL_MS : CONTEXT_FILE_TTL_MS;
+    if (age < 0 || age <= ttl) continue;
     try {
       rmSync(full, { force: true });
     } catch {
@@ -308,6 +315,11 @@ function pruneStaleContextFiles(dir: string): void {
  * open: the caller runs the original command unchanged).
  */
 var PENDING_CONTEXT_FILE_NAME = "__pending__.txt";
+// Pending freshness window, mirroring the CLI reader TTL
+// (src/command-runner.ts PENDING_CONTEXT_TTL_MS): a pending file no agent
+// invocation ever reads must not linger past the window in which any
+// analyze call would accept it.
+var PENDING_CONTEXT_TTL_MS = 60 * 1000;
 
 function pendingContextFilePath(): string {
   return join(contextFileDir(), PENDING_CONTEXT_FILE_NAME);
@@ -582,9 +594,9 @@ function runHook(event: Record<string, any> | null): void {
     // original command runs unchanged.
     var toolNameEarly = event.tool_name != null ? event.tool_name : event.toolName;
     if (toolNameEarly === "Bash") {
-      // Phase 1 dual path: keep explicit handoff for vp analyze (detector
-      // + rewrite), and additionally publish the deterministic pending file
-      // so any launcher (vp, node dist/cli.js, npx tsx) auto-discovers.
+      // Dual path: explicit handoff for vp analyze (detector + rewrite),
+      // deterministic pending file for any other launcher (node dist/cli.js,
+      // npx tsx) auto-discovery.
       var shellContext = "";
       try {
         shellContext = readTranscriptContext(
@@ -594,8 +606,6 @@ function runHook(event: Record<string, any> | null): void {
         shellContext = "";
       }
       if (shellContext) {
-        // Deterministic fallback (covers any launcher).
-        writePendingContextFile(shellContext);
         var rawCommand = "";
         try {
           var toolInputEarly = readToolInput(event);
@@ -603,7 +613,15 @@ function runHook(event: Record<string, any> | null): void {
         } catch {
           rawCommand = "";
         }
-        if (rawCommand && isUnflaggedAnalyzeCommand(rawCommand)) {
+        // Publish the deterministic fallback only when no explicit handoff
+        // will be used: a rewritten analyze call consumes its random file
+        // and ignores pending, so an eagerly written pending would linger
+        // for a later unrelated call to cross-read.
+        if (!rawCommand || !isUnflaggedAnalyzeCommand(rawCommand)) {
+          writePendingContextFile(shellContext);
+          return;
+        }
+        {
           var contextPath = writeContextFile(shellContext);
           if (contextPath) {
             var rewritten = appendContextFileArg(rawCommand, quoteShellArg(contextPath));

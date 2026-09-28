@@ -410,9 +410,8 @@ export function readAnalyzeContextFile(
  * (Pi sets PI_CODING_AGENT=true for LLM-callable shell tools); without it
  * a Pi-spawned bare launcher never reaches the pending fallback.
  * CODEX_SESSION_ID/CODEX_THREAD_ID are what Codex actually injects into
- * model-spawned shells (CODEX_HOME is a config root Codex itself reads, not
- * a child-process signal); without them a Codex-spawned bare launcher is
- * likewise marker-less.
+ * model-spawned shells; CODEX_HOME is a config root Codex itself reads,
+ * not a child-process signal, so it must not unlock agent context.
  * OPENCODE is kept although the opencode plugin is paused for v2: bare
  * `vp analyze` calls under opencode still pick up pending context.
  */
@@ -420,7 +419,6 @@ export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
 	return (
 		!!env.CLAUDECODE ||
 		!!env.CLAUDE_CODE_ENTRY ||
-		!!env.CODEX_HOME ||
 		!!env.CODEX_SESSION_ID ||
 		!!env.CODEX_THREAD_ID ||
 		!!env.PI_DEBUG ||

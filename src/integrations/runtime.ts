@@ -188,6 +188,16 @@ var CONTEXT_FILE_MAX_BYTES = 256 * 1024;
  */
 function isUnflaggedAnalyzeCommand(command: unknown): boolean {
 	if (typeof command !== "string" || !command) return false;
+	// Shell metacharacters split one command string into separate invocations
+	// or redirections: vp analyze adjacent to any of these is not standalone,
+	// and appending the flag would land it on the wrong process.
+	// Conservative over-match: a quoted operator (for example an image path
+	// containing &&) also disqualifies, failing open to no rewrite rather
+	// than risking a flag on the wrong process. The literal lives inside the
+	// function body (not a module-level var) so the standalone shipped
+	// source carries it via toString.
+	var chainRe = /&&|\|\||[|&;()<>]/;
+	if (chainRe.test(command)) return false;
 	var rawTokens = command.match(/'[^']*'|"[^"]*"|\S+/g);
 	if (!rawTokens) return false;
 	var words: string[] = [];
@@ -235,6 +245,13 @@ function isUnflaggedAnalyzeCommand(command: unknown): boolean {
 		}
 	}
 	if (idx === -1) return false;
+	// The binary must be the first word (after an optional npx unwrap
+	// above, which advances the scan to the vp token): echo/sudo before
+	// vp never execute our binary, so appending the flag would hand
+	// context to the wrong process. Env assignments (VAR=1 vp analyze)
+	// and wrappers (time, sudo) are rejected the same way: fail open to
+	// no rewrite.
+	if (words[0] !== "npx" && idx !== 0) return false;
 	var k = 0;
 	for (k = idx + 2; k < words.length; k++) {
 		tok = words[k] || "";

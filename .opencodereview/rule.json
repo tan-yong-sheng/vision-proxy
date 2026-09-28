@@ -1,0 +1,27 @@
+{
+  "include": [
+    "**/*.{md}",
+    "**/*.test.ts"
+  ],
+  "rules": [
+    {
+      "path": "**/*.{md}",
+      "rule": "Review technical documentation for incorrect commands, broken or misleading links, outdated API and CLI references, inaccurate configuration examples, and inconsistencies with the implementation. Report only actionable technical issues, not subjective writing preferences."
+    },
+    {
+      "path": "**/*.test.ts",
+      "rule": "Review tests for weak or tautological assertions, missing edge-case coverage for changed behavior, and committed binary fixtures (build fixtures in-test instead). Do not flag test style or naming preferences.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/core.ts",
+      "rule": "VP_* env var names must stay in sync across src/core.ts, src/cache.ts, src/keyring.ts, src/commands/update.ts, src/commands/provider.ts, src/command-runner.ts, src/provider.ts, and src/integrations/hook-script.ts, pi-extension.ts, runtime.ts. Flag any rename/addition that breaks the sync, and any config-key change missing from docs/CONFIG.md.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/integrations/**",
+      "rule": "Installer safety: file deletion must be marker-gated or exact-filename matched — never prefix/wildcard deletes in shared dirs (~/.claude/hooks, ~/.codex/hooks, plugin dirs). Do not re-add an opencode install spec (paused while its v2 API stabilizes); status/uninstall orphan handling only.",
+      "merge_system_rule": true
+    }
+  ]
+}

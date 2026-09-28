@@ -16,6 +16,8 @@ export {
 	generatePiExtension,
 	getHomeDir,
 	legacyMarkerPath,
+	legacyOpencodePluginFiles,
+	legacyOpencodePluginsDir,
 	makeTsHookCommand,
 	piExtensionsDir,
 	quotePath,

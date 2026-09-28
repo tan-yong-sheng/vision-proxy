@@ -15,6 +15,8 @@ import {
 	legacyArtifactPath,
 	legacyArtifactPresent,
 	legacyMarkerPath,
+	legacyOpencodePluginFiles,
+	legacyOpencodePluginsDir,
 	removeLegacyArtifact,
 	removeLegacyCodexConfigToml,
 	SUPPORTED,
@@ -107,6 +109,46 @@ function rejectUnknownAgent(agent: string): IntegrationResult {
 		ok: false,
 		message: `unknown agent "${agent}". Supported: ${SUPPORTED.join(", ")}`,
 		code: 1,
+	};
+}
+
+/**
+ * Remove orphaned v1 opencode plugin files.
+ *
+ * opencode has no install spec while its v2 API stabilizes, so this is the
+ * only opencode path that acts: it deletes `vision-proxy*.ts` at the old
+ * plugins dir and reports what was removed. With no legacy files present it
+ * reports absent instead of failing. The plugins dir itself is shared with
+ * the user's own plugins, so it is left in place.
+ *
+ * @tags integration, lifecycle
+ */
+async function uninstallLegacyOpencode(installDir?: string): Promise<IntegrationResult> {
+	const dir = installDir ?? legacyOpencodePluginsDir();
+	const files = legacyOpencodePluginFiles(dir);
+	if (files.length === 0) {
+		return {
+			ok: true,
+			message:
+				"opencode integration is not installed (nothing to remove; new installs are paused while the v2 plugin API stabilizes)",
+			code: 0,
+		};
+	}
+	for (const file of files) {
+		try {
+			rmSync(file);
+		} catch {
+			return {
+				ok: false,
+				message: `failed to remove ${file}`,
+				code: 1,
+			};
+		}
+	}
+	return {
+		ok: true,
+		message: `uninstalled opencode integration (removed ${files.join(", ")})`,
+		code: 0,
 	};
 }
 
@@ -301,6 +343,19 @@ export async function integrationStatus(installDir?: string): Promise<Integratio
 	const lines: string[] = [`vp ${VERSION}`];
 	let outdated = 0;
 	let installedCount = 0;
+	const legacyOpencodeDir = installDir ?? legacyOpencodePluginsDir();
+	const legacyOpencodeFiles = legacyOpencodePluginFiles(legacyOpencodeDir);
+	if (legacyOpencodeFiles.length > 0) {
+		// Orphaned v1 plugin: no spec and no install path, but opencode
+		// auto-loads every file in its plugins dir, so a stale file is a
+		// live legacy install — count it as installed and out of date.
+		// installDir (when set) stands in for the whole home-relative dir.
+		for (const file of legacyOpencodeFiles) {
+			lines.push(`! opencode  legacy install at ${file} - run: vp integration uninstall opencode`);
+		}
+		installedCount += legacyOpencodeFiles.length;
+		outdated += legacyOpencodeFiles.length;
+	}
 	for (const agent of SUPPORTED) {
 		const spec = specFor(agent)!;
 		const installed = isAgentInstalled(spec, installDir);
@@ -383,6 +438,10 @@ export async function integrationUninstall(
 	agent: string,
 	opts: IntegrationInstallOptions = {},
 ): Promise<IntegrationResult> {
+	// opencode has no install spec while its v2 API stabilizes: the only
+	// uninstall action is removing orphaned v1 plugin files. Install keeps
+	// reporting the pause message.
+	if (agent === "opencode") return uninstallLegacyOpencode(opts.installDir);
 	const resolved = resolveAgentTarget(agent, opts);
 	if ("result" in resolved) return resolved.result;
 	const { spec, target, cfgPath } = resolved;

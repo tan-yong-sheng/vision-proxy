@@ -416,6 +416,41 @@ function stubFetch(body: Uint8Array, headers: Record<string, string>, ok = true)
 	};
 }
 
+describe("readImageFileWithReason dimension cap", () => {
+	// Patches the IHDR width/height of the 1x1 PNG fixture in-memory: no
+	// binary fixtures committed, just a tiny PNG declaring 20000x1.
+	function oversizedPngBytes(width: number, height: number): Buffer {
+		const buf = Buffer.from(Buffer.from(PNG_B64, "base64"));
+		buf.writeUInt32BE(width, 16);
+		buf.writeUInt32BE(height, 20);
+		return buf;
+	}
+
+	it("rejects a local file declaring oversized dimensions", async () => {
+		const evil = path.join(dir, "evil.png");
+		await writeFile(evil, oversizedPngBytes(20000, 1));
+		const res = await readImageFileWithReason(evil);
+		assert.equal(res.image, null);
+		assert.equal(res.reason, "unreadable");
+	});
+
+	it("still accepts a normal-dimension file", async () => {
+		const res = await readImageFileWithReason(imgPath);
+		assert.ok(res.image);
+	});
+
+	it("rejects a downloaded body declaring oversized dimensions", async () => {
+		const restore = stubFetch(oversizedPngBytes(20000, 1), { "content-type": "image/png" });
+		try {
+			const res = await readImageFileWithReason("http://93.184.216.34/evil.png");
+			assert.equal(res.image, null);
+			assert.equal(res.reason, "unreadable");
+		} finally {
+			restore();
+		}
+	});
+});
+
 describe("readImageFileWithReason URL download", () => {
 	it("downloads a PNG URL and returns the sniffed mime type", async () => {
 		const png = Buffer.from(PNG_B64, "base64");

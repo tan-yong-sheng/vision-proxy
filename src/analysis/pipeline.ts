@@ -13,77 +13,24 @@ import { analyzeImagesWithModel } from "../adapter.ts";
 import { cacheGet, cacheSet, configureCache } from "../cache.ts";
 import { loadConfig } from "../config.ts";
 import {
-	_imageMeta,
 	buildAnalyzeResult,
 	buildGroundingInstruction,
 	buildJointDescriptionFence,
 	buildToolCacheKey,
 	type CropEntry,
-	cropImage,
 	cropSignature,
-	describeReadReason,
 	type GroundingFormat,
 	getGroundingFormat,
 	hashImageData,
-	type ImageContent,
 	type ImagePayload,
+	intakeImage,
 	parseCropArg,
-	readImageFileWithReason,
-	resolveCropEntry,
-	storeImageMeta,
 	truncateContext,
 } from "../core.ts";
 import { isKnownProvider, resolveModel } from "../provider.ts";
 import type { AnalyzeFlags, AnalyzeOutcome } from "./types.ts";
 
 export type { AnalyzeFlags, AnalyzeOutcome };
-
-async function readPayload(path: string): Promise<ImagePayload | { error: string }> {
-	const r = await readImageFileWithReason(path);
-	if (!r.image) {
-		return {
-			error: `could not read image: ${describeReadReason(r.reason ?? "not-an-image", r.bytes)}`,
-		};
-	}
-	const img: ImageContent = r.image;
-	const hash = hashImageData(img.data);
-	storeImageMeta(hash, img.data, r.filename);
-	const meta = metaForHash(hash);
-	return { image: img, hash, meta, crop: undefined };
-}
-
-// metaForHash reads from the in-memory map populated by storeImageMeta.
-function metaForHash(hash: string) {
-	return _imageMeta.get(hash);
-}
-
-async function applyCrop(
-	payload: ImagePayload,
-	cropEntry: CropEntry,
-): Promise<ImagePayload | { error: string }> {
-	const meta = payload.meta;
-	if (!meta) return { error: "cannot crop image - dimensions unknown" };
-	try {
-		const resolved = resolveCropEntry(cropEntry, meta.width, meta.height);
-		const buf = Buffer.from(payload.image.data, "base64");
-		const cropped = await cropImage(buf, resolved, payload.image.mimeType);
-		if (!cropped) return { error: "crop failed" };
-		// encodeCroppedImage emits PNG only for image/png inputs; everything else
-		// becomes JPEG. Label the bytes with the actual encoded media type so the
-		// provider receives a correct Content-Type, not the source format.
-		const outMime = payload.image.mimeType === "image/png" ? "image/png" : "image/jpeg";
-		const newImg: ImageContent = {
-			type: "image",
-			data: cropped.toString("base64"),
-			mimeType: outMime,
-		};
-		const newHash = hashImageData(newImg.data);
-		storeImageMeta(newHash, newImg.data, meta.filename);
-		return { image: newImg, hash: newHash, meta: metaForHash(newHash), crop: resolved };
-	} catch (err) {
-		return { error: `crop failed: ${err instanceof Error ? err.message : String(err)}` };
-	}
-}
 
 /**
  * Run analyze. Returns the outcome (does not print). The CLI layer decides how
@@ -135,16 +82,10 @@ export async function runAnalyze(
 	// Read + hash + crop payloads.
 	const payloads: ImagePayload[] = [];
 	for (let i = 0; i < imagePaths.length; i++) {
-		const read = await readPayload(imagePaths[i]!);
-		if ("error" in read) throw new AnalyzeError(read.error);
 		const cropForIndex = flags.crops?.find((c) => c.image_index === i);
-		if (cropForIndex) {
-			const cropped = await applyCrop(read, cropForIndex);
-			if ("error" in cropped) throw new AnalyzeError(cropped.error);
-			payloads.push(cropped);
-		} else {
-			payloads.push(read);
-		}
+		const taken = await intakeImage(imagePaths[i]!, cropForIndex);
+		if ("error" in taken) throw new AnalyzeError(taken.error);
+		payloads.push(taken);
 	}
 
 	const question = flags.question ?? "";

@@ -97,7 +97,7 @@ export function buildAnalyzeResult(
 ): string {
 	const header = imagePayloads
 		.map((p, i) => {
-			const meta = _imageMeta.get(p.hash);
+			const meta = p.meta ?? imageMeta.get(p.hash);
 			const dims = meta ? ` width="${meta.width}" height="${meta.height}"` : "";
 			const filename = meta?.filename ? ` filename="${escapeAttr(meta.filename)}"` : "";
 			return `<vision_proxy_description image_index="${i}"${dims}${filename}>${p.hash}</vision_proxy_description>`;
@@ -113,18 +113,18 @@ export function buildAnalyzeResult(
 }
 
 /** In-memory map: image hash → dimensions + filename. Populated on first ingestion. */
-export const _imageMeta = new Map<string, ImageMeta>();
+const imageMeta = new Map<string, ImageMeta>();
 
 /** Maximum pixel dimension for decoded images. Prevents decode bombs. */
 const MAX_IMAGE_DIMENSION = 16384;
 
-/** Maximum entries in _imageMeta to prevent unbounded memory growth. */
+/** Maximum entries in the image-meta map to prevent unbounded memory growth. */
 const IMAGE_META_MAX = 500;
 
 function evictImageMeta(): void {
-	while (_imageMeta.size > IMAGE_META_MAX) {
-		const first = _imageMeta.keys().next().value;
-		if (first !== undefined) _imageMeta.delete(first);
+	while (imageMeta.size > IMAGE_META_MAX) {
+		const first = imageMeta.keys().next().value;
+		if (first !== undefined) imageMeta.delete(first);
 	}
 }
 
@@ -1553,7 +1553,7 @@ function decodeImageBuffer(imageBufferOrData: Buffer | string): Buffer | undefin
 function storeNewImageMeta(hash: string, buf: Buffer, filename: string | undefined): void {
 	const dims = safeDimensions(buf);
 	if (!dims) return;
-	_imageMeta.set(hash, { width: dims.width, height: dims.height, filename });
+	imageMeta.set(hash, { width: dims.width, height: dims.height, filename });
 	evictImageMeta();
 }
 
@@ -1568,7 +1568,7 @@ export function storeImageMeta(
 	imageBufferOrData: Buffer | string,
 	filename?: string,
 ): void {
-	const existing = _imageMeta.get(hash);
+	const existing = imageMeta.get(hash);
 	if (existing) {
 		backfillFilename(existing, filename);
 		return;
@@ -1786,6 +1786,65 @@ export function imageContentToBuffer(img: ImageContent): Buffer {
 export function bufferToImageContent(buf: Buffer, originalMimeType?: string): ImageContent {
 	const mimeType = originalMimeType ?? "image/png";
 	return { type: "image", data: buf.toString("base64"), mimeType };
+}
+
+// ── Image intake ──────────────────────────────────────────────────────────
+/** Intake failure: either the source cannot be read, or the crop cannot apply. */
+export type IntakeResult = ImagePayload | { error: string };
+
+/**
+ * Read one image through the full intake flow: read → hash → meta → crop.
+ *
+ * Owns the ordering that `src/analysis/pipeline.ts` used to repeat per
+ * caller: the source is read, hashed, and registered in the in-memory meta
+ * map (so the returned payload carries its dimensions/filename), and an
+ * optional crop is resolved against those dimensions and re-registered under
+ * the cropped bytes' hash. Returns `{ error }` for unreadable sources,
+ * unknown dimensions, or failed crops.
+ *
+ * @tags intake, image
+ */
+export async function intakeImage(path: string, cropEntry?: CropEntry): Promise<IntakeResult> {
+	const read = await readImageFileWithReason(path);
+	if (!read.image) {
+		return {
+			error: `could not read image: ${describeReadReason(read.reason ?? "not-an-image", read.bytes)}`,
+		};
+	}
+	const img: ImageContent = read.image;
+	const hash = hashImageData(img.data);
+	storeImageMeta(hash, img.data, read.filename);
+	const payload: ImagePayload = { image: img, hash, meta: imageMeta.get(hash), crop: undefined };
+	if (!cropEntry) return payload;
+	return applyCropToPayload(payload, cropEntry);
+}
+
+async function applyCropToPayload(
+	payload: ImagePayload,
+	cropEntry: CropEntry,
+): Promise<IntakeResult> {
+	const meta = payload.meta;
+	if (!meta) return { error: "cannot crop image - dimensions unknown" };
+	try {
+		const resolved = resolveCropEntry(cropEntry, meta.width, meta.height);
+		const buf = Buffer.from(payload.image.data, "base64");
+		const cropped = await cropImage(buf, resolved, payload.image.mimeType);
+		if (!cropped) return { error: "crop failed" };
+		// encodeCroppedImage emits PNG only for image/png inputs; everything else
+		// becomes JPEG. Label the bytes with the actual encoded media type so the
+		// provider receives a correct Content-Type, not the source format.
+		const outMime = payload.image.mimeType === "image/png" ? "image/png" : "image/jpeg";
+		const newImg: ImageContent = {
+			type: "image",
+			data: cropped.toString("base64"),
+			mimeType: outMime,
+		};
+		const newHash = hashImageData(newImg.data);
+		storeImageMeta(newHash, newImg.data, meta.filename);
+		return { image: newImg, hash: newHash, meta: imageMeta.get(newHash), crop: resolved };
+	} catch (err) {
+		return { error: `crop failed: ${err instanceof Error ? err.message : String(err)}` };
+	}
 }
 
 // ── Perceptual hashing (imghash) ────────────────────────────────────────────

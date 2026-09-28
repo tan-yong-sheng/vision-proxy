@@ -7,8 +7,12 @@
  * Requires Node 22.6+ for native TypeScript stripping. No build / no deps.
  */
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+	buildAnalyzeResult,
 	buildConversationContext,
 	buildDescriptionFence,
 	buildJointDescriptionFence,
@@ -19,6 +23,7 @@ import {
 	fenceUntrusted,
 	getGroundingFormat,
 	hashImageData,
+	intakeImage,
 	isRestrictedAddress,
 	isValidNamedRegion,
 	LRUCache,
@@ -130,6 +135,70 @@ describe("resolveCropEntry", () => {
 
 	it("throws on invalid image dimensions", () => {
 		assert.throws(() => resolveCropEntry({ image_index: 0, region: "center" }, 0, 0));
+	});
+});
+
+describe("intakeImage", () => {
+	let dir: string;
+	const fixturePng = path.join(
+		path.dirname(new URL(import.meta.url).pathname),
+		"..",
+		"test",
+		"fixtures",
+		"test.png",
+	);
+
+	beforeEach(async () => {
+		dir = await mkdtemp(path.join(os.tmpdir(), "vp-intake-"));
+	});
+
+	afterEach(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("reads, hashes, and attaches meta in one flow", async () => {
+		const copied = path.join(dir, "img.png");
+		await copyFile(fixturePng, copied);
+		const taken = await intakeImage(copied);
+		assert.ok(!("error" in taken));
+		if ("error" in taken) return;
+		assert.equal(taken.hash, hashImageData(taken.image.data));
+		assert.deepEqual(taken.meta, { width: 100, height: 100, filename: "img.png" });
+		assert.equal(taken.crop, undefined);
+	});
+
+	it("returns an error for an unreadable source", async () => {
+		const taken = await intakeImage(path.join(dir, "missing.png"));
+		assert.ok("error" in taken);
+		if (!("error" in taken)) return;
+		assert.match(taken.error, /could not read image/);
+	});
+
+	it("resolves, crops, and re-hashes under the cropped bytes", async () => {
+		const taken = await intakeImage(fixturePng, { image_index: 0, region: "center" });
+		assert.ok(!("error" in taken));
+		if ("error" in taken) return;
+		assert.deepEqual(taken.crop, { x: 25, y: 25, width: 50, height: 50 });
+		assert.equal(taken.hash, hashImageData(taken.image.data));
+		// Filename is first-seen per content hash in the shared map, so only
+		// assert the re-registered cropped dimensions here.
+		assert.equal(taken.meta?.width, 50);
+		assert.equal(taken.meta?.height, 50);
+	});
+
+	it("buildAnalyzeResult prefers the payload meta over the map", async () => {
+		const fenced = buildAnalyzeResult(
+			[
+				{
+					image: { type: "image", data: "x", mimeType: "image/png" },
+					hash: "h",
+					meta: { width: 3, height: 4, filename: "a.png" },
+				},
+			],
+			"desc",
+			"none",
+		);
+		assert.ok(fenced.includes('width="3" height="4" filename="a.png"'));
 	});
 });
 

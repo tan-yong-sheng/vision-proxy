@@ -88,8 +88,9 @@ vp integration install claude-code
 vp integration install codex
 vp integration install pi
 # NOTE: opencode support is paused while its v2 plugin API stabilizes
-# (see docs/INTEGRATIONS.md). Bare `vp analyze` calls under opencode still
-# pick up pending context via the OPENCODE marker.
+# (see docs/INTEGRATIONS.md). The CLI reader can consume a fresh pending
+# context file when `OPENCODE` is set, but opencode v2 does not currently
+# provide an integration that writes that file.
 
 # Check installed integrations and version status
 vp integration status
@@ -100,7 +101,7 @@ vp integration uninstall <agent>
 
 - **Claude Code & Codex**: Writes a `vision-proxy_read.ts` hook script (`~/.claude/hooks/` or `~/.codex/hooks/`) and registers `UserPromptSubmit` and `PreToolUse Read` hooks that run it as a plain `npx tsx <script>` command with only standard hook keys. Requires `tsx` to be installed (`npm install -g tsx`). `UserPromptSubmit` emits a static reminder to `Read` each referenced image (never shells out, so submission is never blocked); `PreToolUse Read` is the single analysis point. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache` so each gets a reminder line.
 - **Pi**: Installs a `vision-proxy_read.ts` extension into `~/.pi/agent/extensions/` that hooks into Pi's `input`, `context`, and `tool_result` lifecycle events: `context` appends a static reminder to read referenced image paths (no subprocess, no latency), and `tool_result` is the single analysis point for images the model actually reads.
-- **opencode (paused while v2 stabilizes)**: `vp integration install opencode` reports the pause instead of installing — the v1 plugin (`chat.message` + `tool.execute.before` hooks) does not load under opencode v2. Bare `vp analyze` calls under opencode still pick up pending context via the `OPENCODE` marker. Revisit a native v2 plugin once the API stabilizes.
+- **opencode (paused while v2 stabilizes)**: `vp integration install opencode` reports the pause instead of installing — the v1 plugin (`chat.message` + `tool.execute.before` hooks) does not load under opencode v2. The CLI reader can consume a fresh pending context file when `OPENCODE` is set, but opencode v2 does not currently provide an integration that writes that file. Revisit a native v2 plugin once the API stabilizes.
 
 Caveat: For Claude Code, images can only be referenced by file path in the user prompt. The hook can resolve host-provided `[Image #N]` references through the session-scoped `image-cache`, but it cannot render or insert those references into the prompt because `UserPromptSubmit` cannot modify the user prompt before it is sent to the LLM API.
 

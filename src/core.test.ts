@@ -363,9 +363,43 @@ describe("resolveConfig baseUrl", () => {
 });
 
 describe("resolveConfig VP_PROVIDER / VP_PHASH aliases", () => {
+	// Standalone-provider default-model resolution needs the registry lookup
+	// (production wires getProvider via loadConfig in config.ts).
+	const probeDefaults = (id: string): string | undefined =>
+		id === "openai" ? "gpt-4o" : id === "google" ? "gemini-2.5-pro" : undefined;
+
 	it("applies a standalone VP_PROVIDER override", () => {
 		const cfg = resolveConfig({ VP_PROVIDER: "openai" } as NodeJS.ProcessEnv);
 		assert.equal(cfg.provider, "openai");
+	});
+
+	it("resolves the new provider default model for standalone VP_PROVIDER", () => {
+		const cfg = resolveConfig({ VP_PROVIDER: "openai" } as NodeJS.ProcessEnv, {}, probeDefaults);
+		assert.equal(cfg.provider, "openai");
+		assert.equal(cfg.modelId, "gpt-4o");
+	});
+
+	it("keeps the pinned model when VP_MODEL accompanies VP_PROVIDER", () => {
+		const cfg = resolveConfig(
+			{
+				VP_PROVIDER: "openai",
+				VP_MODEL: "openai/gpt-4o-mini",
+			} as NodeJS.ProcessEnv,
+			{},
+			probeDefaults,
+		);
+		assert.equal(cfg.provider, "openai");
+		assert.equal(cfg.modelId, "gpt-4o-mini");
+	});
+
+	it("keeps the file model when the provider switches via env", () => {
+		const cfg = resolveConfig(
+			{ VP_PROVIDER: "openai" } as NodeJS.ProcessEnv,
+			{ provider: "anthropic", modelId: "claude-sonnet-4-5" },
+			probeDefaults,
+		);
+		assert.equal(cfg.provider, "anthropic");
+		assert.equal(cfg.modelId, "claude-sonnet-4-5");
 	});
 
 	it("lets VP_MODEL win over VP_PROVIDER when both are set", () => {

@@ -413,6 +413,7 @@ function parseModeOverride(value: string | undefined): ProxyMode | undefined {
 	return undefined;
 }
 
+/** Parse a standalone provider id for VP_PROVIDER (provider/modelId pairs stay in VP_MODEL). */
 function parseProviderOverride(value: string | undefined): string | undefined {
 	if (!value) return undefined;
 	const v = value.trim();
@@ -631,6 +632,7 @@ export function sanitize(config: VisionConfig): VisionConfig {
 export function resolveConfig(
 	env: NodeJS.ProcessEnv = process.env,
 	fileConfig: Partial<VisionConfig> = {},
+	providerDefaultModel?: (providerId: string) => string | undefined,
 ): VisionConfig {
 	const envOverrides = readEnvOverrides(env);
 
@@ -653,6 +655,30 @@ export function resolveConfig(
 				{ type: "DeprecationWarning", code: "VP_DEPRECATED_MAX_BATCH" },
 			);
 			(envOverrides as Partial<VisionConfig>).maxImagesPerCall = batchAlias;
+		}
+	}
+
+	// A standalone provider switch (env or file) without a pinned model must
+	// not keep the previous provider's model: resolve the new provider's
+	// default instead (mirrors the --provider flag behavior in provider.ts).
+	// An explicit model (VP_MODEL, file modelId) always wins.
+	const modelPinned = "modelId" in envOverrides || "modelId" in fileConfig;
+	if (!modelPinned) {
+		const nextProvider =
+			"provider" in envOverrides
+				? envOverrides.provider
+				: "provider" in fileConfig
+					? fileConfig.provider
+					: undefined;
+		if (
+			nextProvider !== undefined &&
+			nextProvider !== DEFAULT_CONFIG.provider &&
+			providerDefaultModel
+		) {
+			const fallback = providerDefaultModel(nextProvider);
+			if (fallback !== undefined) {
+				(envOverrides as Partial<VisionConfig>).modelId = fallback;
+			}
 		}
 	}
 

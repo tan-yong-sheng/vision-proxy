@@ -16,6 +16,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { readPersistentFile, resolveConfig, type VisionConfig } from "./core.ts";
+import { getProvider } from "./provider.ts";
 
 export interface LoadedConfig {
 	config: VisionConfig;
@@ -67,6 +68,6 @@ export async function loadConfig(
 		}
 	}
 
-	const config = resolveConfig(env, fileConfig);
+	const config = resolveConfig(env, fileConfig, (id) => getProvider(id)?.defaultModelId);
 	return { config, resolvedFrom };
 }

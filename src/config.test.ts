@@ -16,6 +16,7 @@ import { loadConfig } from "./config.ts";
 let cwd: string;
 let home: string;
 let prevHome: string | undefined;
+let prevUserProfile: string | undefined;
 let savedWrite: typeof process.stderr.write;
 let stderrText: string;
 
@@ -23,9 +24,11 @@ beforeEach(async () => {
 	cwd = await mkdtemp(path.join(os.tmpdir(), "vp-cfg-warn-"));
 	home = await mkdtemp(path.join(os.tmpdir(), "vp-cfg-warn-home-"));
 	// readPersistentFile resolves ~/.vision-proxy/config.json via os.homedir(),
-	// so HOME (and USERPROFILE on win32 path resolution) must be isolated.
+	// which reads USERPROFILE (not HOME) on Windows — isolate both.
 	prevHome = process.env.HOME;
 	process.env.HOME = home;
+	prevUserProfile = process.env.USERPROFILE;
+	process.env.USERPROFILE = home;
 	stderrText = "";
 	savedWrite = process.stderr.write.bind(process.stderr);
 	process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -38,6 +41,8 @@ afterEach(async () => {
 	process.stderr.write = savedWrite;
 	if (prevHome === undefined) delete process.env.HOME;
 	else process.env.HOME = prevHome;
+	if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+	else process.env.USERPROFILE = prevUserProfile;
 	await rm(cwd, { recursive: true, force: true });
 	await rm(home, { recursive: true, force: true });
 });

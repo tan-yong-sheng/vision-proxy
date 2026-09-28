@@ -988,6 +988,39 @@ test("pi extension preserves the image block across repeated reminder events", a
 	reset();
 });
 
+test("pi extension writes context files without a Buffer global (fail-open)", async (t) => {
+	t.after(() => {
+		delete process.env.VP_MODE;
+		reset();
+	});
+	const home = isolate();
+	const dir = installDir(home);
+	await runIntegration("install", "pi", dir);
+	const source = readFileSync(join(dir, "vision-proxy_read.ts"), "utf8");
+	assert.ok(
+		!source.includes('from "node:buffer"'),
+		"Pi artifact must not import node:buffer (no Buffer global assumed)",
+	);
+	const { events } = await loadPiExtension(source, home);
+	process.env.VP_MODE = "always";
+	const toolContext = "session context for the pending fallback";
+	const disabled = await events.tool_call[0](
+		{
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "call-no-buffer",
+			input: { command: "node server.js" },
+		},
+		{
+			sessionManager: {
+				getBranch: () => [{ type: "message", message: { role: "user", content: toolContext } }],
+			},
+		},
+	);
+	assert.equal(disabled, undefined, "tool_call must fail open without Buffer");
+	reset();
+});
+
 test("pi extension honors a non-default VP_HOOK_TIMEOUT_MS and falls back on garbage", async (t) => {
 	t.after(() => {
 		delete process.env.VP_MODE;

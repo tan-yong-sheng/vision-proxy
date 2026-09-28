@@ -20,6 +20,8 @@ import {
 	CONTEXT_FILE_MAX_BYTES,
 	CONTEXT_MAX_CHARS,
 	contextFileDir,
+	DEFAULT_HOOK_TIMEOUT_MS,
+	DEFAULT_MAX_OUTPUT_TOKENS,
 	ensurePrivateContextDir,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
@@ -29,6 +31,10 @@ import {
 	isImagePath,
 	isSafeContextDir,
 	isUnflaggedAnalyzeCommand,
+	MAX_HOOK_TIMEOUT_MS,
+	MAX_MAX_OUTPUT_TOKENS,
+	MIN_HOOK_TIMEOUT_MS,
+	MIN_MAX_OUTPUT_TOKENS,
 	maxOutputTokens,
 	parsePositiveInt,
 	pendingContextFilePath,
@@ -41,6 +47,7 @@ import {
 	resolveMaxOutputTokens,
 	resolveVpBin,
 	truncateConversationContext,
+	utf8ByteLength,
 	vpEntryToSpawn,
 	withImageInstruction,
 	writeContextFile,
@@ -409,16 +416,21 @@ test("resolveHookTimeout and resolveMaxOutputTokens read live through the shared
 	assert.equal(resolveMaxOutputTokens("0"), 2000);
 });
 
-test("HOST_ENV tables the four hook settings with defaults and ranges", () => {
+test("HOST_ENV references the canonical defaults and bounds", () => {
 	const names = HOST_ENV.map((s) => s.name);
 	assert.deepEqual(names, ["VP_HOOK_TIMEOUT_MS", "VP_MAX_OUTPUT_TOKENS"]);
-	for (const spec of HOST_ENV) {
-		assert.ok(
-			Number.isFinite(spec.fallback) && Number.isFinite(spec.min) && Number.isFinite(spec.max),
-			`${spec.name} must carry finite fallback/min/max`,
-		);
-		assert.ok(spec.min <= spec.fallback && spec.fallback <= spec.max);
-	}
+	assert.deepEqual(HOST_ENV[0], {
+		name: "VP_HOOK_TIMEOUT_MS",
+		fallback: DEFAULT_HOOK_TIMEOUT_MS,
+		min: MIN_HOOK_TIMEOUT_MS,
+		max: MAX_HOOK_TIMEOUT_MS,
+	});
+	assert.deepEqual(HOST_ENV[1], {
+		name: "VP_MAX_OUTPUT_TOKENS",
+		fallback: DEFAULT_MAX_OUTPUT_TOKENS,
+		min: MIN_MAX_OUTPUT_TOKENS,
+		max: MAX_MAX_OUTPUT_TOKENS,
+	});
 });
 
 test("HOOK_RUNTIME_SOURCE inlines the HOST_ENV table verbatim", () => {
@@ -427,6 +439,12 @@ test("HOOK_RUNTIME_SOURCE inlines the HOST_ENV table verbatim", () => {
 		HOOK_RUNTIME_SOURCE.includes(expected),
 		"runtime source must inline the HOST_ENV table without edits",
 	);
+});
+
+test("utf8ByteLength never throws without a Buffer global (Pi fail-open)", () => {
+	assert.equal(utf8ByteLength("hello"), 5);
+	assert.ok(utf8ByteLength("é") >= 2, "multibyte text must exceed its char count");
+	assert.ok(utf8ByteLength("".padEnd(300 * 1024, "x")) > CONTEXT_FILE_MAX_BYTES);
 });
 
 test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {

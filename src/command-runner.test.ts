@@ -222,6 +222,11 @@ describe("command-runner seam", () => {
 		// Pi's documented child-process signal (Orca probe 2026-09-28:
 		// Pi tool env carries PI_CODING_AGENT=true with no PI_DEBUG).
 		assert.equal(hasAgentMarker({ PI_CODING_AGENT: "true" }), true);
+		// The gate covers exactly the supported hosts (pi, claude-code,
+		// codex, opencode) plus the manual VP_AUTO_CONTEXT override: an
+		// unrelated agent env (e.g. Cursor, which has no integration) must
+		// never unlock agent context.
+		assert.equal(hasAgentMarker({ CURSOR_AGENT: "1" }), false);
 		// Outside agent: pending file exists but marker absent → not consumed.
 		const dir = hookContextFileDir();
 		mkdirSync(dir, { recursive: true, mode: 0o700 });

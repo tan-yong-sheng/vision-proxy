@@ -417,7 +417,6 @@ export function hasAgentMarker(env: NodeJS.ProcessEnv = process.env): boolean {
 	return (
 		!!env.CLAUDECODE ||
 		!!env.CLAUDE_CODE_ENTRY ||
-		!!env.CURSOR_AGENT ||
 		!!env.CODEX_HOME ||
 		!!env.PI_DEBUG ||
 		!!env.PI_CODING_AGENT ||

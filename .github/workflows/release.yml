@@ -108,7 +108,7 @@ jobs:
     name: publish release
     needs: build
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ inputs.prerelease == true && 'prerelease' || 'release' }}
     permissions:
       contents: write
     outputs:

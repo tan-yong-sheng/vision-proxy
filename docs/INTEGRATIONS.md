@@ -17,11 +17,17 @@ vp integration install claude-code
 vp integration status claude-code
 ```
 
-Uninstall:
+Uninstall (one agent, or every integration at once):
 
 ```bash
 vp integration uninstall claude-code
+vp integration uninstall --all
 ```
+
+`--all` removes every supported integration (`pi`, `claude-code`, `codex`)
+plus orphaned v1 opencode plugin files, one agent per output line, without
+stopping at the first failure. An explicit `<agent>` cannot be combined
+with `--all`.
 
 ## Codex
 
@@ -47,6 +53,8 @@ Uninstall:
 
 ```bash
 vp integration uninstall codex
+# or remove every integration at once:
+vp integration uninstall --all
 ```
 
 ## Pi
@@ -71,6 +79,8 @@ Uninstall:
 
 ```bash
 vp integration uninstall pi
+# or remove every integration at once:
+vp integration uninstall --all
 ```
 
 Restart Pi after installing.

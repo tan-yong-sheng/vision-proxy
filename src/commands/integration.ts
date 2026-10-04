@@ -16,5 +16,6 @@ export {
 	integrationShow,
 	integrationStatus,
 	integrationUninstall,
+	integrationUninstallAll,
 	runIntegration,
 } from "../integrations/index.ts";

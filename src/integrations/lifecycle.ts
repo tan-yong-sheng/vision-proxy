@@ -560,7 +560,31 @@ export async function integrationUninstall(
 }
 
 /**
- * CLI dispatch for `vp integration <subcommand> <agent>`.
+ * Remove every known integration (SUPPORTED agents plus the orphaned v1
+ * opencode plugin files).
+ *
+ * Runs each per-agent uninstall to completion even when one fails, so a
+ * `codex` failure never strands a `pi` install. Output is one line per
+ * agent (`<agent>: <single-line outcome>`); the exit code is 1 when any
+ * agent failed. Multi-line per-agent messages are flattened so the
+ * one-line-per-agent shape holds.
+ *
+ * @tags integration, lifecycle
+ */
+// fallow-ignore-next-line unused-export
+export async function integrationUninstallAll(installDir?: string): Promise<IntegrationResult> {
+	const lines: string[] = [];
+	let failed = false;
+	for (const agent of [...SUPPORTED, "opencode"]) {
+		const r = await integrationUninstall(agent, { installDir });
+		if (!r.ok) failed = true;
+		lines.push(`${agent}: ${r.message.split("\n").join(" ")}`);
+	}
+	return { ok: !failed, message: lines.join("\n"), code: failed ? 1 : 0 };
+}
+
+/**
+ * CLI dispatch for `vp integration <subcommand> [<agent>] [--all]`.
  *
  * @tags integration, lifecycle
  */
@@ -569,6 +593,7 @@ export async function runIntegration(
 	agent: string,
 	installDir?: string,
 	dev = false,
+	all = false,
 ): Promise<IntegrationResult> {
 	switch (sub) {
 		case "install":
@@ -582,7 +607,17 @@ export async function runIntegration(
 		case "status":
 			return integrationStatus(installDir);
 		case "uninstall":
-			if (!agent) return { ok: false, message: "usage: vp integration uninstall <agent>", code: 1 };
+			if (all) {
+				if (agent)
+					return {
+						ok: false,
+						message: "usage: vp integration uninstall <agent> | --all",
+						code: 1,
+					};
+				return integrationUninstallAll(installDir);
+			}
+			if (!agent)
+				return { ok: false, message: "usage: vp integration uninstall <agent> | --all", code: 1 };
 			return integrationUninstall(agent, { installDir });
 		default:
 			return {

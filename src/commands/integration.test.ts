@@ -1507,6 +1507,86 @@ test("uninstall pi leaves other files in the extensions directory intact", async
 	reset();
 });
 
+test("uninstall --all removes every integration and clears legacy opencode files", async () => {
+	const home = isolate();
+	await runIntegration("install", "pi");
+	await runIntegration("install", "claude-code");
+	await runIntegration("install", "codex");
+	const opencodeDir = legacyOpencodeDir(home);
+	mkdirSync(opencodeDir, { recursive: true });
+	writeFileSync(join(opencodeDir, "vision-proxy_read.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("uninstall", "", undefined, false, true);
+	assert.equal(r.ok, true);
+	assert.equal(r.code, 0);
+	const lines = r.message.split("\n");
+	assert.equal(lines.length, 4);
+	assert.deepEqual(
+		lines.map((l) => l.split(":")[0]),
+		["pi", "claude-code", "codex", "opencode"],
+	);
+	for (const line of lines) assert.match(line, /^(pi|claude-code|codex|opencode): .+/);
+	assert.equal(existsSync(join(home_pi(), "vision-proxy_read.ts")), false);
+	assert.equal(existsSync(claudeHookPath(home)), false);
+	assert.equal(existsSync(codexHookPath(home)), false);
+	assert.equal(existsSync(join(opencodeDir, "vision-proxy_read.ts")), false);
+	reset();
+});
+
+test("uninstall --all with no integrations reports nothing installed per agent", async () => {
+	isolate();
+	const r = await runIntegration("uninstall", "", undefined, false, true);
+	assert.equal(r.ok, true);
+	assert.equal(r.code, 0);
+	assert.match(r.message, /pi: /);
+	assert.match(r.message, /claude-code: /);
+	assert.match(r.message, /codex: /);
+	assert.match(r.message, /opencode: /);
+	reset();
+});
+
+test("uninstall --all rejects an explicit agent", async () => {
+	isolate();
+	const r = await runIntegration("uninstall", "pi", undefined, false, true);
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 1);
+	assert.match(r.message, /usage: vp integration uninstall <agent> \| --all/);
+	reset();
+});
+
+test("uninstall without an agent points at --all", async () => {
+	isolate();
+	const r = await runIntegration("uninstall", "");
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 1);
+	assert.match(r.message, /usage: vp integration uninstall <agent> \| --all/);
+	reset();
+});
+
+test("uninstall --all keeps going when one agent uninstall fails", async () => {
+	if (!CAN_BLOCK_REMOVAL) return;
+	const home = isolate();
+	await runIntegration("install", "claude-code");
+	// A read-only extensions dir blocks pi's artifact + dir removal, so pi
+	// fails while claude-code still uninstalls cleanly.
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const piTarget = join(piDir, "vision-proxy_read.ts");
+	writeFileSync(piTarget, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(piDir, 0o555);
+	try {
+		const r = await runIntegration("uninstall", "", undefined, false, true);
+		assert.equal(r.ok, false);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /pi: failed to remove/);
+		assert.match(r.message, /claude-code: uninstalled/);
+		assert.equal(existsSync(claudeHookPath(home)), false);
+		assert.equal(existsSync(piTarget), true);
+	} finally {
+		chmodSync(piDir, 0o755);
+		reset();
+	}
+});
+
 test("unknown agent is rejected", async () => {
 	isolate();
 	const r = await runIntegration("install", "vim");

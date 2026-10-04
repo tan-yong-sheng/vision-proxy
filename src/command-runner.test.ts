@@ -531,6 +531,34 @@ describe("command-runner seam", () => {
 		const list = await runCommand(["integration", "list", "--help"]);
 		assert.match(list.stdout ?? "", /installed agents/);
 		assert.equal(list.code, 0);
+
+		const uninstall = await runCommand(["integration", "uninstall", "--help"]);
+		assert.match(uninstall.stdout ?? "", /--all/);
+		assert.equal(uninstall.code, 0);
+	});
+
+	it("routes integration uninstall --all through the runner", async () => {
+		const prevHome = process.env.HOME;
+		const home = mkdtempSync(join(tmpdir(), "vp-uninstall-all-runner-"));
+		process.env.HOME = home;
+		try {
+			const okAll = await runCommand(["integration", "uninstall", "--all"]);
+			assert.equal(okAll.code, 0);
+			assert.match(okAll.stdout ?? "", /pi: /);
+			assert.match(okAll.stdout ?? "", /opencode: /);
+
+			const conflict = await runCommand(["integration", "uninstall", "pi", "--all"]);
+			assert.equal(conflict.code, 1);
+			assert.match(conflict.stderr ?? "", /usage: vp integration uninstall/);
+
+			const missing = await runCommand(["integration", "uninstall"]);
+			assert.equal(missing.code, 1);
+			assert.match(missing.stderr ?? "", /usage: vp integration uninstall/);
+		} finally {
+			if (prevHome === undefined) delete process.env.HOME;
+			else process.env.HOME = prevHome;
+			rmSync(home, { recursive: true, force: true });
+		}
 	});
 
 	it("rejects unknown commands with the historical wording and codes", async () => {

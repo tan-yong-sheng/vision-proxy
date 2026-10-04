@@ -44,6 +44,7 @@ export {
 	integrationShow,
 	integrationStatus,
 	integrationUninstall,
+	integrationUninstallAll,
 	runIntegration,
 } from "./lifecycle.ts";
 export type {

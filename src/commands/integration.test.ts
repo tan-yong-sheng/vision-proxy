@@ -1605,6 +1605,24 @@ test("uninstall --all keeps going when one agent uninstall fails", async () => {
 	}
 });
 
+test("uninstall --all converts a per-agent rejection into a failed line", async () => {
+	// settings.json as a directory makes readConfig's readFileSync throw
+	// (EISDIR); --all must convert the rejection to a failed line and
+	// continue with the later agents instead of aborting.
+	const home = isolate();
+	const configPath = join(home, ".claude", "settings.json");
+	mkdirSync(dirname(configPath), { recursive: true });
+	mkdirSync(configPath);
+	const r = await runIntegration("uninstall", "", undefined, false, true);
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 1);
+	assert.match(r.message, /claude: failed to uninstall claude integration: /);
+	// Later agents still ran and reported their lines.
+	assert.match(r.message, /codex: /);
+	assert.match(r.message, /opencode: /);
+	reset();
+});
+
 test("unknown agent is rejected", async () => {
 	isolate();
 	const r = await runIntegration("install", "vim");

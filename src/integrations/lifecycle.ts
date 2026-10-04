@@ -568,9 +568,12 @@ export async function integrationUninstall(
  * opencode plugin files).
  *
  * Runs each per-agent uninstall to completion even when one fails, so a
- * `codex` failure never strands a `pi` install. Output is one line per
- * agent (`<agent>: <single-line outcome>`); the exit code is 1 when any
- * agent failed. Multi-line per-agent messages are flattened so the
+ * `codex` failure never strands a `pi` install. A per-agent rejection
+ * (thrown on an unreadable config or a failed config write) is converted
+ * to a failed result line so later agents still run and every outcome
+ * reaches the aggregate report. Output is one line per agent
+ * (`<agent>: <single-line outcome>`); the exit code is 1 when any agent
+ * failed. Multi-line per-agent messages are flattened so the
  * one-line-per-agent shape holds.
  *
  * @tags integration, lifecycle
@@ -580,7 +583,16 @@ export async function integrationUninstallAll(installDir?: string): Promise<Inte
 	const lines: string[] = [];
 	let failed = false;
 	for (const agent of [...SUPPORTED, "opencode"]) {
-		const r = await integrationUninstall(agent, { installDir });
+		let r: IntegrationResult;
+		try {
+			r = await integrationUninstall(agent, { installDir });
+		} catch (e) {
+			r = {
+				ok: false,
+				message: `failed to uninstall ${agent} integration: ${e instanceof Error ? e.message : String(e)}`,
+				code: 1,
+			};
+		}
 		if (!r.ok) failed = true;
 		lines.push(`${agent}: ${r.message.split("\n").join(" ")}`);
 	}

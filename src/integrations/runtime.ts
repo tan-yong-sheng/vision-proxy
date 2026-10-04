@@ -841,6 +841,61 @@ function buildConversationContext(messages: unknown): string {
 	return truncateConversationContext(lines.join("\n"));
 }
 
+/**
+ * String-union of analyze failure causes shared by both host executors.
+ *
+ * The sync stdio hook and the async Pi extension classify the same child
+ * outcomes; the literal strings below preserve the exact model-visible
+ * causes hosts already key on (tests match on /was not found/,
+ * /exited with status/ ranges), so unification cannot silently reword them.
+ *
+ * @tags integrations, runtime
+ */
+export type AnalyzeFailureKind =
+	| "not-started"
+	| "spawn-failed"
+	| "missing-cli"
+	| "failed"
+	| "failed-or-timed-out"
+	| "exit-status"
+	| "timed-out"
+	| "aborted";
+
+/**
+ * Shared failure-cause strings for `vp analyze` executors.
+ *
+ * One taxonomy for both host adapters: the sync stdio hook (`hook-script`)
+ * and the async Pi extension (`pi-extension`) each passed their own cause
+ * strings inline, already drifting ("failed or timed out" vs "failed" on
+ * the same non-ENOENT outcome). Hosts keep their own executor (sync vs
+ * async, extra timeout vs abort paths) but render causes through this one
+ * function so the model-visible wording cannot drift again.
+ * Standalone-safe: plain concatenation only, no backtick, no ${.
+ *
+ * @tags integrations, runtime
+ */
+function describeAnalyzeFailure(kind: AnalyzeFailureKind, detail?: string | number | null): string {
+	switch (kind) {
+		case "not-started":
+			return "vp analyze could not be started";
+		case "spawn-failed":
+			return "vision-proxy could not be started";
+		case "missing-cli":
+			return "the vision-proxy CLI was not found";
+		case "failed":
+			return "vp analyze failed";
+		case "failed-or-timed-out":
+			return "vp analyze failed or timed out";
+		case "exit-status":
+			// biome-ignore lint/style/useTemplate: concatenation keeps the shipped source free of backticks and interpolation sequences.
+			return "vp analyze exited with status " + (detail == null ? "?" : String(detail));
+		case "timed-out":
+			return "vp analyze timed out";
+		case "aborted":
+			return "vp analyze was aborted";
+	}
+}
+
 function isImagePath(p: unknown): boolean {
 	if (!p || typeof p !== "string") return false;
 	var parts = p.split(".");
@@ -980,6 +1035,7 @@ export {
 	contextFileDir,
 	DEFAULT_HOOK_TIMEOUT_MS,
 	DEFAULT_MAX_OUTPUT_TOKENS,
+	describeAnalyzeFailure,
 	ensurePrivateContextDir,
 	extractImagePaths,
 	extractText,
@@ -1079,6 +1135,7 @@ export const HOOK_RUNTIME_SOURCE: string = [
 	vpEntryToSpawn.toString(),
 	resolveVpBin.toString(),
 	buildAnalyzeArgs.toString(),
+	describeAnalyzeFailure.toString(),
 	isUnflaggedAnalyzeCommand.toString(),
 	appendContextFileArg.toString(),
 	contextFileDir.toString(),

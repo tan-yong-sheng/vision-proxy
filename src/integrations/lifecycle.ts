@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, resolve } from "node:path";
 import { extractMarkerVersion, VERSION } from "../version.ts";
 import {
+	allKnownAgents,
 	canonicalAgentId,
 	getLegacyArtifactState,
 	legacyArtifactPath,
@@ -564,8 +565,8 @@ export async function integrationUninstall(
 }
 
 /**
- * Remove every known integration (SUPPORTED agents plus the orphaned v1
- * opencode plugin files).
+ * Remove every known integration (all known agents, SUPPORTED plus the
+ * orphaned v1 opencode plugin files).
  *
  * Runs each per-agent uninstall to completion even when one fails, so a
  * `codex` failure never strands a `pi` install. A per-agent rejection
@@ -582,7 +583,7 @@ export async function integrationUninstall(
 export async function integrationUninstallAll(installDir?: string): Promise<IntegrationResult> {
 	const lines: string[] = [];
 	let failed = false;
-	for (const agent of [...SUPPORTED, "opencode"]) {
+	for (const agent of allKnownAgents()) {
 		let r: IntegrationResult;
 		try {
 			r = await integrationUninstall(agent, { installDir });

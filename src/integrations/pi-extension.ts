@@ -160,7 +160,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<{
       try { child.stdin.end(); } catch { /* error handler settles */ }
     } catch (err) {
       const msg = err && (err as Error).message ? (err as Error).message : String(err);
-      failure = "vision-proxy could not be started";
+      failure = describeAnalyzeFailure("spawn-failed");
       process.stderr.write("[vision-proxy] failed to spawn vp: " + msg + "\n");
       finish(null);
       return;
@@ -171,10 +171,10 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<{
     child.on("error", (err) => {
       const e = err as NodeJS.ErrnoException;
       if (e && e.code === "ENOENT") {
-        failure = "the vision-proxy CLI was not found";
+        failure = describeAnalyzeFailure("missing-cli");
         process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
       } else {
-        failure = "vp analyze failed";
+        failure = describeAnalyzeFailure("failed");
         process.stderr.write("[vision-proxy] vp analyze failed: " + (e && e.message ? e.message : String(err)) + "\n");
       }
       finish(null);
@@ -185,7 +185,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<{
         // First cause wins: a spawn failure already reported ENOENT (close then
         // reports a meaningless -2), and the model should see the specific one.
         if (!failure) {
-          failure = "vp analyze exited with status " + (code == null ? "?" : String(code));
+          failure = describeAnalyzeFailure("exit-status", code);
         }
         process.stderr.write("[vision-proxy] vp analyze exited with status " + (code == null ? "?" : String(code)) + "\n");
         finish(null);
@@ -195,7 +195,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<{
     });
     timer = setTimeout(() => {
       try { if (child) child.kill("SIGKILL"); } catch { /* ignore */ }
-      failure = "vp analyze timed out";
+      failure = describeAnalyzeFailure("timed-out");
       process.stderr.write("[vision-proxy] vp analyze timed out\n");
       finish(null);
     }, timeoutMs);
@@ -203,7 +203,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<{
       const onAbort = () => {
         // Settle immediately so the context handler does not hang until the hard
         // timeout waiting on a child that swallows SIGTERM and never emits "close".
-        failure = "vp analyze was aborted";
+        failure = describeAnalyzeFailure("aborted");
         finish(null);
         try { if (child) child.kill("SIGTERM"); } catch { /* ignore */ }
         // Force-stop a child that handles SIGTERM and never exits.

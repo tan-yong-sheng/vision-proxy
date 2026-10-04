@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { renderVersionMarker, VERSION } from "../version.ts";
 import {
+	allKnownAgents,
 	canonicalAgentId,
 	claudeCodeConfigPath,
 	claudeHookScriptPath,
@@ -24,7 +25,7 @@ import {
 	legacyArtifactPath,
 	legacyArtifactPresent,
 	legacyMarkerPath,
-	makeTsHookCommand,
+	makeHookCommand,
 	piExtensionsDir,
 	quotePath,
 	removeLegacyArtifact,
@@ -58,6 +59,12 @@ test("SUPPORTED lists the three hosts and specFor resolves each", () => {
 	// same spec as `claude` so existing scripts keep working.
 	assert.equal(specFor("claude-code")?.id, "claude");
 	assert.equal(specFor("vim"), undefined);
+});
+
+test("allKnownAgents enumerates SUPPORTED plus the paused opencode", () => {
+	// opencode has no install spec while its v2 plugin API stabilizes, but it
+	// still counts as known so status/uninstall surface orphaned v1 installs.
+	assert.deepEqual(allKnownAgents(), [...SUPPORTED, "opencode"]);
 });
 
 test("canonicalAgentId ignores inherited object keys", () => {
@@ -101,13 +108,10 @@ test("hook command quotes paths with whitespace", () => {
 		"'/home/my user/hooks/vision-proxy.ts'",
 	);
 	assert.equal(
-		makeTsHookCommand("/home/my user/.claude/hooks/vision-proxy.ts"),
+		makeHookCommand("/home/my user/.claude/hooks/vision-proxy.ts"),
 		"node --experimental-strip-types '/home/my user/.claude/hooks/vision-proxy.ts'",
 	);
-	assert.equal(
-		makeTsHookCommand("/plain/path.ts"),
-		"node --experimental-strip-types /plain/path.ts",
-	);
+	assert.equal(makeHookCommand("/plain/path.ts"), "node --experimental-strip-types /plain/path.ts");
 });
 
 test("quotePath hardens shell metacharacters with single-quote escaping", () => {
@@ -132,7 +136,7 @@ test("quotePath uses double-quote grouping on win32 (cmd.exe has no single quote
 	assert.equal(quotePath('C:\\we"ird\\x.ts', "win32"), '"C:\\we""ird\\x.ts"');
 	assert.equal(quotePath("", "win32"), '""');
 	assert.equal(
-		makeTsHookCommand("C:\\Users\\my user\\hooks\\vision-proxy.ts", "win32"),
+		makeHookCommand("C:\\Users\\my user\\hooks\\vision-proxy.ts", "win32"),
 		'node --experimental-strip-types "C:\\Users\\my user\\hooks\\vision-proxy.ts"',
 	);
 });
@@ -146,6 +150,15 @@ test("file integration status tolerates a non-file target", () => {
 	} finally {
 		reset();
 	}
+});
+
+test("legacyMarkerPath resolves by canonical id, not the raw input", () => {
+	// The alias must resolve by construction: claude-code is the pre-rename
+	// id for claude, so it shares claude's marker location.
+	assert.equal(legacyMarkerPath("claude"), legacyMarkerPath("claude-code"));
+	assert.equal(canonicalAgentId("claude-code"), "claude");
+	assert.ok(legacyMarkerPath("codex").includes(".codex"));
+	assert.ok(legacyMarkerPath("claude").includes(".claude"));
 });
 
 test("catalog paths honor process.env.HOME", () => {

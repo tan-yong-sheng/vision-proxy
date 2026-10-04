@@ -108,7 +108,13 @@ jobs:
     name: publish release
     needs: build
     runs-on: ubuntu-latest
-    environment: ${{ inputs.prerelease == true && 'prerelease' || 'release' }}
+    # Derive the environment from the resolved tag as well as the input flag
+    # (mirrors the Determine release kind step below): on a tag-push
+    # `inputs` is empty, so the old `inputs.prerelease == true` check alone
+    # selected `release` even for `vX.Y.Z-rc.N` tags, bypassing prerelease
+    # protection rules. `inputs.tag || github.ref_name` matches the `tag=`
+    # resolution in the meta step, so both paths classify `-` tags as prerelease.
+    environment: ${{ (inputs.prerelease == true || contains(inputs.tag || github.ref_name, '-')) && 'prerelease' || 'release' }}
     permissions:
       contents: write
     outputs:

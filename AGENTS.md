@@ -36,7 +36,7 @@ Keep it short and update it when workflows change.
 - **Module boundary:** `src/core.ts` is the Pi-free core - pure functions and no peer-dep runtime requirements.
 `src/adapter.ts` calls the Vercel AI SDK.
 `src/commands/*.ts` wire CLI arguments to `src/core.ts` and `src/adapter.ts`.
-Agent hook logic lives in `src/integrations/`: `hook-script.ts` for the `npx tsx` hook scripts installed by `vp integration install claude-code|codex`; the Pi extension (`pi-extension.ts`) carries the same reminder-only submit plus Read-time analyze flow for its host; `runtime.ts` is the shared standalone analysis policy inlined into both.
+Agent hook logic lives in `src/integrations/`: `hook-script.ts` for the `node --experimental-strip-types` hook scripts installed by `vp integration install claude|codex`; the Pi extension (`pi-extension.ts`) carries the same reminder-only submit plus Read-time analyze flow for its host; `runtime.ts` is the shared standalone analysis policy inlined into both.
 - **Generated code:** `.fallow/cache.bin` is fallow cache data - do not edit manually.
 `.claude/hooks/fallow-gate.sh` is a generated hook wrapper.
 - **Sensitive areas:** `src/adapter.ts` and `src/commands/analyze.ts` make actual API calls to external vision models.
@@ -72,10 +72,10 @@ Unit tests do not catch stale installs. Always rebuild + reinstall + headless-te
 ```sh
 npm run build
 node dist/cli.js integration uninstall pi
-node dist/cli.js integration uninstall claude-code
+node dist/cli.js integration uninstall claude
 node dist/cli.js integration uninstall codex
 node dist/cli.js integration install pi --dev
-node dist/cli.js integration install claude-code --dev
+node dist/cli.js integration install claude --dev
 node dist/cli.js integration install codex --dev
 node dist/cli.js integration list  # all three should show installed
 ```

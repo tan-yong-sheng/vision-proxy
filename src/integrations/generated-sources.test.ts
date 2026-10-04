@@ -136,7 +136,7 @@ test("generated artifacts preserve the historical reminder and deny wording", ()
 	);
 	assert.ok(
 		generateHookScript().includes('var SUBMIT_TOOL_WORD = "Read";'),
-		"claude-code artifact keeps the Read reminder",
+		"claude artifact keeps the Read reminder",
 	);
 	assert.ok(
 		generateHookScript(undefined, "view_image").includes('var SUBMIT_TOOL_WORD = "view_image";'),

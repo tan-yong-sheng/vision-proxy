@@ -47,12 +47,15 @@ function reset() {
 
 test("SUPPORTED lists the three hosts and specFor resolves each", () => {
 	// opencode paused while its v2 plugin API stabilizes.
-	assert.deepEqual(SUPPORTED, ["pi", "claude-code", "codex"]);
+	assert.deepEqual(SUPPORTED, ["pi", "claude", "codex"]);
 	for (const agent of SUPPORTED) {
 		const spec = specFor(agent);
 		assert.ok(spec, `${agent} must resolve a spec`);
 		assert.equal(spec!.id, agent);
 	}
+	// `claude-code` is the deprecated pre-rename id: it resolves to the
+	// same spec as `claude` so existing scripts keep working.
+	assert.equal(specFor("claude-code")?.id, "claude");
 	assert.equal(specFor("vim"), undefined);
 });
 
@@ -138,6 +141,7 @@ test("catalog paths honor process.env.HOME", () => {
 		assert.equal(claudeCodeConfigPath(), join(home, ".claude", "settings.json"));
 		assert.equal(codexConfigPath(), join(home, ".codex", "hooks.json"));
 		assert.equal(piExtensionsDir(), join(home, ".pi", "agent", "extensions"));
+		assert.equal(legacyMarkerPath("claude"), join(home, ".claude", "vision-proxy.hook.json"));
 		assert.equal(legacyMarkerPath("claude-code"), join(home, ".claude", "vision-proxy.hook.json"));
 		assert.equal(legacyMarkerPath("codex"), join(home, ".codex", "vision-proxy.hook.json"));
 	} finally {
@@ -148,13 +152,13 @@ test("catalog paths honor process.env.HOME", () => {
 test("hook-agent specs report script paths and metadata-free commands", () => {
 	const home = isolate();
 	try {
-		for (const agent of ["claude-code", "codex"] as const) {
+		for (const agent of ["claude", "codex"] as const) {
 			const spec = specFor(agent)!;
 			assert.match(spec.hookCommand(), /^npx tsx /);
 			assert.ok(spec.hookCommand().includes("vision-proxy_read.ts"));
 			assert.equal(
 				spec.configPath(),
-				agent === "claude-code"
+				agent === "claude"
 					? join(home, ".claude", "settings.json")
 					: join(home, ".codex", "hooks.json"),
 			);

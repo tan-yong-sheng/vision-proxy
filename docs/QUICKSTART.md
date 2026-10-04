@@ -95,7 +95,7 @@ vp analyze screenshot.png
 ## 5. (Optional) Add an agent integration
 
 ```bash
-vp integration install claude-code
+vp integration install claude
 ```
 
 See [INTEGRATIONS.md](./INTEGRATIONS.md) for Claude Code, Codex, and Pi (opencode paused while its v2 API stabilizes).

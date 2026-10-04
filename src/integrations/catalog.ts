@@ -22,7 +22,24 @@ import type { AgentSpec } from "./types.ts";
  * this repo shipped does not load under v2 (SchemaError on V1-style
  * exports), and developing against both APIs at once is churn. Revisit
  * once v2 stabilizes; see docs/INTEGRATIONS.md. */
-export const SUPPORTED = ["pi", "claude-code", "codex"];
+export const SUPPORTED = ["pi", "claude", "codex"];
+
+/** Deprecated input aliases for agent ids (canonical ids stay unchanged in
+ * output, status, and messages). `claude-code` is the pre-rename id for
+ * the Claude agent; it still resolves so existing scripts keep working. */
+export const AGENT_ALIASES: Record<string, string> = {
+	"claude-code": "claude",
+};
+
+/**
+ * Resolve an agent id through the alias table to its canonical id.
+ * Unknown ids pass through unchanged so callers still reject them.
+ *
+ * @tags integration, catalog
+ */
+export function canonicalAgentId(agent: string): string {
+	return AGENT_ALIASES[agent] ?? agent;
+}
 
 /** Installed host artifact name (feature-suffix convention: the Read-time analyze hooks). */
 export const ARTIFACT_FILENAME = "vision-proxy_read.ts";
@@ -274,7 +291,7 @@ function makeHookAgentSpec(opts: {
 }
 
 const claudeCode: AgentSpec = makeHookAgentSpec({
-	id: "claude-code",
+	id: "claude",
 	scriptPath: claudeHookScriptPath,
 	configPath: claudeCodeConfigPath,
 });
@@ -417,11 +434,15 @@ export function legacyOpencodePluginFiles(dir: string): string[] {
 /**
  * Look up the install adapter for an agent id, or undefined when unknown.
  *
+ * Input aliases (see AGENT_ALIASES) resolve to the canonical spec first,
+ * so `claude-code` (deprecated) returns the same spec as `claude`.
+ *
  * @tags integration, catalog
  */
 export function specFor(agent: string): AgentSpec | undefined {
-	if (agent === "pi") return piSpec;
-	if (agent === "claude-code") return claudeCode;
-	if (agent === "codex") return codex;
+	const id = canonicalAgentId(agent);
+	if (id === "pi") return piSpec;
+	if (id === "claude") return claudeCode;
+	if (id === "codex") return codex;
 	return undefined;
 }

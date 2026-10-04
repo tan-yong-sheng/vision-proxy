@@ -8,6 +8,8 @@
  * owns the shared hooks-JSON shape for Claude Code and Codex.
  */
 export {
+	AGENT_ALIASES,
+	canonicalAgentId,
 	claudeCodeConfigPath,
 	claudeHookScriptPath,
 	codexConfigPath,

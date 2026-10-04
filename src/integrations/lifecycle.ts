@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, resolve } from "node:path";
 import { extractMarkerVersion, VERSION } from "../version.ts";
 import {
+	canonicalAgentId,
 	getLegacyArtifactState,
 	legacyArtifactPath,
 	legacyArtifactPresent,
@@ -102,12 +103,12 @@ const OPENCODE_PAUSED_MESSAGE =
 	"via the OPENCODE marker.";
 
 function rejectUnknownAgent(agent: string): IntegrationResult {
-	if (agent === "opencode") {
+	if (canonicalAgentId(agent) === "opencode") {
 		return { ok: false, message: OPENCODE_PAUSED_MESSAGE, code: 1 };
 	}
 	return {
 		ok: false,
-		message: `unknown agent "${agent}". Supported: ${SUPPORTED.join(", ")}`,
+		message: `unknown agent "${agent}". Supported: ${SUPPORTED.join(", ")} (deprecated alias: claude-code still accepted)`,
 		code: 1,
 	};
 }
@@ -202,6 +203,7 @@ export async function integrationInstall(
 	agent: string,
 	opts: IntegrationInstallOptions = {},
 ): Promise<IntegrationResult> {
+	agent = canonicalAgentId(agent);
 	const resolved = resolveAgentTarget(agent, opts);
 	if ("result" in resolved) return resolved.result;
 	const { spec, target, cfgPath } = resolved;
@@ -308,6 +310,7 @@ export async function integrationInstall(
  * @tags integration, lifecycle
  */
 export async function integrationShow(agent: string): Promise<IntegrationResult> {
+	agent = canonicalAgentId(agent);
 	const spec = specFor(agent);
 	if (!spec) return rejectUnknownAgent(agent);
 
@@ -469,6 +472,7 @@ export async function integrationUninstall(
 	agent: string,
 	opts: IntegrationInstallOptions = {},
 ): Promise<IntegrationResult> {
+	agent = canonicalAgentId(agent);
 	// opencode has no install spec while its v2 API stabilizes: the only
 	// uninstall action is removing orphaned v1 plugin files. Install keeps
 	// reporting the pause message.

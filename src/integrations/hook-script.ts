@@ -1,7 +1,7 @@
 /**
  * Embedded agent hook script source.
  *
- * `vp integration install claude-code` writes this exact TypeScript to
+ * `vp integration install claude` writes this exact TypeScript to
  * `~/.claude/hooks/vision-proxy_read.ts`, and `vp integration install codex`
  * writes it to `~/.codex/hooks/vision-proxy_read.ts` (stamped at generate()
  * time to name view_image, the official Codex CLI image tool, in its

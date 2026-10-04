@@ -13,18 +13,24 @@ Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers 
 - `PreToolUse Bash` - rewrites a model-invoked `vp analyze` command to append `--context-file <path>`: the hook writes the recent conversation (from the handed transcript) to a `0600` tempfile so the model's own command executes with context. Fail-open: any failure leaves the command unchanged.
 
 ```bash
-vp integration install claude-code
-vp integration status claude-code
+vp integration install claude
+vp integration status claude
 ```
+
+The agent id was renamed from `claude-code` to `claude` (matching the
+`claude` CLI binary, like `codex` and `pi` match theirs). The old
+`claude-code` id still works everywhere as a deprecated alias and resolves
+to the same integration; installed files are unchanged, so no reinstall is
+needed.
 
 Uninstall (one agent, or every integration at once):
 
 ```bash
-vp integration uninstall claude-code
+vp integration uninstall claude
 vp integration uninstall --all
 ```
 
-`--all` removes every supported integration (`pi`, `claude-code`, `codex`)
+`--all` removes every supported integration (`pi`, `claude`, `codex`)
 plus orphaned v1 opencode plugin files, one agent per output line, without
 stopping at the first failure. An explicit `<agent>` cannot be combined
 with `--all`.
@@ -113,7 +119,7 @@ When running the built CLI from this checkout, use `--dev` so generated artifact
 ```bash
 npm run build
 node dist/cli.js integration install pi --dev
-node dist/cli.js integration install claude-code --dev
+node dist/cli.js integration install claude --dev
 node dist/cli.js integration install codex --dev
 ```
 

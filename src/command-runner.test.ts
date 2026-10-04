@@ -264,7 +264,7 @@ describe("command-runner seam", () => {
 		assert.equal(hasAgentMarker({ CODEX_SESSION_ID: "sess-1" }), true);
 		assert.equal(hasAgentMarker({ CODEX_THREAD_ID: "thread-1" }), true);
 		assert.equal(hasAgentMarker({ CODEX_HOME: "/home/u/.codex" }), false);
-		// The gate covers exactly the supported hosts (pi, claude-code,
+		// The gate covers exactly the supported hosts (pi, claude,
 		// codex, opencode) plus the manual VP_AUTO_CONTEXT override: an
 		// unrelated agent env (e.g. Cursor, which has no integration) must
 		// never unlock agent context.

@@ -626,7 +626,7 @@ doctor options:
   --json                     machine-readable output
 
 integration options:
-  install <agent>            install vision-proxy for pi | claude-code | codex
+  install <agent>            install vision-proxy for pi | claude | codex
   show <agent>               print what install would generate
   list                       show which agents have vision-proxy installed
   status                     show installed version markers per agent
@@ -940,7 +940,7 @@ Subcommands:
 
 Agents:
   pi                 Pi coding agent (global extensions directory)
-  claude-code        Claude Code agent (npx tsx hook script + hooks)
+  claude             Claude agent (npx tsx hook script + hooks; deprecated alias: claude-code)
   codex              Codex agent (npx tsx hook script + hooks)
 
 Options:
@@ -954,7 +954,7 @@ Usage:
   vp integration install <agent> [--dev]
 
 Arguments:
-  <agent>            supported agent id: pi | claude-code | codex
+  <agent>            supported agent id: pi | claude | codex
 
 (opencode support is paused while its v2 plugin API stabilizes.)
 
@@ -969,7 +969,7 @@ Usage:
   vp integration show <agent>
 
 Arguments:
-  <agent>            supported agent id: pi | claude-code | codex`,
+  <agent>            supported agent id: pi | claude | codex`,
 
 	"integration uninstall": `vp integration uninstall <agent> | --all
 
@@ -980,7 +980,7 @@ Usage:
   vp integration uninstall --all
 
 Arguments:
-  <agent>            supported agent id: pi | claude-code | codex
+  <agent>            supported agent id: pi | claude | codex
 
 Options:
   --all              remove every integration instead of one agent (an explicit

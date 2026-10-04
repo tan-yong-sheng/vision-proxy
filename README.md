@@ -84,7 +84,7 @@ Install `vp` into your coding agent so it automatically analyzes images from pro
 
 ```bash
 # Install integration for your agent
-vp integration install claude-code
+vp integration install claude
 vp integration install codex
 vp integration install pi
 # NOTE: opencode support is paused while its v2 plugin API stabilizes

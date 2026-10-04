@@ -4,9 +4,9 @@ Install `vp` into an agent so it can see images in your prompts.
 
 ## Claude Code
 
-Prerequisite: `tsx` must be installed for the `npx tsx` hook command to run (`npm install -g tsx`).
+Prerequisite: Node 22.6+ must be on PATH for the `node --experimental-strip-types` hook command to run.
 
-Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers two hooks in `~/.claude/settings.json`, both running it as a plain `npx tsx ~/.claude/hooks/vision-proxy_read.ts` command with only standard hook keys (no vision-proxy metadata in the config):
+Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers two hooks in `~/.claude/settings.json`, both running it as a plain `node --experimental-strip-types ~/.claude/hooks/vision-proxy_read.ts` command with only standard hook keys (no vision-proxy metadata in the config):
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Pasted/attached images (rendered as `[Image #N]` refs) are resolved via Claude Code's `image-cache/<session>/<N>.<ext>` so each gets a reminder line too. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse Read` - the single analysis point: describes an image read via the `Read` tool (`file_path`).
@@ -37,9 +37,9 @@ with `--all`.
 
 ## Codex
 
-Prerequisite: `tsx` must be installed for the `npx tsx` hook command to run (`npm install -g tsx`).
+Prerequisite: Node 22.6+ must be on PATH for the `node --experimental-strip-types` hook command to run.
 
-Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and registers three hooks in `~/.codex/hooks.json` as plain `npx tsx ~/.codex/hooks/vision-proxy_read.ts` commands with only standard hook keys:
+Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and registers three hooks in `~/.codex/hooks.json` as plain `node --experimental-strip-types ~/.codex/hooks/vision-proxy_read.ts` commands with only standard hook keys:
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse Read` - analyzes image reads requested through the `Read` tool (`file_path`).
@@ -131,7 +131,7 @@ node dist/cli.js integration install codex --dev
 |---------|-----|
 | Agent CLI not found | Install Claude Code, Codex, or Pi first (opencode paused while its v2 API stabilizes). |
 | Hook not firing | Claude Code / Codex: confirm the config file contains the `UserPromptSubmit` and `PreToolUse` blocks (including the `Bash` matcher for model-invoked `vp analyze`). Pi: check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |
-| Hook script not found (`npx tsx ...vision-proxy_read.ts` fails) | Re-run `vp integration install <agent>` to regenerate the script, ensure `npx`/`tsx` is available, and ensure `vp` is on PATH (or set `VP_BIN`). |
+| Hook script not found (`node --experimental-strip-types ...vision-proxy_read.ts` fails) | Re-run `vp integration install <agent>` to regenerate the script, ensure Node 22.6+ is on PATH, and ensure `vp` is on PATH (or set `VP_BIN`). |
 | Stale Codex marker outside a block | Run `vp integration uninstall codex` and reinstall. |
 | Pi extension not loading | Restart Pi after installing. |
 | Pi images not described | Check Pi logs for `[vision-proxy]` messages; ensure `vp` is on PATH or set `VP_BIN`. |

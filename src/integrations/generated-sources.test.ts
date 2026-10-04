@@ -79,7 +79,10 @@ test("hook script keeps its stdio adapter: image-cache refs, spawnSync, deny sha
 		HOOK_SCRIPT_SOURCE.includes("updatedInput"),
 		"must keep the updatedInput rewrite field",
 	);
-	assert.ok(HOOK_SCRIPT_SOURCE.includes("#!/usr/bin/env -S npx tsx"), "must keep the tsx shebang");
+	assert.ok(
+		HOOK_SCRIPT_SOURCE.includes("#!/usr/bin/env -S node --experimental-strip-types"),
+		"must keep the node strip-types shebang",
+	);
 });
 
 test("pi extension keeps its lifecycle adapter: mode gating, abort handling, context shape", () => {

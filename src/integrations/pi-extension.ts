@@ -31,9 +31,13 @@
  *
  * No tool is registered, keeping system tokens low.
  *
- * Fail-open: if `vp` is missing, exits non-zero, or any other error occurs, the
- * extension returns undefined and Pi proceeds unchanged. Image-derived text is
- * attacker-controlled, so the analyzer fence stays on.
+ * Fail-open: the bash context rewrite returns undefined and Pi proceeds
+ * unchanged on any error, and a prompt reminder that cannot be built is simply
+ * omitted. An image read whose analysis fails FAILS CLOSED: instead of returning
+ * undefined (which would hand Pi the raw image), it returns a message naming the
+ * cause, so the agent reports a vision-proxy failure rather than answering from
+ * an image it never saw. Image-derived text is attacker-controlled, so the
+ * analyzer fence stays on.
  *
  * Composition: the shared analysis policy (path classification, env parsing,
  * reminder rendering, vp resolution) is inlined from the canonical runtime
@@ -115,8 +119,14 @@ function sessionBranchContext(ctx: unknown): string {
  * The optional extras (question, context) travel on stdin, never argv, so the
  * description is grounded in the recent conversation without exposing it in
  * the process listing. */
+// Coarse reason for the last failed analyze, used by the fail-closed tool_result.
+// Never carries paths or child stderr: diagnostics stay on stderr for the logs,
+// and the model gets only enough to name the failure.
+var analyzeFailure = "";
+
 async function runAnalyze(images: string[], extras, signal?: unknown): Promise<string | null> {
   return new Promise((resolve) => {
+    analyzeFailure = "";
     if (!images || images.length === 0) return resolve(null);
     var timeoutMs = currentTimeoutMs();
     var maxTokens = resolveMaxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
@@ -151,6 +161,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
       try { child.stdin.end(); } catch { /* error handler settles */ }
     } catch (err) {
       const msg = err && (err as Error).message ? (err as Error).message : String(err);
+      analyzeFailure = "vision-proxy could not be started";
       process.stderr.write("[vision-proxy] failed to spawn vp: " + msg + "\n");
       return resolve(null);
     }
@@ -159,13 +170,23 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     child.stderr.on("data", (d) => { process.stderr.write(String(d)); });
     child.on("error", (err) => {
       const e = err as NodeJS.ErrnoException;
-      if (e && e.code === "ENOENT") process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
-      else process.stderr.write("[vision-proxy] vp analyze failed: " + (e && e.message ? e.message : String(err)) + "\n");
+      if (e && e.code === "ENOENT") {
+        analyzeFailure = "the vision-proxy CLI was not found";
+        process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
+      } else {
+        analyzeFailure = "vp analyze failed";
+        process.stderr.write("[vision-proxy] vp analyze failed: " + (e && e.message ? e.message : String(err)) + "\n");
+      }
       finish(null);
     });
     child.on("close", (code) => {
       const out = stdout.trim();
       if (code !== 0 || !out) {
+        // First cause wins: a spawn failure already reported ENOENT (close then
+        // reports a meaningless -2), and the model should see the specific one.
+        if (!analyzeFailure) {
+          analyzeFailure = "vp analyze exited with status " + (code == null ? "?" : String(code));
+        }
         process.stderr.write("[vision-proxy] vp analyze exited with status " + (code == null ? "?" : String(code)) + "\n");
         finish(null);
       } else {
@@ -174,6 +195,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     });
     timer = setTimeout(() => {
       try { if (child) child.kill("SIGKILL"); } catch { /* ignore */ }
+      analyzeFailure = "vp analyze timed out";
       process.stderr.write("[vision-proxy] vp analyze timed out\n");
       finish(null);
     }, timeoutMs);
@@ -181,6 +203,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
       const onAbort = () => {
         // Settle immediately so the context handler does not hang until the hard
         // timeout waiting on a child that swallows SIGTERM and never emits "close".
+        analyzeFailure = "vp analyze was aborted";
         finish(null);
         try { if (child) child.kill("SIGTERM"); } catch { /* ignore */ }
         // Force-stop a child that handles SIGTERM and never exits.
@@ -308,7 +331,7 @@ export default function setup(pi: ExtensionAPI): void {
   // --- tool_call: append a context-file reference to model-invoked analyze ---
   // Fires before the tool executes; event.input is mutable, so appending
   // --context-file here rewrites the model's own bash command in place and
-  // it executes with the reference (no deny, no substitute). Fail open:
+  // it executes with the reference (no deny, no substitute). Fail-open:
   // every failure returns undefined with input unmutated so the original
   // command runs unchanged.
   pi.on("tool_call", async (event, ctx) => {
@@ -346,7 +369,16 @@ export default function setup(pi: ExtensionAPI): void {
       context ? { context } : undefined,
       ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
     );
-    if (!description) return undefined; // fail-open
+    if (!description) {
+      // Fail closed: returning undefined would hand Pi the raw image, which for
+      // a text-only model is an unanswered read and for any model bypasses the
+      // analyzer fence. Naming the cause lets the agent report the real problem
+      // instead of answering from an image it never saw.
+      const cause = analyzeFailure || "vp analyze produced no description";
+      return { content: [{ type: "text",
+        text: "vision-proxy could not analyze this image (" + cause + ").\n" +
+          "The image could not be read: report the vision-proxy failure to the user instead of answering from it." }] };
+    }
     return { content: [{ type: "text", text: withImageInstruction(description, undefined) }] };
   });
 }

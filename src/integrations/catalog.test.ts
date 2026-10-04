@@ -102,9 +102,12 @@ test("hook command quotes paths with whitespace", () => {
 	);
 	assert.equal(
 		makeTsHookCommand("/home/my user/.claude/hooks/vision-proxy.ts"),
-		"npx tsx '/home/my user/.claude/hooks/vision-proxy.ts'",
+		"node --experimental-strip-types '/home/my user/.claude/hooks/vision-proxy.ts'",
 	);
-	assert.equal(makeTsHookCommand("/plain/path.ts"), "npx tsx /plain/path.ts");
+	assert.equal(
+		makeTsHookCommand("/plain/path.ts"),
+		"node --experimental-strip-types /plain/path.ts",
+	);
 });
 
 test("quotePath hardens shell metacharacters with single-quote escaping", () => {
@@ -130,7 +133,7 @@ test("quotePath uses double-quote grouping on win32 (cmd.exe has no single quote
 	assert.equal(quotePath("", "win32"), '""');
 	assert.equal(
 		makeTsHookCommand("C:\\Users\\my user\\hooks\\vision-proxy.ts", "win32"),
-		'npx tsx "C:\\Users\\my user\\hooks\\vision-proxy.ts"',
+		'node --experimental-strip-types "C:\\Users\\my user\\hooks\\vision-proxy.ts"',
 	);
 });
 
@@ -167,7 +170,7 @@ test("hook-agent specs report script paths and metadata-free commands", () => {
 	try {
 		for (const agent of ["claude", "codex"] as const) {
 			const spec = specFor(agent)!;
-			assert.match(spec.hookCommand(), /^npx tsx /);
+			assert.match(spec.hookCommand(), /^node --experimental-strip-types /);
 			assert.ok(spec.hookCommand().includes("vision-proxy_read.ts"));
 			assert.equal(
 				spec.configPath(),

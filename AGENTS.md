@@ -65,6 +65,37 @@ Runtime requirements:
 
 - Node 22.6+ (required for `--experimental-strip-types`)
 
+## Live verification (required after `src/` changes)
+
+Unit tests do not catch stale installs. Always rebuild + reinstall + headless-test:
+
+```sh
+npm run build
+node dist/cli.js integration uninstall pi
+node dist/cli.js integration uninstall claude-code
+node dist/cli.js integration uninstall codex
+node dist/cli.js integration install pi --dev
+node dist/cli.js integration install claude-code --dev
+node dist/cli.js integration install codex --dev
+node dist/cli.js integration list  # all three should show installed
+```
+
+`--dev` points generated artifacts at this checkout's `dist/cli.js`, so the
+headless run exercises the amended code. Uninstalls are idempotent
+(`was not installed` is fine) and clear stale markers before reinstall.
+
+Then in a fresh shell, one prompt per host (expects a fenced
+`<vision_proxy_description>` UNTRUSTED block for `test/fixtures/test.png`):
+
+```sh
+pi -p 'Read test/fixtures/test.png and describe what you see'
+claude -p 'Read test/fixtures/test.png and describe what you see'
+codex exec 'Read test/fixtures/test.png and describe what you see'
+```
+
+Pass = fenced description returned. Fail = agent claims it cannot see images,
+hallucinates, or emits no fence → integration is broken, do not commit.
+
 ## Fallow
 
 - Use `fallow audit --format json --quiet` before committing AI-generated changes.

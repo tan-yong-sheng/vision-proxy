@@ -19,7 +19,7 @@ lifecycle translation (event shapes, image-cache refs, mode gating,
 executors, deny/output shapes).
 
 Standalone constraint: generated artifacts must run with no
-vision-proxy package present (plain `npx tsx`, Pi jiti), so the module ships its policy in two shapes from one source
+vision-proxy package present (plain `node --experimental-strip-types`, Pi jiti), so the module ships its policy in two shapes from one source
 of truth: real functions (exercised directly by `src/integrations/runtime.test.ts`)
 plus `HOOK_RUNTIME_SOURCE`, composed from those same functions via
 `toString` and inlined into each emitted file at `generate()` time.

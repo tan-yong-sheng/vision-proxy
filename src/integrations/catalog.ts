@@ -130,12 +130,19 @@ export function quotePath(p: string, platform: string = process.platform): strin
 }
 
 /**
- * The hook command written into every agent config: `npx tsx <script>`.
+ * The hook command written into every agent config: `node --experimental-strip-types <script>`.
+ *
+ * Runs the generated script on plain `node` rather than `npx tsx`. `npx` reads
+ * `package.json` from the agent's working directory before it does anything
+ * else, so a cwd whose `package.json` is unreadable (sandboxes, restrictive
+ * permissions) kills the bootstrap with `ERR_INVALID_PACKAGE_CONFIG` and exit 1
+ * -- before the script's fail-open handler can run, leaving the host to fall
+ * through to its native image tool. `node <abs path>` reads nothing from cwd.
  *
  * @tags integration, catalog
  */
 export function makeTsHookCommand(scriptPath: string, platform: string = process.platform): string {
-	return `npx tsx ${quotePath(scriptPath, platform)}`;
+	return `node --experimental-strip-types ${quotePath(scriptPath, platform)}`;
 }
 
 /**
@@ -246,7 +253,7 @@ const piSpec: AgentSpec = {
 };
 
 /**
- * Build a hook-agent spec (Claude Code, Codex): a generated `npx tsx` script
+ * Build a hook-agent spec (Claude Code, Codex): a generated plain-`node` script
  * plus a shared-shape JSON hooks config carrying only standard keys.
  */
 function makeHookAgentSpec(opts: {

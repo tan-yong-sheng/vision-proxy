@@ -38,7 +38,7 @@ export function parseConfig(raw: string): Record<string, unknown> {
 
 /**
  * Detect a vision-proxy hook registration, current or stale: the generated
- * `.ts` script run via `npx tsx`, the previous `vp hook` binary installs
+ * `.ts` script run via `node --experimental-strip-types`, the previous `vp hook` binary installs
  * (tagged or not), and the old `.mjs` shims that shipped before the
  * binary-as-hook rewrite.
  *

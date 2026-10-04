@@ -2,12 +2,14 @@
  * Contract tests for the Claude/Codex stdio hook-script adapter.
  *
  * Executes the generated `HOOK_SCRIPT_SOURCE` in a child process (mirroring
- * `npx tsx <script>` with a hook event on stdin) and pins the host-specific
+ * `node --experimental-strip-types <script>` with a hook event on stdin) and pins the host-specific
  * contract: UserPromptSubmit is reminder-only and resolves `[Image #N]` refs
  * via the image cache with a sessionId traversal guard, while PreToolUse
  * Read shells out to `vp analyze` once and denies with
- * `hookSpecificOutput.additionalContext`. Every failure mode is fail-open
- * (exit 0, no stdout).
+ * `hookSpecificOutput.additionalContext`. Failures stay fail-open (exit 0, no
+ * stdout) everywhere except an image read whose `vp analyze` fails, which fails
+ * closed with a deny naming the cause so a text-only model never falls through
+ * to a native image tool.
  */
 
 import assert from "node:assert/strict";
@@ -536,7 +538,7 @@ test("PreToolUse fails open when an image path cannot be passed to spawn", () =>
 	assert.match(run.stderr, /hook failed open/);
 });
 
-test("PreToolUse fails open when vp is missing or exits non-zero", () => {
+test("PreToolUse fails closed when vp is missing or exits non-zero", () => {
 	const script = writeScript();
 	const event = {
 		hook_event_name: "PreToolUse",
@@ -546,16 +548,29 @@ test("PreToolUse fails open when vp is missing or exits non-zero", () => {
 	const missing = runHook(script, event, {
 		VP_BIN: join(tmpdir(), "vp-definitely-absent-binary"),
 	});
-	assert.equal(missing.status, 0, "missing vp must still exit 0");
-	assert.equal(missing.stdout.trim(), "", "missing vp must emit nothing");
+	assert.equal(missing.status, 0, "fail-closed still exits 0");
+	assert.ok(missing.stdout.trim(), "missing vp must emit a deny, not silence");
+	assert.match(missing.stdout, /"permissionDecision":"deny"/, "must deny the read");
+	assert.match(missing.stdout, /the vision-proxy CLI was not found/, "must name the cause");
+	assert.doesNotMatch(
+		missing.stdout,
+		/<vision_proxy_description>/,
+		"must never present a failed analysis as a description",
+	);
 
 	const failingDir = mkdtempSync(join(tmpdir(), "vp-failing-bin-"));
 	const failing = join(failingDir, "vp");
 	writeFileSync(failing, "#!/bin/sh\nexit 1\n");
 	chmodSync(failing, 0o755);
 	const failed = runHook(script, event, { VP_BIN: failing });
-	assert.equal(failed.status, 0, "failing vp must still exit 0");
-	assert.equal(failed.stdout.trim(), "", "failing vp must emit nothing");
+	assert.equal(failed.status, 0, "failing vp still exits 0");
+	assert.match(failed.stdout, /"permissionDecision":"deny"/, "must deny the read");
+	assert.match(failed.stdout, /vp analyze exited with status 1/, "must name the cause");
+	assert.match(
+		failed.stdout,
+		/do not use the native image tool/,
+		"must steer the agent away from the native read",
+	);
 });
 
 test("PreToolUse forwards child stderr so config warnings stay visible", () => {

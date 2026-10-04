@@ -67,7 +67,7 @@ vp config set provider google
 vp config set apiKey AIzaSy...
 ```
 
-Because this file is read on every invocation, agents that run the `npx tsx` hook script in isolated subshells pick the settings up automatically.
+Because this file is read on every invocation, agents that run the `node --experimental-strip-types` hook script in isolated subshells pick the settings up automatically.
 Prefer `vp provider store-key google` to keep the key in your OS keyring instead of plain text, or export `GOOGLE_API_KEY` for a single session.
 
 2. Analyze an image:
@@ -100,7 +100,7 @@ vp integration uninstall <agent>
 vp integration uninstall --all
 ```
 
-- **Claude Code & Codex**: Writes a `vision-proxy_read.ts` hook script (`~/.claude/hooks/` or `~/.codex/hooks/`) and registers `UserPromptSubmit` and `PreToolUse Read` hooks that run it as a plain `npx tsx <script>` command with only standard hook keys. Requires `tsx` to be installed (`npm install -g tsx`). `UserPromptSubmit` emits a static reminder to `Read` each referenced image (never shells out, so submission is never blocked); `PreToolUse Read` is the single analysis point. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache` so each gets a reminder line.
+- **Claude Code & Codex**: Writes a `vision-proxy_read.ts` hook script (`~/.claude/hooks/` or `~/.codex/hooks/`) and registers `UserPromptSubmit` and `PreToolUse Read` hooks that run it as a plain `node --experimental-strip-types <script>` command with only standard hook keys. Requires Node 22.6+ on PATH. `UserPromptSubmit` emits a static reminder to `Read` each referenced image (never shells out, so submission is never blocked); `PreToolUse Read` is the single analysis point. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache` so each gets a reminder line.
 - **Pi**: Installs a `vision-proxy_read.ts` extension into `~/.pi/agent/extensions/` that hooks into Pi's `input`, `context`, and `tool_result` lifecycle events: `context` appends a static reminder to read referenced image paths (no subprocess, no latency), and `tool_result` is the single analysis point for images the model actually reads.
 - **opencode (paused while v2 stabilizes)**: `vp integration install opencode` reports the pause instead of installing — the v1 plugin (`chat.message` + `tool.execute.before` hooks) does not load under opencode v2. The CLI reader can consume a fresh pending context file when `OPENCODE` is set, but opencode v2 does not currently provide an integration that writes that file. Revisit a native v2 plugin once the API stabilizes.
 

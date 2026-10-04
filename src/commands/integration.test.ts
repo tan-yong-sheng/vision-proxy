@@ -9,7 +9,7 @@
  *     static reminder to read referenced image paths (never spawning vp),
  *     and tool_result replaces image reads with the analyzed description
  *   - install claude/codex writes a plain `vision-proxy_read.ts` hook script
- *     (run via `npx tsx`) and registers the hooks (UserPromptSubmit +
+ *     (run via `node --experimental-strip-types`) and registers the hooks (UserPromptSubmit +
  *     PreToolUse matchers) in the agent config with no vision-proxy metadata keys
  *   - uninstall removes only our registrations and the script (idempotent,
  *     leaves others intact)
@@ -562,8 +562,8 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		],
 	});
 
-	// vp exits non-zero -> tool_result returns undefined (fail-open), so the
-	// original read result reaches the model unchanged.
+	// vp exits non-zero -> tool_result fails CLOSED: the model gets a message
+	// naming the cause instead of the raw image it cannot actually read.
 	process.env.VP_MODE = "always";
 	setNextResult({ status: 1, stdout: "" });
 	const failed = await events.tool_result[0]({
@@ -573,10 +573,15 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		content: [{ type: "image", data: b64, mimeType: "image/png" }],
 		isError: false,
 	});
-	assert.equal(failed, undefined);
+	assert.ok(failed?.content, "fail-closed read must return a message");
+	assert.match(
+		failed.content[0].text,
+		/could not analyze this image \(vp analyze exited with status 1\)/,
+		"the message must name the cause",
+	);
 
 	// The context reminder needs no vp call, so it still fires even when vp
-	// is broken — the model is told to read, and the read fails open above.
+	// is broken — the model is told to read, and the read fails closed above.
 	const reminded = (await events.context[0]({
 		type: "context",
 		messages: [userMessage()],
@@ -1180,7 +1185,7 @@ test("install claude writes a tsx hook script and metadata-free settings.json en
 	const script = claudeHookPath(home);
 	assert.equal(existsSync(script), true);
 	const source = readFileSync(script, "utf8");
-	assert.match(source, /npx tsx/);
+	assert.match(source, /node --experimental-strip-types/);
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -1189,16 +1194,16 @@ test("install claude writes a tsx hook script and metadata-free settings.json en
 		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
 		["Read", "Bash"],
 	);
-	const expected = `npx tsx ${script}`;
+	const expected = `node --experimental-strip-types ${script}`;
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
 		expected,
-		"UserPromptSubmit hook command must invoke the generated script via npx tsx",
+		"UserPromptSubmit hook command must invoke the generated script via node --experimental-strip-types",
 	);
 	assert.equal(
 		cfg.hooks.PreToolUse[0].hooks[0].command,
 		expected,
-		"PreToolUse hook command must invoke the generated script via npx tsx",
+		"PreToolUse hook command must invoke the generated script via node --experimental-strip-types",
 	);
 	// No vision-proxy metadata keys in the host config.
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
@@ -1216,7 +1221,7 @@ test("install codex writes its hook script under ~/.codex and registers it in ho
 	const script = codexHookPath(home);
 	assert.equal(existsSync(script), true);
 	const source = readFileSync(script, "utf8");
-	assert.match(source, /npx tsx/);
+	assert.match(source, /node --experimental-strip-types/);
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -1227,8 +1232,8 @@ test("install codex writes its hook script under ~/.codex and registers it in ho
 	);
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
-		`npx tsx ${script}`,
-		"codex command must invoke the generated script via npx tsx",
+		`node --experimental-strip-types ${script}`,
+		"codex command must invoke the generated script via node --experimental-strip-types",
 	);
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
 	assert.equal("version" in cfg.hooks.UserPromptSubmit[0], false);
@@ -1264,7 +1269,10 @@ test("re-install does not duplicate hooks or scripts", async () => {
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 2);
-	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
+	assert.equal(
+		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
+		`node --experimental-strip-types ${claudeHookPath(home)}`,
+	);
 	reset();
 });
 
@@ -1342,7 +1350,10 @@ test("install claude replaces legacy vp hook entries", async () => {
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 2);
-	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
+	assert.equal(
+		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
+		`node --experimental-strip-types ${claudeHookPath(home)}`,
+	);
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
 	assert.equal(existsSync(claudeHookPath(home)), true);
 	reset();
@@ -1381,18 +1392,19 @@ test("show claude prints the hook command without writing to disk", async () => 
 	const home = isolate();
 	const r = await runIntegration("show", "claude");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /npx tsx .*vision-proxy_read\.ts/);
+	assert.match(r.message, /node --experimental-strip-types .*vision-proxy_read\.ts/);
 	assert.match(r.message, /vision-proxy_read\.ts/);
 	assert.equal(existsSync(join(process.env.HOME!, ".claude", "settings.json")), false);
 	assert.equal(existsSync(claudeHookPath(home)), false);
 	reset();
 });
 
-test("install claude mentions the tsx prerequisite in its message", async () => {
+test("install claude mentions the node strip-types prerequisite in its message", async () => {
 	isolate();
 	const r = await runIntegration("install", "claude");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /tsx/);
+	assert.match(r.message, /node --experimental-strip-types/);
+	assert.match(r.message, /Node 22\.6\+/);
 	reset();
 });
 
@@ -2103,7 +2115,11 @@ test("status reports a surviving legacy hook-agent script as inert, not out of d
 		JSON.stringify({
 			hooks: {
 				UserPromptSubmit: [
-					{ hooks: [{ type: "command", command: `npx tsx ${fresh}`, timeout: 30 }] },
+					{
+						hooks: [
+							{ type: "command", command: `node --experimental-strip-types ${fresh}`, timeout: 30 },
+						],
+					},
 				],
 			},
 		}),
@@ -2126,7 +2142,15 @@ test("status flags a legacy-only hook-agent registration for re-install, not ine
 		JSON.stringify({
 			hooks: {
 				UserPromptSubmit: [
-					{ hooks: [{ type: "command", command: `npx tsx ${legacyScript}`, timeout: 30 }] },
+					{
+						hooks: [
+							{
+								type: "command",
+								command: `node --experimental-strip-types ${legacyScript}`,
+								timeout: 30,
+							},
+						],
+					},
 				],
 			},
 		}),
@@ -2155,7 +2179,15 @@ test("reinstall claude migrates a legacy-named registration and script", async (
 		JSON.stringify({
 			hooks: {
 				UserPromptSubmit: [
-					{ hooks: [{ type: "command", command: `npx tsx ${legacyScript}`, timeout: 30 }] },
+					{
+						hooks: [
+							{
+								type: "command",
+								command: `node --experimental-strip-types ${legacyScript}`,
+								timeout: 30,
+							},
+						],
+					},
 				],
 			},
 		}),

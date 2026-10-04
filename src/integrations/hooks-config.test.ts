@@ -15,6 +15,7 @@ import {
 	hooksInstalled,
 	isVisionProxyGroup,
 	mergeHookGroup,
+	mergeHookGroups,
 	parseConfig,
 	removeHooks,
 	stripHookGroups,
@@ -117,6 +118,38 @@ test("mergeHookGroup replaces existing vp registration without duplicating", () 
 	assert.equal(again.length, 2, "re-install must not duplicate the group");
 });
 
+test("mergeHookGroups overwrites vp groups in place to preserve host trust indices", () => {
+	const cmd = "node --experimental-strip-types /home/u/.codex/hooks/vision-proxy_read.ts";
+	const foreign = (name: string) => ({
+		hooks: [{ type: "command", command: name, timeout: 10 }],
+	});
+	const vp = (matcher: string) => hookGroup(cmd, matcher);
+	// Codex shape: [foreign-Bash, foreign-all, vp-view_image, vp-Bash].
+	const existing = [foreign("dcg"), foreign("orca"), vp("view_image"), vp("Bash")];
+	const merged = mergeHookGroups(existing, [vp("view_image"), vp("Bash")]);
+	assert.equal(merged.length, 4, "same matcher count must not move groups");
+	assert.deepEqual(merged[0], foreign("dcg"), "foreign groups must be untouched");
+	assert.deepEqual(merged[1], foreign("orca"), "foreign groups must be untouched");
+	assert.deepEqual((merged[2] as { matcher: string }).matcher, "view_image");
+	assert.deepEqual((merged[3] as { matcher: string }).matcher, "Bash");
+	// Shrinking (Read-removal era: 3 matchers -> 2) drops the surplus
+	// last-to-first so surviving indices never shift.
+	const legacy = [foreign("dcg"), vp("Read"), vp("view_image"), vp("Bash")];
+	const shrunk = mergeHookGroups(legacy, [vp("view_image"), vp("Bash")]);
+	assert.equal(shrunk.length, 3);
+	assert.deepEqual(shrunk[0], foreign("dcg"));
+	assert.deepEqual((shrunk[1] as { matcher: string }).matcher, "view_image");
+	assert.deepEqual((shrunk[2] as { matcher: string }).matcher, "Bash");
+	// Growing inserts after the last reused slot, preserving earlier indices.
+	const grown = mergeHookGroups([foreign("dcg"), vp("view_image")], [vp("view_image"), vp("Bash")]);
+	assert.equal(grown.length, 3);
+	assert.deepEqual(grown[0], foreign("dcg"));
+	assert.deepEqual((grown[2] as { matcher: string }).matcher, "Bash");
+	// Re-apply is idempotent.
+	const twice = mergeHookGroups(merged, [vp("view_image"), vp("Bash")]);
+	assert.deepEqual(twice, merged);
+});
+
 test("stripHookGroups keeps foreign groups and reports removal", () => {
 	const foreign = { hooks: [{ type: "command", command: "node /some/other-hook.mjs" }] };
 	const ours = { hooks: [{ type: "command", command: "npx tsx ~/vision-proxy_read.ts" }] };
@@ -170,6 +203,26 @@ test("applyHooks registers both events and preserves foreign groups", () => {
 	const twice = JSON.parse(applyHooks(JSON.stringify(merged), cmd));
 	assert.equal(twice.hooks.UserPromptSubmit.length, 2);
 	assert.equal(twice.hooks.PreToolUse.length, 1);
+});
+
+test("applyHooks reinstall keeps vp groups at their indices", () => {
+	const cmd = "node --experimental-strip-types /home/u/.codex/hooks/vision-proxy_read.ts";
+	const foreign = { hooks: [{ type: "command", command: "dcg", timeout: 10 }] };
+	const raw = JSON.stringify({
+		hooks: {
+			PreToolUse: [foreign, hookGroup(cmd, "view_image"), hookGroup(cmd, "Bash")],
+		},
+	});
+	const merged = JSON.parse(applyHooks(raw, cmd, ["view_image", "Bash"]));
+	assert.equal(merged.hooks.PreToolUse.length, 3);
+	assert.deepEqual(merged.hooks.PreToolUse[0], foreign);
+	assert.equal(merged.hooks.PreToolUse[1].matcher, "view_image");
+	assert.equal(merged.hooks.PreToolUse[2].matcher, "Bash");
+	// A second apply must produce byte-identical output (trust hash stable).
+	assert.equal(
+		applyHooks(JSON.stringify(merged), cmd, ["view_image", "Bash"]),
+		JSON.stringify(merged, null, 2),
+	);
 });
 
 test("applyHooks can register additional tool matchers", () => {

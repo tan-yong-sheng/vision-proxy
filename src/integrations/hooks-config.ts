@@ -77,7 +77,18 @@ export function isVisionProxyGroup(group: Record<string, unknown>): boolean {
 }
 
 /**
- * Merge `group` into a hook-event array, replacing any existing vision-proxy registration.
+ * Merge `groups` into a hook-event array, replacing any existing vision-proxy registration.
+ *
+ * Index-stable: existing vision-proxy groups are overwritten IN PLACE at
+ * their current positions instead of being stripped and re-appended. Codex
+ * keys hook trust as `file:event:group_index:handler_index` with a hash of
+ * (event, matcher, command), so moving a group to the end of the array
+ * orphans its stored `trusted_hash` and the handler is silently dropped
+ * until re-trusted. Overwriting in place keeps both the index and (when the
+ * command and matchers are unchanged) the hash, so a reinstall preserves
+ * trust. Surplus groups (fewer matchers than before) are removed last-to-first
+ * so surviving indices never shift; extra groups (more matchers than before)
+ * are inserted directly after the last reused slot.
  *
  * A non-array existing value is REPLACED, not merged: install must yield a
  * valid array registration (the host schema requires arrays), and an unknown
@@ -85,15 +96,44 @@ export function isVisionProxyGroup(group: Record<string, unknown>): boolean {
  * uninstall path (`stripHookGroups`/`removeHooks`), which preserves non-array
  * values untouched — install must register to fulfill its contract, uninstall
  * must never destroy what it does not own.
+ *
+ * @tags integration, catalog
+ */
+export function mergeHookGroups(
+	existing: unknown,
+	groups: Record<string, unknown>[],
+): Record<string, unknown>[] {
+	const list = Array.isArray(existing) ? [...(existing as Record<string, unknown>[])] : [];
+	const vpIndices: number[] = [];
+	list.forEach((g, i) => {
+		if (isVisionProxyGroup(g)) vpIndices.push(i);
+	});
+	if (vpIndices.length === 0) {
+		list.push(...groups);
+		return list;
+	}
+	const reused = Math.min(vpIndices.length, groups.length);
+	for (let k = 0; k < reused; k++) list[vpIndices[k]!] = groups[k]!;
+	if (groups.length > vpIndices.length) {
+		// More matchers than before: insert the remainder directly after the
+		// last reused slot so earlier indices never shift.
+		const insertAt = vpIndices[vpIndices.length - 1]! + 1;
+		list.splice(insertAt, 0, ...groups.slice(vpIndices.length));
+	} else {
+		// Fewer (or equal) matchers: drop surplus slots last-to-first.
+		for (let k = vpIndices.length - 1; k >= groups.length; k--) list.splice(vpIndices[k]!, 1);
+	}
+	return list;
+}
+
+/**
+ * Merge a single `group` into a hook-event array (see `mergeHookGroups`).
  */
 export function mergeHookGroup(
 	existing: unknown,
 	group: Record<string, unknown>,
 ): Record<string, unknown>[] {
-	const list = Array.isArray(existing) ? (existing as Record<string, unknown>[]) : [];
-	const without = list.filter((g) => !isVisionProxyGroup(g));
-	without.push(group);
-	return without;
+	return mergeHookGroups(existing, [group]);
 }
 
 /**
@@ -119,7 +159,7 @@ export function stripHookGroups(existing: unknown): {
  * and Codex (hooks.json), which use the same shape.
  *
  * Non-array event values are replaced with a fresh registration (see
- * `mergeHookGroup`): install cannot merge into an unknown shape and must
+ * `mergeHookGroups`): install cannot merge into an unknown shape and must
  * leave a working registration behind. The uninstall path preserves such
  * values instead of discarding them.
  */
@@ -134,13 +174,13 @@ export function applyHooks(
 		existing !== null && typeof existing === "object" && !Array.isArray(existing)
 			? (existing as Record<string, unknown>)
 			: {};
-	hooks.UserPromptSubmit = mergeHookGroup(hooks.UserPromptSubmit, hookGroup(command));
+	hooks.UserPromptSubmit = mergeHookGroups(hooks.UserPromptSubmit, [hookGroup(command)]);
 	let preToolUse = hooks.PreToolUse;
 	if (preToolUseMatchers.length > 0) {
-		preToolUse = mergeHookGroup(preToolUse, hookGroup(command, preToolUseMatchers[0]));
-		for (const matcher of preToolUseMatchers.slice(1)) {
-			(preToolUse as Record<string, unknown>[]).push(hookGroup(command, matcher));
-		}
+		preToolUse = mergeHookGroups(
+			preToolUse,
+			preToolUseMatchers.map((matcher) => hookGroup(command, matcher)),
+		);
 	}
 	hooks.PreToolUse = preToolUse;
 	cfg.hooks = hooks;

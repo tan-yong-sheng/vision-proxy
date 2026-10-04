@@ -580,6 +580,71 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		"the message must name the cause",
 	);
 
+	// Spawn error (e.g. ENOENT from a missing vp binary) fails closed with
+	// the specific cause, not the generic fallback.
+	const spawnError = new Error("spawn vp ENOENT") as NodeJS.ErrnoException;
+	spawnError.code = "ENOENT";
+	setNextResult({ error: spawnError, stdout: "" });
+	const missing = await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
+	});
+	assert.match(
+		(missing as any).content[0].text,
+		/the vision-proxy CLI was not found/,
+		"spawn ENOENT must name the missing CLI",
+	);
+
+	// Success exit with empty stdout is a failure branch too: deny rather
+	// than presenting an empty analysis as a description.
+	setNextResult({ status: 0, stdout: "" });
+	const empty = await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
+	});
+	assert.ok((empty as any)?.content, "empty stdout must fail closed, not pass through");
+	assert.doesNotMatch(
+		(empty as any).content[0].text,
+		/<vision_proxy_description>/,
+		"must never present a failed analysis as a description",
+	);
+
+	// Overlapping tool_result calls keep their own causes: the second call's
+	// reset must not wipe the first call's failure message.
+	setNextResult({ status: 1, stdout: "" });
+	const [first, second] = await Promise.all([
+		events.tool_result[0]({
+			type: "tool_result",
+			toolName: "read",
+			input: { path: imagePath },
+			content: [{ type: "image", data: b64, mimeType: "image/png" }],
+			isError: false,
+		}),
+		events.tool_result[0]({
+			type: "tool_result",
+			toolName: "read",
+			input: { path: imagePath },
+			content: [{ type: "image", data: b64, mimeType: "image/png" }],
+			isError: false,
+		}),
+	]);
+	for (const [label, result] of [
+		["first", first],
+		["second", second],
+	] as const) {
+		assert.match(
+			(result as any).content[0].text,
+			/vp analyze exited with status 1/,
+			`${label} overlapping call must keep its own cause`,
+		);
+	}
+
 	// The context reminder needs no vp call, so it still fires even when vp
 	// is broken — the model is told to read, and the read fails closed above.
 	const reminded = (await events.context[0]({

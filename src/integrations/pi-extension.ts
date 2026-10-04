@@ -115,19 +115,18 @@ function sessionBranchContext(ctx: unknown): string {
   } catch { return ""; }
 }
 
-/** Run vp analyze (async) and return the fenced description, or null on failure.
+/** Run vp analyze (async) and return the fenced description with its failure cause.
  * The optional extras (question, context) travel on stdin, never argv, so the
  * description is grounded in the recent conversation without exposing it in
- * the process listing. */
-// Coarse reason for the last failed analyze, used by the fail-closed tool_result.
-// Never carries paths or child stderr: diagnostics stay on stderr for the logs,
-// and the model gets only enough to name the failure.
-let analyzeFailure = "";
-
-async function runAnalyze(images: string[], extras, signal?: unknown): Promise<string | null> {
+ * the process listing.
+ * The failure cause is returned per call (never module state) so overlapping
+ * tool_result handlers cannot clear or overwrite each other's cause. It never
+ * carries paths or child stderr: diagnostics stay on stderr for the logs,
+ * and the model gets only enough to name the failure. */
+async function runAnalyze(images: string[], extras, signal?: unknown): Promise<{ description: string | null; failure: string }> {
   return new Promise((resolve) => {
-    analyzeFailure = "";
-    if (!images || images.length === 0) return resolve(null);
+    let failure = "";
+    if (!images || images.length === 0) return resolve({ description: null, failure: failure });
     var timeoutMs = currentTimeoutMs();
     var maxTokens = resolveMaxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
     var invocation = buildAnalyzeArgs(images, maxTokens, extras);
@@ -139,11 +138,11 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     var vp = resolveVpBin();
     let settled = false;
     let timer: unknown = null;
-    const finish = (val: string | null) => {
+    const finish = (description: string | null) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer as NodeJS.Timeout);
-      resolve(val);
+      resolve({ description: description, failure: failure });
     };
     let child;
     try {
@@ -161,9 +160,10 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
       try { child.stdin.end(); } catch { /* error handler settles */ }
     } catch (err) {
       const msg = err && (err as Error).message ? (err as Error).message : String(err);
-      analyzeFailure = "vision-proxy could not be started";
+      failure = "vision-proxy could not be started";
       process.stderr.write("[vision-proxy] failed to spawn vp: " + msg + "\n");
-      return resolve(null);
+      finish(null);
+      return;
     }
     let stdout = "";
     child.stdout.on("data", (d) => { stdout += String(d); });
@@ -171,10 +171,10 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     child.on("error", (err) => {
       const e = err as NodeJS.ErrnoException;
       if (e && e.code === "ENOENT") {
-        analyzeFailure = "the vision-proxy CLI was not found";
+        failure = "the vision-proxy CLI was not found";
         process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
       } else {
-        analyzeFailure = "vp analyze failed";
+        failure = "vp analyze failed";
         process.stderr.write("[vision-proxy] vp analyze failed: " + (e && e.message ? e.message : String(err)) + "\n");
       }
       finish(null);
@@ -184,8 +184,8 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
       if (code !== 0 || !out) {
         // First cause wins: a spawn failure already reported ENOENT (close then
         // reports a meaningless -2), and the model should see the specific one.
-        if (!analyzeFailure) {
-          analyzeFailure = "vp analyze exited with status " + (code == null ? "?" : String(code));
+        if (!failure) {
+          failure = "vp analyze exited with status " + (code == null ? "?" : String(code));
         }
         process.stderr.write("[vision-proxy] vp analyze exited with status " + (code == null ? "?" : String(code)) + "\n");
         finish(null);
@@ -195,7 +195,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
     });
     timer = setTimeout(() => {
       try { if (child) child.kill("SIGKILL"); } catch { /* ignore */ }
-      analyzeFailure = "vp analyze timed out";
+      failure = "vp analyze timed out";
       process.stderr.write("[vision-proxy] vp analyze timed out\n");
       finish(null);
     }, timeoutMs);
@@ -203,7 +203,7 @@ async function runAnalyze(images: string[], extras, signal?: unknown): Promise<s
       const onAbort = () => {
         // Settle immediately so the context handler does not hang until the hard
         // timeout waiting on a child that swallows SIGTERM and never emits "close".
-        analyzeFailure = "vp analyze was aborted";
+        failure = "vp analyze was aborted";
         finish(null);
         try { if (child) child.kill("SIGTERM"); } catch { /* ignore */ }
         // Force-stop a child that handles SIGTERM and never exits.
@@ -364,7 +364,7 @@ export default function setup(pi: ExtensionAPI): void {
     const filePath = resolveImagePath(argPath, process.cwd());
     if (!filePath || !existsSync(filePath)) return undefined;
     var context = sessionBranchContext(ctx);
-    const description = await runAnalyze(
+    const { description, failure } = await runAnalyze(
       [filePath],
       context ? { context } : undefined,
       ctx && (ctx as any).signal ? (ctx as any).signal : undefined,
@@ -374,7 +374,7 @@ export default function setup(pi: ExtensionAPI): void {
       // a text-only model is an unanswered read and for any model bypasses the
       // analyzer fence. Naming the cause lets the agent report the real problem
       // instead of answering from an image it never saw.
-      const cause = analyzeFailure || "vp analyze produced no description";
+      const cause = failure || "vp analyze produced no description";
       return { content: [{ type: "text",
         text: "vision-proxy could not analyze this image (" + cause + ").\n" +
           "The image could not be read: report the vision-proxy failure to the user instead of answering from it." }] };

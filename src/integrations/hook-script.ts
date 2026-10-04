@@ -169,14 +169,15 @@ var TRANSCRIPT_TAIL_LINES = 400;
 // so multi-GB transcripts stay cheap.
 var TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 
-// Coarse reason for the last failed analyze, used by the fail-closed deny.
-// Deliberately never carries paths or child stderr: diagnostics stay on stderr
-// for the logs, and the model gets only enough to name the failure.
-let analyzeFailure = "";
-
-function runAnalyze(images: string[], extras): string | null {
-  analyzeFailure = "";
-  if (!images || images.length === 0) return null;
+/** Run vp analyze (sync) and return the fenced description with its failure cause.
+ * The failure cause is returned per call (never module state): the stdio hook
+ * runs one event per process so no overlap is possible today, but returning
+ * the cause keeps the contract race-free if the host ever runs handlers
+ * concurrently. It never carries paths or child stderr: diagnostics stay on
+ * stderr for the logs, and the model gets only enough to name the failure. */
+function runAnalyze(images: string[], extras): { description: string | null; failure: string } {
+  let failure = "";
+  if (!images || images.length === 0) return { description: null, failure: failure };
   var timeout = resolveHookTimeout(process.env.VP_HOOK_TIMEOUT_MS);
   var maxTokens = resolveMaxOutputTokens(process.env.VP_MAX_OUTPUT_TOKENS);
   var invocation = buildAnalyzeArgs(images, maxTokens, extras);
@@ -195,21 +196,21 @@ function runAnalyze(images: string[], extras): string | null {
   if (childStderr) process.stderr.write(childStderr);
   if (result.error) {
     if (result.error.code === "ENOENT") {
-      analyzeFailure = "the vision-proxy CLI was not found";
+      failure = "the vision-proxy CLI was not found";
       process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
     } else {
-      analyzeFailure = "vp analyze failed or timed out";
+      failure = "vp analyze failed or timed out";
       process.stderr.write("[vision-proxy] vp analyze failed or timed out\n");
     }
-    return null;
+    return { description: null, failure: failure };
   }
   var out = String(result.stdout == null ? "" : result.stdout).trim();
   if (result.status !== 0 || !out) {
-    analyzeFailure = "vp analyze exited with status " + String(result.status == null ? "?" : result.status);
+    failure = "vp analyze exited with status " + String(result.status == null ? "?" : result.status);
     process.stderr.write("[vision-proxy] vp analyze exited with status " + String(result.status == null ? "?" : result.status) + "\n");
-    return null;
+    return { description: null, failure: failure };
   }
-  return out;
+  return { description: out, failure: failure };
 }
 
 // Read the host's on-disk transcript (CC JSONL or Codex rollout) and render
@@ -405,14 +406,15 @@ function runHook(event: Record<string, any> | null): void {
     } catch {
       context = "";
     }
-    var desc = runAnalyze([file], context ? { context } : undefined);
+    var result = runAnalyze([file], context ? { context } : undefined);
+    var desc = result.description;
     if (!desc) {
       // Fail closed. The native fallback is not a graceful degradation: for a
       // text-only model it is a guaranteed provider 400, and for a vision model
       // it bypasses the analyzer fence. Denying with the cause lets a
       // long-running agent report the real problem instead of retrying against
       // an API error it cannot interpret.
-      const cause = analyzeFailure || "vp analyze produced no description";
+      const cause = result.failure || "vp analyze produced no description";
       emit(
         "PreToolUse",
         "vision-proxy could not analyze this image (" + cause + ").\n" +

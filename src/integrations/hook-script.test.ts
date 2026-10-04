@@ -571,6 +571,21 @@ test("PreToolUse fails closed when vp is missing or exits non-zero", () => {
 		/do not use the native image tool/,
 		"must steer the agent away from the native read",
 	);
+
+	// Success exit with empty stdout takes the same fail-closed branch:
+	// deny, never an empty description.
+	const emptyDir = mkdtempSync(join(tmpdir(), "vp-empty-bin-"));
+	const empty = join(emptyDir, "vp");
+	writeFileSync(empty, "#!/bin/sh\nexit 0\n");
+	chmodSync(empty, 0o755);
+	const emptyOut = runHook(script, event, { VP_BIN: empty });
+	assert.equal(emptyOut.status, 0, "empty stdout still exits 0");
+	assert.match(emptyOut.stdout, /"permissionDecision":"deny"/, "must deny the read");
+	assert.doesNotMatch(
+		emptyOut.stdout,
+		/<vision_proxy_description>/,
+		"must never present a failed analysis as a description",
+	);
 });
 
 test("PreToolUse forwards child stderr so config warnings stay visible", () => {

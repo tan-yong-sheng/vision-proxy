@@ -46,7 +46,7 @@ export interface AgentSpec {
 	readConfig(): { raw: string };
 	/** Config file edited by install/uninstall (the host's settings/hooks json). */
 	configPath(): string;
-	/** The hook command written into the agent config (plain `npx tsx`). */
+	/** The hook command written into the agent config (plain `node --experimental-strip-types`). */
 	hookCommand(): string;
 	/** Apply the hook registrations to the config; returns new serialized config. */
 	apply(raw: string): string;

@@ -242,7 +242,7 @@ export async function integrationInstall(
 	}
 	if (cfgPath) {
 		// Hook agents: write the generated hook script, then register it as a
-		// plain `npx tsx` command in the host config. The config carries only
+		// plain `node --experimental-strip-types` command in the host config. The config carries only
 		// standard hook keys; the version marker lives in the script file.
 		mkdirSync(dirname(target), { recursive: true });
 		writeFileSync(target, nextArtifact, { mode: 0o644 });
@@ -280,7 +280,7 @@ export async function integrationInstall(
 				ok: true,
 				message:
 					`${lead}${where}\n` +
-					`Prerequisite: tsx must be installed for the 'npx tsx' hook command to run (npm install -g tsx).\n` +
+					`Prerequisite: Node 22.6+ must be on PATH for the 'node --experimental-strip-types' hook command to run.\n` +
 					`Warning: legacy artifact at ${legacyPath} could not be removed; it is not executed (the config points at ${target}); delete it manually if desired.`,
 				code: 0,
 			};
@@ -297,7 +297,7 @@ export async function integrationInstall(
 	return {
 		ok: true,
 		message: cfgPath
-			? `${lead}${where}\nPrerequisite: tsx must be installed for the 'npx tsx' hook command to run (npm install -g tsx).`
+			? `${lead}${where}\nPrerequisite: Node 22.6+ must be on PATH for the 'node --experimental-strip-types' hook command to run.`
 			: `${lead}${where}`,
 		code: 0,
 	};

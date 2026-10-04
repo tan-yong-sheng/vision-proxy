@@ -940,8 +940,8 @@ Subcommands:
 
 Agents:
   pi                 Pi coding agent (global extensions directory)
-  claude             Claude agent (npx tsx hook script + hooks; deprecated alias: claude-code)
-  codex              Codex agent (npx tsx hook script + hooks)
+  claude             Claude agent (node --experimental-strip-types hook script + hooks; deprecated alias: claude-code)
+  codex              Codex agent (node --experimental-strip-types hook script + hooks)
 
 Options:
   -h, --help         show this help`,

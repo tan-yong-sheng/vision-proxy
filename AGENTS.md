@@ -36,7 +36,7 @@ Keep it short and update it when workflows change.
 - **Module boundary:** `src/core.ts` is the Pi-free core - pure functions and no peer-dep runtime requirements.
 `src/adapter.ts` calls the Vercel AI SDK.
 `src/commands/*.ts` wire CLI arguments to `src/core.ts` and `src/adapter.ts`.
-Agent hook logic lives in `src/integrations/`: `hook-script.ts` for the `npx tsx` hook scripts installed by `vp integration install claude-code|codex`; the Pi extension (`pi-extension.ts`) carries the same reminder-only submit plus Read-time analyze flow for its host; `runtime.ts` is the shared standalone analysis policy inlined into both.
+Agent hook logic lives in `src/integrations/`: `hook-script.ts` for the `node --experimental-strip-types` hook scripts installed by `vp integration install claude|codex`; the Pi extension (`pi-extension.ts`) carries the same reminder-only submit plus Read-time analyze flow for its host; `runtime.ts` is the shared standalone analysis policy inlined into both.
 - **Generated code:** `.fallow/cache.bin` is fallow cache data - do not edit manually.
 `.claude/hooks/fallow-gate.sh` is a generated hook wrapper.
 - **Sensitive areas:** `src/adapter.ts` and `src/commands/analyze.ts` make actual API calls to external vision models.
@@ -64,6 +64,37 @@ Environment overrides use `VP_*`.
 Runtime requirements:
 
 - Node 22.6+ (required for `--experimental-strip-types`)
+
+## Live verification (required after `src/` changes)
+
+Unit tests do not catch stale installs. Always rebuild + reinstall + headless-test:
+
+```sh
+npm run build
+node dist/cli.js integration uninstall pi
+node dist/cli.js integration uninstall claude
+node dist/cli.js integration uninstall codex
+node dist/cli.js integration install pi --dev
+node dist/cli.js integration install claude --dev
+node dist/cli.js integration install codex --dev
+node dist/cli.js integration list  # all three should show installed
+```
+
+`--dev` points generated artifacts at this checkout's `dist/cli.js`, so the
+headless run exercises the amended code. Uninstalls are idempotent
+(`was not installed` is fine) and clear stale markers before reinstall.
+
+Then in a fresh shell, one prompt per host (expects a fenced
+`<vision_proxy_description>` UNTRUSTED block for `test/fixtures/test.png`):
+
+```sh
+pi -p 'Read test/fixtures/test.png and describe what you see'
+claude -p 'Read test/fixtures/test.png and describe what you see'
+codex exec 'Read test/fixtures/test.png and describe what you see'
+```
+
+Pass = fenced description returned. Fail = agent claims it cannot see images,
+hallucinates, or emits no fence → integration is broken, do not commit.
 
 ## Fallow
 

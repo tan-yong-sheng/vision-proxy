@@ -35,6 +35,7 @@ export {
 	hooksInstalled,
 	isVisionProxyGroup,
 	mergeHookGroup,
+	mergeHookGroups,
 	parseConfig,
 	removeHooks,
 	stripHookGroups,

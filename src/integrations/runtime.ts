@@ -10,7 +10,7 @@
  * sync/async executors, and deny/output shapes.
  *
  * Standalone constraint: the generated artifacts must run with no
- * vision-proxy package present (plain npx tsx, Pi jiti), so this module ships its policy in two shapes from one source of
+ * vision-proxy package present (plain node --experimental-strip-types, Pi jiti), so this module ships its policy in two shapes from one source of
  * truth:
  *
  * - real functions below, which repo unit tests exercise directly

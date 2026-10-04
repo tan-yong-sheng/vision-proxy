@@ -9,7 +9,7 @@
  *     static reminder to read referenced image paths (never spawning vp),
  *     and tool_result replaces image reads with the analyzed description
  *   - install claude/codex writes a plain `vision-proxy_read.ts` hook script
- *     (run via `npx tsx`) and registers the hooks (UserPromptSubmit +
+ *     (run via `node --experimental-strip-types`) and registers the hooks (UserPromptSubmit +
  *     PreToolUse matchers) in the agent config with no vision-proxy metadata keys
  *   - uninstall removes only our registrations and the script (idempotent,
  *     leaves others intact)
@@ -87,6 +87,7 @@ interface LoadedGenerated {
 	dir: string;
 	calls: Array<[string, string[]]>;
 	setNextResult(result: unknown): void;
+	setNextResults(results: unknown[]): void;
 }
 
 async function loadGeneratedSource(
@@ -105,11 +106,14 @@ async function loadGeneratedSource(
 		[
 			"export const calls: Array<[string, string[]]> = [];",
 			"let nextResult;",
-			"export function setNextResult(r) { nextResult = r; }",
-			"export function spawnSync(command, args) { calls.push([command, args]); return nextResult; }",
+			"let resultQueue = null;",
+			"export function setNextResult(r) { nextResult = r; resultQueue = null; }",
+			"export function setNextResults(rs) { resultQueue = rs.slice(); }",
+			"function takeResult() { return resultQueue && resultQueue.length > 0 ? resultQueue.shift() : nextResult; }",
+			"export function spawnSync(command, args) { calls.push([command, args]); return takeResult(); }",
 			"export function spawn(command, args) {",
 			"  calls.push([command, args]);",
-			"  const result = nextResult;",
+			"  const result = takeResult();",
 			"  let stdoutHandler = null;",
 			"  const proc = {",
 			"    stdin: { on: () => {}, write: () => true, end: () => {} },",
@@ -132,7 +136,7 @@ async function loadGeneratedSource(
 			"export function execFile(command, args, options, callback) {",
 			"  calls.push([command, args]);",
 			"  if (typeof options === 'function') { callback = options; }",
-			"  const result = nextResult;",
+			"  const result = takeResult();",
 			"  setImmediate(() => {",
 			'    if (!result) { callback(null, "", ""); return; }',
 			'    if (result.error) { callback(result.error, result.stdout ?? "", result.stderr ?? ""); return; }',
@@ -150,11 +154,13 @@ async function loadGeneratedSource(
 		].join("\n"),
 	);
 	const mod = (await import(join(dir, `${name}.ts`))) as Record<string, unknown>;
+	const mockChild = await import(join(dir, "mock-child-process.ts"));
 	return {
 		mod,
 		dir,
-		calls: (await import(join(dir, "mock-child-process.ts"))).calls,
-		setNextResult: (await import(join(dir, "mock-child-process.ts"))).setNextResult,
+		calls: mockChild.calls,
+		setNextResult: mockChild.setNextResult,
+		setNextResults: mockChild.setNextResults,
 	};
 }
 
@@ -180,7 +186,7 @@ type PiExtensionSetup = (input: {
 }) => unknown;
 
 async function loadPiExtension(source: string, home: string) {
-	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
+	const { mod, dir, calls, setNextResult, setNextResults } = await loadGeneratedSource(
 		source,
 		home,
 		"vision-proxy",
@@ -204,7 +210,7 @@ async function loadPiExtension(source: string, home: string) {
 	for (const required of ["input", "context", "tool_call", "tool_result"]) {
 		assert.ok(eventNames.includes(required), `must register ${required} handler`);
 	}
-	return { events, dir, calls, setNextResult };
+	return { events, dir, calls, setNextResult, setNextResults };
 }
 
 test("install pi writes the vision-proxy extension file with valid source", async () => {
@@ -551,6 +557,7 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		events,
 		dir: testDir,
 		setNextResult,
+		setNextResults,
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "pic.png");
 	const b64 = Buffer.from("x").toString("base64");
@@ -562,8 +569,8 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		],
 	});
 
-	// vp exits non-zero -> tool_result returns undefined (fail-open), so the
-	// original read result reaches the model unchanged.
+	// vp exits non-zero -> tool_result fails CLOSED: the model gets a message
+	// naming the cause instead of the raw image it cannot actually read.
 	process.env.VP_MODE = "always";
 	setNextResult({ status: 1, stdout: "" });
 	const failed = await events.tool_result[0]({
@@ -573,10 +580,87 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		content: [{ type: "image", data: b64, mimeType: "image/png" }],
 		isError: false,
 	});
-	assert.equal(failed, undefined);
+	assert.ok(failed?.content, "fail-closed read must return a message");
+	assert.match(
+		failed.content[0].text,
+		/could not analyze this image \(vp analyze exited with status 1\)/,
+		"the message must name the cause",
+	);
+
+	// Spawn error (e.g. ENOENT from a missing vp binary) fails closed with
+	// the specific cause, not the generic fallback.
+	const spawnError = new Error("spawn vp ENOENT") as NodeJS.ErrnoException;
+	spawnError.code = "ENOENT";
+	setNextResult({ error: spawnError, stdout: "" });
+	const missing = await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
+	});
+	assert.match(
+		(missing as any).content[0].text,
+		/the vision-proxy CLI was not found/,
+		"spawn ENOENT must name the missing CLI",
+	);
+
+	// Success exit with empty stdout is a failure branch too: deny with the
+	// cause named, rather than presenting an empty analysis as a description.
+	setNextResult({ status: 0, stdout: "" });
+	const empty = (await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
+	})) as any;
+	assert.ok(empty?.content, "empty stdout must fail closed, not pass through");
+	assert.match(
+		empty.content[0].text,
+		/could not analyze this image \(vp analyze exited with status 0\)/,
+		"empty stdout must fail closed with the cause named",
+	);
+	assert.doesNotMatch(
+		empty.content[0].text,
+		/<vision_proxy_description>/,
+		"must never present a failed analysis as a description",
+	);
+
+	// Overlapping tool_result calls keep their own causes: each spawned call
+	// consumes the next queued mock result, so distinct failures must surface
+	// as distinct messages. Under shared module state the second call's reset
+	// would wipe the first call's cause.
+	const firstError = new Error("spawn vp ENOENT") as NodeJS.ErrnoException;
+	firstError.code = "ENOENT";
+	setNextResults([
+		{ error: firstError, stdout: "" },
+		{ status: 2, stdout: "" },
+	]);
+	const toolResultEvent = (): any => ({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
+	});
+	const [first, second] = (await Promise.all([
+		events.tool_result[0](toolResultEvent()),
+		events.tool_result[0](toolResultEvent()),
+	])) as any[];
+	assert.match(
+		first.content[0].text,
+		/the vision-proxy CLI was not found/,
+		"first overlapping call must keep its own ENOENT cause",
+	);
+	assert.match(
+		second.content[0].text,
+		/vp analyze exited with status 2/,
+		"second overlapping call must keep its own exit-status cause",
+	);
 
 	// The context reminder needs no vp call, so it still fires even when vp
-	// is broken — the model is told to read, and the read fails open above.
+	// is broken — the model is told to read, and the read fails closed above.
 	const reminded = (await events.context[0]({
 		type: "context",
 		messages: [userMessage()],
@@ -1180,7 +1264,7 @@ test("install claude writes a tsx hook script and metadata-free settings.json en
 	const script = claudeHookPath(home);
 	assert.equal(existsSync(script), true);
 	const source = readFileSync(script, "utf8");
-	assert.match(source, /npx tsx/);
+	assert.match(source, /node --experimental-strip-types/);
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -1189,16 +1273,16 @@ test("install claude writes a tsx hook script and metadata-free settings.json en
 		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
 		["Read", "Bash"],
 	);
-	const expected = `npx tsx ${script}`;
+	const expected = `node --experimental-strip-types ${script}`;
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
 		expected,
-		"UserPromptSubmit hook command must invoke the generated script via npx tsx",
+		"UserPromptSubmit hook command must invoke the generated script via node --experimental-strip-types",
 	);
 	assert.equal(
 		cfg.hooks.PreToolUse[0].hooks[0].command,
 		expected,
-		"PreToolUse hook command must invoke the generated script via npx tsx",
+		"PreToolUse hook command must invoke the generated script via node --experimental-strip-types",
 	);
 	// No vision-proxy metadata keys in the host config.
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
@@ -1216,19 +1300,19 @@ test("install codex writes its hook script under ~/.codex and registers it in ho
 	const script = codexHookPath(home);
 	assert.equal(existsSync(script), true);
 	const source = readFileSync(script, "utf8");
-	assert.match(source, /npx tsx/);
+	assert.match(source, /node --experimental-strip-types/);
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 3);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	assert.deepEqual(
 		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
-		["Read", "view_image", "Bash"],
+		["view_image", "Bash"],
 	);
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
-		`npx tsx ${script}`,
-		"codex command must invoke the generated script via npx tsx",
+		`node --experimental-strip-types ${script}`,
+		"codex command must invoke the generated script via node --experimental-strip-types",
 	);
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
 	assert.equal("version" in cfg.hooks.UserPromptSubmit[0], false);
@@ -1264,7 +1348,10 @@ test("re-install does not duplicate hooks or scripts", async () => {
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 2);
-	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
+	assert.equal(
+		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
+		`node --experimental-strip-types ${claudeHookPath(home)}`,
+	);
 	reset();
 });
 
@@ -1342,7 +1429,10 @@ test("install claude replaces legacy vp hook entries", async () => {
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
 	assert.equal(cfg.hooks.PreToolUse.length, 2);
-	assert.equal(cfg.hooks.UserPromptSubmit[0].hooks[0].command, `npx tsx ${claudeHookPath(home)}`);
+	assert.equal(
+		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
+		`node --experimental-strip-types ${claudeHookPath(home)}`,
+	);
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
 	assert.equal(existsSync(claudeHookPath(home)), true);
 	reset();
@@ -1381,18 +1471,19 @@ test("show claude prints the hook command without writing to disk", async () => 
 	const home = isolate();
 	const r = await runIntegration("show", "claude");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /npx tsx .*vision-proxy_read\.ts/);
+	assert.match(r.message, /node --experimental-strip-types .*vision-proxy_read\.ts/);
 	assert.match(r.message, /vision-proxy_read\.ts/);
 	assert.equal(existsSync(join(process.env.HOME!, ".claude", "settings.json")), false);
 	assert.equal(existsSync(claudeHookPath(home)), false);
 	reset();
 });
 
-test("install claude mentions the tsx prerequisite in its message", async () => {
+test("install claude mentions the node strip-types prerequisite in its message", async () => {
 	isolate();
 	const r = await runIntegration("install", "claude");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /tsx/);
+	assert.match(r.message, /node --experimental-strip-types/);
+	assert.match(r.message, /Node 22\.6\+/);
 	reset();
 });
 
@@ -2103,7 +2194,11 @@ test("status reports a surviving legacy hook-agent script as inert, not out of d
 		JSON.stringify({
 			hooks: {
 				UserPromptSubmit: [
-					{ hooks: [{ type: "command", command: `npx tsx ${fresh}`, timeout: 30 }] },
+					{
+						hooks: [
+							{ type: "command", command: `node --experimental-strip-types ${fresh}`, timeout: 30 },
+						],
+					},
 				],
 			},
 		}),
@@ -2126,7 +2221,15 @@ test("status flags a legacy-only hook-agent registration for re-install, not ine
 		JSON.stringify({
 			hooks: {
 				UserPromptSubmit: [
-					{ hooks: [{ type: "command", command: `npx tsx ${legacyScript}`, timeout: 30 }] },
+					{
+						hooks: [
+							{
+								type: "command",
+								command: `node --experimental-strip-types ${legacyScript}`,
+								timeout: 30,
+							},
+						],
+					},
 				],
 			},
 		}),
@@ -2155,7 +2258,15 @@ test("reinstall claude migrates a legacy-named registration and script", async (
 		JSON.stringify({
 			hooks: {
 				UserPromptSubmit: [
-					{ hooks: [{ type: "command", command: `npx tsx ${legacyScript}`, timeout: 30 }] },
+					{
+						hooks: [
+							{
+								type: "command",
+								command: `node --experimental-strip-types ${legacyScript}`,
+								timeout: 30,
+							},
+						],
+					},
 				],
 			},
 		}),

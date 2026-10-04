@@ -73,7 +73,7 @@ Installs the `vision-proxy_read.ts` extension into `~/.pi/agent/extensions/`. Th
 
 The reminder is appended in the `context` event for every submission Pi assembles for the model, including ones queued via the `streamingBehavior` option while a previous turn is streaming and ones dispatched through `session.steer()` / `session.followUp()` (which route through the same `session.prompt()` path). Repeated events strip the prior reminder before re-appending, so reminder text never duplicates.
 
-If `vp analyze` fails or `VP_MODE=off`, the extension fails open and Pi proceeds unchanged.
+If `vp analyze` fails outside an image read (e.g. the `tool_call` context rewrite) or `VP_MODE=off`, the extension fails open and Pi proceeds unchanged. Failed image reads fail closed per the `tool_result` bullet above.
 
 ```bash
 vp integration install pi

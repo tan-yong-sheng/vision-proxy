@@ -38,7 +38,7 @@ export const AGENT_ALIASES: Record<string, string> = {
  * @tags integration, catalog
  */
 export function canonicalAgentId(agent: string): string {
-	return AGENT_ALIASES[agent] ?? agent;
+	return Object.hasOwn(AGENT_ALIASES, agent) ? AGENT_ALIASES[agent]! : agent;
 }
 
 /** Installed host artifact name (feature-suffix convention: the Read-time analyze hooks). */

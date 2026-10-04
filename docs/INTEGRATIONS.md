@@ -14,7 +14,7 @@ Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers 
 
 ```bash
 vp integration install claude
-vp integration status claude
+vp integration status
 ```
 
 The agent id was renamed from `claude-code` to `claude` (matching the
@@ -52,7 +52,7 @@ Legacy installs that appended a `[[UserPromptSubmit]]` block to `~/.codex/config
 
 ```bash
 vp integration install codex
-vp integration status codex
+vp integration status
 ```
 
 Uninstall:
@@ -78,7 +78,7 @@ If `vp analyze` fails or `VP_MODE=off`, the extension fails open and Pi proceeds
 
 ```bash
 vp integration install pi
-vp integration status pi
+vp integration status
 ```
 
 Uninstall:

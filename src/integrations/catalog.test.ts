@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { renderVersionMarker, VERSION } from "../version.ts";
 import {
+	canonicalAgentId,
 	claudeCodeConfigPath,
 	claudeHookScriptPath,
 	codexConfigPath,
@@ -57,6 +58,18 @@ test("SUPPORTED lists the three hosts and specFor resolves each", () => {
 	// same spec as `claude` so existing scripts keep working.
 	assert.equal(specFor("claude-code")?.id, "claude");
 	assert.equal(specFor("vim"), undefined);
+});
+
+test("canonicalAgentId ignores inherited object keys", () => {
+	// Arbitrary CLI input hits the alias table: inherited keys such as
+	// `toString` and `__proto__` must pass through unchanged instead of
+	// resolving to inherited values and breaking the string contract.
+	assert.equal(canonicalAgentId("toString"), "toString");
+	assert.equal(canonicalAgentId("__proto__"), "__proto__");
+	assert.equal(canonicalAgentId("constructor"), "constructor");
+	assert.equal(canonicalAgentId("claude-code"), "claude");
+	assert.equal(canonicalAgentId("claude"), "claude");
+	assert.equal(specFor("toString"), undefined);
 });
 
 test("generated sources embed the rendered version marker", () => {

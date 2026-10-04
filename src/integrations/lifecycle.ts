@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, resolve } from "node:path";
 import { extractMarkerVersion, VERSION } from "../version.ts";
 import {
+	canonicalAgentId,
 	getLegacyArtifactState,
 	legacyArtifactPath,
 	legacyArtifactPresent,
@@ -102,12 +103,12 @@ const OPENCODE_PAUSED_MESSAGE =
 	"via the OPENCODE marker.";
 
 function rejectUnknownAgent(agent: string): IntegrationResult {
-	if (agent === "opencode") {
+	if (canonicalAgentId(agent) === "opencode") {
 		return { ok: false, message: OPENCODE_PAUSED_MESSAGE, code: 1 };
 	}
 	return {
 		ok: false,
-		message: `unknown agent "${agent}". Supported: ${SUPPORTED.join(", ")}`,
+		message: `unknown agent "${agent}". Supported: ${SUPPORTED.join(", ")} (deprecated alias: claude-code still accepted)`,
 		code: 1,
 	};
 }
@@ -202,6 +203,7 @@ export async function integrationInstall(
 	agent: string,
 	opts: IntegrationInstallOptions = {},
 ): Promise<IntegrationResult> {
+	agent = canonicalAgentId(agent);
 	const resolved = resolveAgentTarget(agent, opts);
 	if ("result" in resolved) return resolved.result;
 	const { spec, target, cfgPath } = resolved;
@@ -308,6 +310,7 @@ export async function integrationInstall(
  * @tags integration, lifecycle
  */
 export async function integrationShow(agent: string): Promise<IntegrationResult> {
+	agent = canonicalAgentId(agent);
 	const spec = specFor(agent);
 	if (!spec) return rejectUnknownAgent(agent);
 
@@ -469,6 +472,7 @@ export async function integrationUninstall(
 	agent: string,
 	opts: IntegrationInstallOptions = {},
 ): Promise<IntegrationResult> {
+	agent = canonicalAgentId(agent);
 	// opencode has no install spec while its v2 API stabilizes: the only
 	// uninstall action is removing orphaned v1 plugin files. Install keeps
 	// reporting the pause message.
@@ -560,7 +564,43 @@ export async function integrationUninstall(
 }
 
 /**
- * CLI dispatch for `vp integration <subcommand> <agent>`.
+ * Remove every known integration (SUPPORTED agents plus the orphaned v1
+ * opencode plugin files).
+ *
+ * Runs each per-agent uninstall to completion even when one fails, so a
+ * `codex` failure never strands a `pi` install. A per-agent rejection
+ * (thrown on an unreadable config or a failed config write) is converted
+ * to a failed result line so later agents still run and every outcome
+ * reaches the aggregate report. Output is one line per agent
+ * (`<agent>: <single-line outcome>`); the exit code is 1 when any agent
+ * failed. Multi-line per-agent messages are flattened so the
+ * one-line-per-agent shape holds.
+ *
+ * @tags integration, lifecycle
+ */
+// fallow-ignore-next-line unused-export
+export async function integrationUninstallAll(installDir?: string): Promise<IntegrationResult> {
+	const lines: string[] = [];
+	let failed = false;
+	for (const agent of [...SUPPORTED, "opencode"]) {
+		let r: IntegrationResult;
+		try {
+			r = await integrationUninstall(agent, { installDir });
+		} catch (e) {
+			r = {
+				ok: false,
+				message: `failed to uninstall ${agent} integration: ${e instanceof Error ? e.message : String(e)}`,
+				code: 1,
+			};
+		}
+		if (!r.ok) failed = true;
+		lines.push(`${agent}: ${r.message.split("\n").join(" ")}`);
+	}
+	return { ok: !failed, message: lines.join("\n"), code: failed ? 1 : 0 };
+}
+
+/**
+ * CLI dispatch for `vp integration <subcommand> [<agent>] [--all]`.
  *
  * @tags integration, lifecycle
  */
@@ -569,6 +609,7 @@ export async function runIntegration(
 	agent: string,
 	installDir?: string,
 	dev = false,
+	all = false,
 ): Promise<IntegrationResult> {
 	switch (sub) {
 		case "install":
@@ -582,7 +623,17 @@ export async function runIntegration(
 		case "status":
 			return integrationStatus(installDir);
 		case "uninstall":
-			if (!agent) return { ok: false, message: "usage: vp integration uninstall <agent>", code: 1 };
+			if (all) {
+				if (agent)
+					return {
+						ok: false,
+						message: "usage: vp integration uninstall <agent> | --all",
+						code: 1,
+					};
+				return integrationUninstallAll(installDir);
+			}
+			if (!agent)
+				return { ok: false, message: "usage: vp integration uninstall <agent> | --all", code: 1 };
 			return integrationUninstall(agent, { installDir });
 		default:
 			return {

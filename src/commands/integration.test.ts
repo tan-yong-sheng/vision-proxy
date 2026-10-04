@@ -8,7 +8,7 @@
  *     so the prompt submit is never blocked, the context event appends a
  *     static reminder to read referenced image paths (never spawning vp),
  *     and tool_result replaces image reads with the analyzed description
- *   - install claude-code/codex writes a plain `vision-proxy_read.ts` hook script
+ *   - install claude/codex writes a plain `vision-proxy_read.ts` hook script
  *     (run via `npx tsx`) and registers the hooks (UserPromptSubmit +
  *     PreToolUse matchers) in the agent config with no vision-proxy metadata keys
  *   - uninstall removes only our registrations and the script (idempotent,
@@ -1172,9 +1172,9 @@ test("install pi is idempotent (no error on re-install)", async () => {
 	reset();
 });
 
-test("install claude-code writes a tsx hook script and metadata-free settings.json entries", async () => {
+test("install claude writes a tsx hook script and metadata-free settings.json entries", async () => {
 	const home = isolate();
-	const r = await runIntegration("install", "claude-code");
+	const r = await runIntegration("install", "claude");
 	assert.equal(r.ok, true);
 	// The generated hook script lands in ~/.claude/hooks with a version marker.
 	const script = claudeHookPath(home);
@@ -1253,12 +1253,12 @@ test("codex install removes a legacy config.toml UserPromptSubmit block", async 
 
 test("re-install does not duplicate hooks or scripts", async () => {
 	const home = isolate();
-	await runIntegration("install", "claude-code");
-	const first = await runIntegration("install", "claude-code");
+	await runIntegration("install", "claude");
+	const first = await runIntegration("install", "claude");
 	assert.equal(first.ok, true);
 	assert.match(
 		first.message,
-		new RegExp(`claude-code integration already up to date \\(${VERSION.replace(/\./g, "\\.")}\\)`),
+		new RegExp(`claude integration already up to date \\(${VERSION.replace(/\./g, "\\.")}\\)`),
 		"identical reinstall must say so instead of claiming a fresh install",
 	);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
@@ -1270,7 +1270,7 @@ test("re-install does not duplicate hooks or scripts", async () => {
 
 test("reinstall over a stale artifact reports the replaced version", async () => {
 	const home = isolate();
-	await runIntegration("install", "claude-code");
+	await runIntegration("install", "claude");
 	const script = claudeHookPath(home);
 	// Simulate drift (e.g. an older release or an unreleased-branch edit):
 	// same install, older marker plus one changed byte.
@@ -1283,11 +1283,11 @@ test("reinstall over a stale artifact reports the replaced version", async () =>
 			)
 			.replace("vision-proxy", "vision-proxx"),
 	);
-	const r = await runIntegration("install", "claude-code");
+	const r = await runIntegration("install", "claude");
 	assert.equal(r.ok, true);
 	assert.match(
 		r.message,
-		/reinstalled claude-code integration \(replaced 0\.0\.9 with /,
+		/reinstalled claude integration \(replaced 0\.0\.9 with /,
 		"reinstall must warn that it overwrote a differing artifact",
 	);
 	// The artifact is refreshed to the generated content.
@@ -1305,10 +1305,10 @@ test("fresh install still reports an install lead", async () => {
 	assert.match(r.message, /installed pi extension ->/);
 	reset();
 });
-test("install is idempotent (no duplicate blocks) for claude-code", async () => {
+test("install is idempotent (no duplicate blocks) for claude", async () => {
 	isolate();
-	await runIntegration("install", "claude-code");
-	const first = await runIntegration("install", "claude-code");
+	await runIntegration("install", "claude");
+	const first = await runIntegration("install", "claude");
 	assert.equal(first.ok, true);
 	const cfg = parseHooks(readFileSync(join(process.env.HOME!, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -1316,7 +1316,7 @@ test("install is idempotent (no duplicate blocks) for claude-code", async () => 
 	reset();
 });
 
-test("install claude-code replaces legacy vp hook entries", async () => {
+test("install claude replaces legacy vp hook entries", async () => {
 	const home = isolate();
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	writeFileSync(
@@ -1337,7 +1337,7 @@ test("install claude-code replaces legacy vp hook entries", async () => {
 			},
 		}),
 	);
-	const r = await runIntegration("install", "claude-code");
+	const r = await runIntegration("install", "claude");
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -1348,7 +1348,7 @@ test("install claude-code replaces legacy vp hook entries", async () => {
 	reset();
 });
 
-test("uninstall claude-code removes legacy shim entries and the script", async () => {
+test("uninstall claude removes legacy shim entries and the script", async () => {
 	const home = isolate();
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	writeFileSync(
@@ -1369,7 +1369,7 @@ test("uninstall claude-code removes legacy shim entries and the script", async (
 			},
 		}),
 	);
-	const r = await runIntegration("uninstall", "claude-code");
+	const r = await runIntegration("uninstall", "claude");
 	assert.equal(r.ok, true);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks, undefined);
@@ -1377,9 +1377,9 @@ test("uninstall claude-code removes legacy shim entries and the script", async (
 	reset();
 });
 
-test("show claude-code prints the hook command without writing to disk", async () => {
+test("show claude prints the hook command without writing to disk", async () => {
 	const home = isolate();
-	const r = await runIntegration("show", "claude-code");
+	const r = await runIntegration("show", "claude");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /npx tsx .*vision-proxy_read\.ts/);
 	assert.match(r.message, /vision-proxy_read\.ts/);
@@ -1388,9 +1388,9 @@ test("show claude-code prints the hook command without writing to disk", async (
 	reset();
 });
 
-test("install claude-code mentions the tsx prerequisite in its message", async () => {
+test("install claude mentions the tsx prerequisite in its message", async () => {
 	isolate();
-	const r = await runIntegration("install", "claude-code");
+	const r = await runIntegration("install", "claude");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /tsx/);
 	reset();
@@ -1407,18 +1407,18 @@ test("show pi omits the empty hook-command line", async () => {
 
 test("list shows installed state across agents", async () => {
 	isolate();
-	await runIntegration("install", "claude-code");
+	await runIntegration("install", "claude");
 	await runIntegration("install", "codex");
 	// pi uses its default ~/.pi location, not the test installDir.
 	await runIntegration("install", "pi");
 	const r = await runIntegration("list", "");
-	assert.match(r.message, /✓ claude-code/);
+	assert.match(r.message, /✓ claude/);
 	assert.match(r.message, /✓ codex/);
 	assert.match(r.message, /✓ pi/);
 	reset();
 });
 
-test("uninstall claude-code removes only the vision-proxy registrations and leaves others", async () => {
+test("uninstall claude removes only the vision-proxy registrations and leaves others", async () => {
 	const home = isolate();
 	mkdirSync(join(home, ".claude"), { recursive: true });
 	writeFileSync(
@@ -1431,12 +1431,12 @@ test("uninstall claude-code removes only the vision-proxy registrations and leav
 			},
 		}),
 	);
-	await runIntegration("install", "claude-code");
+	await runIntegration("install", "claude");
 	assert.equal(existsSync(claudeHookPath(home)), true);
 	let cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 2);
 	assert.equal(cfg.hooks.PreToolUse.length, 2);
-	const r = await runIntegration("uninstall", "claude-code");
+	const r = await runIntegration("uninstall", "claude");
 	assert.equal(r.ok, true);
 	cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
@@ -1478,7 +1478,7 @@ test("uninstall preserves a foreign config when no registration is removed", asy
 	mkdirSync(dirname(configPath), { recursive: true });
 	const raw = '{\n  "hooks": {\n    "UserPromptSubmit": []\n  }\n}\n';
 	writeFileSync(configPath, raw);
-	const r = await runIntegration("uninstall", "claude-code");
+	const r = await runIntegration("uninstall", "claude");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /was not installed|absent/);
 	assert.equal(readFileSync(configPath, "utf8"), raw);
@@ -1487,7 +1487,7 @@ test("uninstall preserves a foreign config when no registration is removed", asy
 
 test("uninstall of a never-installed agent reports nothing-to-do", async () => {
 	isolate();
-	const r = await runIntegration("uninstall", "claude-code");
+	const r = await runIntegration("uninstall", "claude");
 	assert.equal(r.ok, true);
 	assert.match(r.message, /was not installed|absent/);
 	reset();
@@ -1504,6 +1504,122 @@ test("uninstall pi leaves other files in the extensions directory intact", async
 	assert.equal(r.ok, true);
 	assert.equal(existsSync(other), true);
 	assert.equal(existsSync(dir), true);
+	reset();
+});
+
+test("uninstall --all removes every integration and clears legacy opencode files", async () => {
+	const home = isolate();
+	await runIntegration("install", "pi");
+	await runIntegration("install", "claude");
+	await runIntegration("install", "codex");
+	const opencodeDir = legacyOpencodeDir(home);
+	mkdirSync(opencodeDir, { recursive: true });
+	writeFileSync(join(opencodeDir, "vision-proxy_read.ts"), `__VP_VERSION__:0.0.9\n`);
+	const r = await runIntegration("uninstall", "", undefined, false, true);
+	assert.equal(r.ok, true);
+	assert.equal(r.code, 0);
+	const lines = r.message.split("\n");
+	assert.equal(lines.length, 4);
+	assert.deepEqual(
+		lines.map((l) => l.split(":")[0]),
+		["pi", "claude", "codex", "opencode"],
+	);
+	for (const line of lines) assert.match(line, /^(pi|claude|codex|opencode): .+/);
+	assert.equal(existsSync(join(home_pi(), "vision-proxy_read.ts")), false);
+	assert.equal(existsSync(claudeHookPath(home)), false);
+	assert.equal(existsSync(codexHookPath(home)), false);
+	assert.equal(existsSync(join(opencodeDir, "vision-proxy_read.ts")), false);
+	reset();
+});
+
+test("uninstall --all with no integrations reports nothing installed per agent", async () => {
+	isolate();
+	const r = await runIntegration("uninstall", "", undefined, false, true);
+	assert.equal(r.ok, true);
+	assert.equal(r.code, 0);
+	assert.match(r.message, /pi: /);
+	assert.match(r.message, /claude: /);
+	assert.match(r.message, /codex: /);
+	assert.match(r.message, /opencode: /);
+	reset();
+});
+
+test("uninstall --all rejects an explicit agent", async () => {
+	isolate();
+	const r = await runIntegration("uninstall", "pi", undefined, false, true);
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 1);
+	assert.match(r.message, /usage: vp integration uninstall <agent> \| --all/);
+	reset();
+});
+
+test("claude-code alias resolves to the same install as claude", async () => {
+	const home = isolate();
+	const viaAlias = await runIntegration("install", "claude-code");
+	assert.equal(viaAlias.ok, true);
+	// Messages are canonical: the alias never leaks into output.
+	assert.match(viaAlias.message, /installed claude integration/);
+	assert.ok(!viaAlias.message.includes("claude-code"));
+	assert.equal(existsSync(claudeHookPath(home)), true);
+	// Show/uninstall through the alias act on the same artifact.
+	const show = await runIntegration("show", "claude-code");
+	assert.equal(show.ok, true);
+	const uninstall = await runIntegration("uninstall", "claude-code");
+	assert.equal(uninstall.ok, true);
+	assert.match(uninstall.message, /uninstalled claude integration/);
+	assert.equal(existsSync(claudeHookPath(home)), false);
+	reset();
+});
+
+test("uninstall without an agent points at --all", async () => {
+	isolate();
+	const r = await runIntegration("uninstall", "");
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 1);
+	assert.match(r.message, /usage: vp integration uninstall <agent> \| --all/);
+	reset();
+});
+
+test("uninstall --all keeps going when one agent uninstall fails", async () => {
+	if (!CAN_BLOCK_REMOVAL) return;
+	const home = isolate();
+	await runIntegration("install", "claude");
+	// A read-only extensions dir blocks pi's artifact + dir removal, so pi
+	// fails while claude still uninstalls cleanly.
+	const piDir = home_pi();
+	mkdirSync(piDir, { recursive: true });
+	const piTarget = join(piDir, "vision-proxy_read.ts");
+	writeFileSync(piTarget, `__VP_VERSION__:0.0.9\n`);
+	chmodSync(piDir, 0o555);
+	try {
+		const r = await runIntegration("uninstall", "", undefined, false, true);
+		assert.equal(r.ok, false);
+		assert.equal(r.code, 1);
+		assert.match(r.message, /pi: failed to remove/);
+		assert.match(r.message, /claude: uninstalled/);
+		assert.equal(existsSync(claudeHookPath(home)), false);
+		assert.equal(existsSync(piTarget), true);
+	} finally {
+		chmodSync(piDir, 0o755);
+		reset();
+	}
+});
+
+test("uninstall --all converts a per-agent rejection into a failed line", async () => {
+	// settings.json as a directory makes readConfig's readFileSync throw
+	// (EISDIR); --all must convert the rejection to a failed line and
+	// continue with the later agents instead of aborting.
+	const home = isolate();
+	const configPath = join(home, ".claude", "settings.json");
+	mkdirSync(dirname(configPath), { recursive: true });
+	mkdirSync(configPath);
+	const r = await runIntegration("uninstall", "", undefined, false, true);
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 1);
+	assert.match(r.message, /claude: failed to uninstall claude integration: /);
+	// Later agents still ran and reported their lines.
+	assert.match(r.message, /codex: /);
+	assert.match(r.message, /opencode: /);
 	reset();
 });
 
@@ -1752,12 +1868,12 @@ test("status flags an integration whose embedded version marker is stale", async
 	reset();
 });
 
-test("status reads claude-code version from the hook script, with a metadata-free config", async () => {
+test("status reads claude version from the hook script, with a metadata-free config", async () => {
 	const home = isolate();
-	await runIntegration("install", "claude-code");
+	await runIntegration("install", "claude");
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
-	assert.match(r.message, new RegExp(`✓ claude-code\\s+${VERSION.replace(/\./g, "\\.")}`));
+	assert.match(r.message, new RegExp(`✓ claude\\s+${VERSION.replace(/\./g, "\\.")}`));
 	assert.equal(existsSync(join(home, ".claude", "vision-proxy.hook.json")), false);
 	const cfg = parseHooks(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 	assert.equal("vpManaged" in cfg.hooks.UserPromptSubmit[0], false);
@@ -1765,9 +1881,9 @@ test("status reads claude-code version from the hook script, with a metadata-fre
 	reset();
 });
 
-test("status flags a stale claude-code hook script version", async () => {
+test("status flags a stale claude hook script version", async () => {
 	isolate();
-	await runIntegration("install", "claude-code");
+	await runIntegration("install", "claude");
 	const script = join(process.env.HOME!, ".claude", "hooks", "vision-proxy_read.ts");
 	writeFileSync(
 		script,
@@ -1777,7 +1893,7 @@ test("status flags a stale claude-code hook script version", async () => {
 	assert.equal(r.ok, true);
 	assert.match(
 		r.message,
-		new RegExp(`! claude-code\\s+0\\.0\\.9.*installed vp is ${VERSION.replace(/\./g, "\\.")}`),
+		new RegExp(`! claude\\s+0\\.0\\.9.*installed vp is ${VERSION.replace(/\./g, "\\.")}`),
 	);
 	assert.match(r.message, /out of date/);
 	reset();
@@ -1883,7 +1999,7 @@ test("uninstall of a hook agent warns about a surviving legacy script instead of
 	writeFileSync(legacy, `__VP_VERSION__:0.0.9\n`);
 	chmodSync(hooksDir, 0o555);
 	try {
-		const r = await runIntegration("uninstall", "claude-code");
+		const r = await runIntegration("uninstall", "claude");
 		// No config registration and no current target: the leftover legacy
 		// script is inert on hook agents, so uninstall stays successful
 		// with a warning.
@@ -1994,7 +2110,7 @@ test("status reports a surviving legacy hook-agent script as inert, not out of d
 	);
 	const r = await runIntegration("status", "");
 	assert.equal(r.ok, true);
-	assert.match(r.message, /- claude-code\s+inert legacy artifact at .+vision-proxy\.ts/);
+	assert.match(r.message, /- claude\s+inert legacy artifact at .+vision-proxy\.ts/);
 	assert.match(r.message, /all 1 integration\(s\) up to date/);
 	reset();
 });
@@ -2022,13 +2138,13 @@ test("status flags a legacy-only hook-agent registration for re-install, not ine
 	// manual deletion would break the user's hooks).
 	assert.match(
 		r.message,
-		/! claude-code\s+legacy artifact at .+vision-proxy\.ts - re-run: vp integration install claude-code/,
+		/! claude\s+legacy artifact at .+vision-proxy\.ts - re-run: vp integration install claude/,
 	);
 	assert.match(r.message, /out of date/);
 	reset();
 });
 
-test("reinstall claude-code migrates a legacy-named registration and script", async () => {
+test("reinstall claude migrates a legacy-named registration and script", async () => {
 	const home = isolate();
 	const hooksDir = join(home, ".claude", "hooks");
 	mkdirSync(hooksDir, { recursive: true });
@@ -2044,7 +2160,7 @@ test("reinstall claude-code migrates a legacy-named registration and script", as
 			},
 		}),
 	);
-	const r = await runIntegration("install", "claude-code");
+	const r = await runIntegration("install", "claude");
 	assert.equal(r.ok, true);
 	assert.equal(existsSync(legacyScript), false, "legacy script must be removed on install");
 	const cfg = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));

@@ -84,7 +84,7 @@ Install `vp` into your coding agent so it automatically analyzes images from pro
 
 ```bash
 # Install integration for your agent
-vp integration install claude-code
+vp integration install claude
 vp integration install codex
 vp integration install pi
 # NOTE: opencode support is paused while its v2 plugin API stabilizes
@@ -95,8 +95,9 @@ vp integration install pi
 # Check installed integrations and version status
 vp integration status
 
-# Remove an integration
+# Remove one integration, or every integration at once
 vp integration uninstall <agent>
+vp integration uninstall --all
 ```
 
 - **Claude Code & Codex**: Writes a `vision-proxy_read.ts` hook script (`~/.claude/hooks/` or `~/.codex/hooks/`) and registers `UserPromptSubmit` and `PreToolUse Read` hooks that run it as a plain `npx tsx <script>` command with only standard hook keys. Requires `tsx` to be installed (`npm install -g tsx`). `UserPromptSubmit` emits a static reminder to `Read` each referenced image (never shells out, so submission is never blocked); `PreToolUse Read` is the single analysis point. For Claude Code, `UserPromptSubmit` also resolves pasted/attached images (rendered as `[Image #N]` refs) via the session-scoped `image-cache` so each gets a reminder line.
@@ -112,7 +113,7 @@ See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for troubleshooting and detai
 | Command | Description |
 |---------|-------------|
 | `vp analyze <paths...>` | Describe one or more images (`--crop`, `--format`, `--json`, `--model`, `--provider`, `--no-fence`). |
-| `vp integration <cmd> [agent]` | Manage agent integrations (`install`, `status`, `list`, `show`, `uninstall`). |
+| `vp integration <cmd> [agent] [--all]` | Manage agent integrations (`install`, `status`, `list`, `show`, `uninstall`, `uninstall --all`). |
 | `vp config <cmd>` | Manage configuration (`init`, `get`, `set`, `validate`). |
 | `vp provider <cmd>` | Manage provider auth and keys (`list`, `check`, `store-key`, `delete-key`, `list-keys`). |
 | `vp cache <cmd>` | Manage perceptual-hash description cache (`status`, `clear`, `prune`). |

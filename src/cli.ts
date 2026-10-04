@@ -8,7 +8,7 @@
  *   config   init | get | set <k> <v> | validate
  *   provider list | check [<name>] | store-key <name> | delete-key <name> | list-keys
  *   cache    status | clear | prune [--older <days>]
- *   integration install | show | list | status | uninstall <agent>
+ *   integration install | show | list | status | uninstall <agent> | uninstall --all
  *   update [--check] [--version <tag>] [--force] [--beta]
  *   version | help
  *

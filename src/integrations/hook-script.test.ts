@@ -526,16 +526,21 @@ test("PreToolUse Bash runs the original command when there is no transcript cont
 	assert.equal(run.stdout.trim(), "", "no context means no rewrite: original runs");
 });
 
-test("PreToolUse fails open when an image path cannot be passed to spawn", () => {
+test("PreToolUse fails closed when spawnSync throws on an unusable image path", () => {
 	const script = writeScript();
 	const run = runHook(script, {
 		hook_event_name: "PreToolUse",
 		tool_name: "Read",
 		tool_input: { file_path: "/tmp/image\u0000.png" },
 	});
-	assert.equal(run.status, 0);
-	assert.equal(run.stdout.trim(), "");
-	assert.match(run.stderr, /hook failed open/);
+	assert.equal(run.status, 0, "fail-closed still exits 0");
+	assert.match(run.stdout, /"permissionDecision":"deny"/, "must deny the read");
+	assert.match(run.stdout, /vp analyze could not be started/, "must name the cause");
+	assert.doesNotMatch(
+		run.stdout,
+		/<vision_proxy_description>/,
+		"must never present a failed analysis as a description",
+	);
 });
 
 test("PreToolUse fails closed when vp is missing or exits non-zero", () => {

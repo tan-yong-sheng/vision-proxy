@@ -191,7 +191,19 @@ function runAnalyze(images: string[], extras): { description: string | null; fai
     maxBuffer: MAX_BUFFER_BYTES,
   };
   if (invocation.stdin) opts.input = invocation.stdin;
-  var result = spawnSync(invocation.command, invocation.args, opts) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown; stderr?: unknown };
+  // spawnSync throws synchronously on unusable input (e.g. a NUL byte in the
+  // image path). Without this guard the throw escapes past the deny branch
+  // to the top-level fail-open guard and the native tool runs -- the exact
+  // fallthrough the fail-closed read exists to prevent.
+  var result: { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown; stderr?: unknown };
+  try {
+    result = spawnSync(invocation.command, invocation.args, opts) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown; stderr?: unknown };
+  } catch (err) {
+    const msg = err && (err as Error).message ? (err as Error).message : String(err);
+    failure = "vp analyze could not be started";
+    process.stderr.write("[vision-proxy] vp analyze could not be started: " + msg + "\n");
+    return { description: null, failure: failure };
+  }
   var childStderr = String(result.stderr == null ? "" : result.stderr);
   if (childStderr) process.stderr.write(childStderr);
   if (result.error) {

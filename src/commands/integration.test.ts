@@ -87,6 +87,7 @@ interface LoadedGenerated {
 	dir: string;
 	calls: Array<[string, string[]]>;
 	setNextResult(result: unknown): void;
+	setNextResults(results: unknown[]): void;
 }
 
 async function loadGeneratedSource(
@@ -105,11 +106,14 @@ async function loadGeneratedSource(
 		[
 			"export const calls: Array<[string, string[]]> = [];",
 			"let nextResult;",
-			"export function setNextResult(r) { nextResult = r; }",
-			"export function spawnSync(command, args) { calls.push([command, args]); return nextResult; }",
+			"let resultQueue = null;",
+			"export function setNextResult(r) { nextResult = r; resultQueue = null; }",
+			"export function setNextResults(rs) { resultQueue = rs.slice(); }",
+			"function takeResult() { return resultQueue && resultQueue.length > 0 ? resultQueue.shift() : nextResult; }",
+			"export function spawnSync(command, args) { calls.push([command, args]); return takeResult(); }",
 			"export function spawn(command, args) {",
 			"  calls.push([command, args]);",
-			"  const result = nextResult;",
+			"  const result = takeResult();",
 			"  let stdoutHandler = null;",
 			"  const proc = {",
 			"    stdin: { on: () => {}, write: () => true, end: () => {} },",
@@ -132,7 +136,7 @@ async function loadGeneratedSource(
 			"export function execFile(command, args, options, callback) {",
 			"  calls.push([command, args]);",
 			"  if (typeof options === 'function') { callback = options; }",
-			"  const result = nextResult;",
+			"  const result = takeResult();",
 			"  setImmediate(() => {",
 			'    if (!result) { callback(null, "", ""); return; }',
 			'    if (result.error) { callback(result.error, result.stdout ?? "", result.stderr ?? ""); return; }',
@@ -150,11 +154,13 @@ async function loadGeneratedSource(
 		].join("\n"),
 	);
 	const mod = (await import(join(dir, `${name}.ts`))) as Record<string, unknown>;
+	const mockChild = await import(join(dir, "mock-child-process.ts"));
 	return {
 		mod,
 		dir,
-		calls: (await import(join(dir, "mock-child-process.ts"))).calls,
-		setNextResult: (await import(join(dir, "mock-child-process.ts"))).setNextResult,
+		calls: mockChild.calls,
+		setNextResult: mockChild.setNextResult,
+		setNextResults: mockChild.setNextResults,
 	};
 }
 
@@ -180,7 +186,7 @@ type PiExtensionSetup = (input: {
 }) => unknown;
 
 async function loadPiExtension(source: string, home: string) {
-	const { mod, dir, calls, setNextResult } = await loadGeneratedSource(
+	const { mod, dir, calls, setNextResult, setNextResults } = await loadGeneratedSource(
 		source,
 		home,
 		"vision-proxy",
@@ -204,7 +210,7 @@ async function loadPiExtension(source: string, home: string) {
 	for (const required of ["input", "context", "tool_call", "tool_result"]) {
 		assert.ok(eventNames.includes(required), `must register ${required} handler`);
 	}
-	return { events, dir, calls, setNextResult };
+	return { events, dir, calls, setNextResult, setNextResults };
 }
 
 test("install pi writes the vision-proxy extension file with valid source", async () => {
@@ -551,6 +557,7 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		events,
 		dir: testDir,
 		setNextResult,
+		setNextResults,
 	} = await loadPiExtension(readFileSync(join(dir, "vision-proxy_read.ts"), "utf8"), home);
 	const imagePath = fakeImage(testDir, "pic.png");
 	const b64 = Buffer.from("x").toString("base64");
@@ -598,52 +605,59 @@ test("pi extension fails open on analyze failure and respects mode off", async (
 		"spawn ENOENT must name the missing CLI",
 	);
 
-	// Success exit with empty stdout is a failure branch too: deny rather
-	// than presenting an empty analysis as a description.
+	// Success exit with empty stdout is a failure branch too: deny with the
+	// cause named, rather than presenting an empty analysis as a description.
 	setNextResult({ status: 0, stdout: "" });
-	const empty = await events.tool_result[0]({
+	const empty = (await events.tool_result[0]({
+		type: "tool_result",
+		toolName: "read",
+		input: { path: imagePath },
+		content: [{ type: "image", data: b64, mimeType: "image/png" }],
+		isError: false,
+	})) as any;
+	assert.ok(empty?.content, "empty stdout must fail closed, not pass through");
+	assert.match(
+		empty.content[0].text,
+		/could not analyze this image \(vp analyze exited with status 0\)/,
+		"empty stdout must fail closed with the cause named",
+	);
+	assert.doesNotMatch(
+		empty.content[0].text,
+		/<vision_proxy_description>/,
+		"must never present a failed analysis as a description",
+	);
+
+	// Overlapping tool_result calls keep their own causes: each spawned call
+	// consumes the next queued mock result, so distinct failures must surface
+	// as distinct messages. Under shared module state the second call's reset
+	// would wipe the first call's cause.
+	const firstError = new Error("spawn vp ENOENT") as NodeJS.ErrnoException;
+	firstError.code = "ENOENT";
+	setNextResults([
+		{ error: firstError, stdout: "" },
+		{ status: 2, stdout: "" },
+	]);
+	const toolResultEvent = (): any => ({
 		type: "tool_result",
 		toolName: "read",
 		input: { path: imagePath },
 		content: [{ type: "image", data: b64, mimeType: "image/png" }],
 		isError: false,
 	});
-	assert.ok((empty as any)?.content, "empty stdout must fail closed, not pass through");
-	assert.doesNotMatch(
-		(empty as any).content[0].text,
-		/<vision_proxy_description>/,
-		"must never present a failed analysis as a description",
+	const [first, second] = (await Promise.all([
+		events.tool_result[0](toolResultEvent()),
+		events.tool_result[0](toolResultEvent()),
+	])) as any[];
+	assert.match(
+		first.content[0].text,
+		/the vision-proxy CLI was not found/,
+		"first overlapping call must keep its own ENOENT cause",
 	);
-
-	// Overlapping tool_result calls keep their own causes: the second call's
-	// reset must not wipe the first call's failure message.
-	setNextResult({ status: 1, stdout: "" });
-	const [first, second] = await Promise.all([
-		events.tool_result[0]({
-			type: "tool_result",
-			toolName: "read",
-			input: { path: imagePath },
-			content: [{ type: "image", data: b64, mimeType: "image/png" }],
-			isError: false,
-		}),
-		events.tool_result[0]({
-			type: "tool_result",
-			toolName: "read",
-			input: { path: imagePath },
-			content: [{ type: "image", data: b64, mimeType: "image/png" }],
-			isError: false,
-		}),
-	]);
-	for (const [label, result] of [
-		["first", first],
-		["second", second],
-	] as const) {
-		assert.match(
-			(result as any).content[0].text,
-			/vp analyze exited with status 1/,
-			`${label} overlapping call must keep its own cause`,
-		);
-	}
+	assert.match(
+		second.content[0].text,
+		/vp analyze exited with status 2/,
+		"second overlapping call must keep its own exit-status cause",
+	);
 
 	// The context reminder needs no vp call, so it still fires even when vp
 	// is broken — the model is told to read, and the read fails closed above.

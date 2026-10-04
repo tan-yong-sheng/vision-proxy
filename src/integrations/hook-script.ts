@@ -200,7 +200,7 @@ function runAnalyze(images: string[], extras): { description: string | null; fai
     result = spawnSync(invocation.command, invocation.args, opts) as { error?: NodeJS.ErrnoException; status?: number | null; stdout?: unknown; stderr?: unknown };
   } catch (err) {
     const msg = err && (err as Error).message ? (err as Error).message : String(err);
-    failure = "vp analyze could not be started";
+    failure = describeAnalyzeFailure("not-started");
     process.stderr.write("[vision-proxy] vp analyze could not be started: " + msg + "\n");
     return { description: null, failure: failure };
   }
@@ -208,17 +208,17 @@ function runAnalyze(images: string[], extras): { description: string | null; fai
   if (childStderr) process.stderr.write(childStderr);
   if (result.error) {
     if (result.error.code === "ENOENT") {
-      failure = "the vision-proxy CLI was not found";
+      failure = describeAnalyzeFailure("missing-cli");
       process.stderr.write("[vision-proxy] vp binary not found: " + vp + "\n");
     } else {
-      failure = "vp analyze failed or timed out";
+      failure = describeAnalyzeFailure("failed-or-timed-out");
       process.stderr.write("[vision-proxy] vp analyze failed or timed out\n");
     }
     return { description: null, failure: failure };
   }
   var out = String(result.stdout == null ? "" : result.stdout).trim();
   if (result.status !== 0 || !out) {
-    failure = "vp analyze exited with status " + String(result.status == null ? "?" : result.status);
+    failure = describeAnalyzeFailure("exit-status", result.status == null ? null : result.status);
     process.stderr.write("[vision-proxy] vp analyze exited with status " + String(result.status == null ? "?" : result.status) + "\n");
     return { description: null, failure: failure };
   }

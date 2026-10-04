@@ -22,6 +22,7 @@ import {
 	contextFileDir,
 	DEFAULT_HOOK_TIMEOUT_MS,
 	DEFAULT_MAX_OUTPUT_TOKENS,
+	describeAnalyzeFailure,
 	ensurePrivateContextDir,
 	extractImagePaths,
 	HOOK_RUNTIME_SOURCE,
@@ -447,6 +448,22 @@ test("utf8ByteLength never throws without a Buffer global (Pi fail-open)", () =>
 	assert.ok(utf8ByteLength("".padEnd(300 * 1024, "x")) > CONTEXT_FILE_MAX_BYTES);
 });
 
+test("describeAnalyzeFailure preserves the exact model-visible cause strings", () => {
+	// Both host executors render causes through this one taxonomy; the
+	// literals below are the historical model-visible strings hosts already
+	// key on (sync hook + async Pi extension), so any rewording is a diff
+	// failure here rather than silent drift in a generated artifact.
+	assert.equal(describeAnalyzeFailure("not-started"), "vp analyze could not be started");
+	assert.equal(describeAnalyzeFailure("spawn-failed"), "vision-proxy could not be started");
+	assert.equal(describeAnalyzeFailure("missing-cli"), "the vision-proxy CLI was not found");
+	assert.equal(describeAnalyzeFailure("failed"), "vp analyze failed");
+	assert.equal(describeAnalyzeFailure("failed-or-timed-out"), "vp analyze failed or timed out");
+	assert.equal(describeAnalyzeFailure("exit-status", 1), "vp analyze exited with status 1");
+	assert.equal(describeAnalyzeFailure("exit-status", null), "vp analyze exited with status ?");
+	assert.equal(describeAnalyzeFailure("timed-out"), "vp analyze timed out");
+	assert.equal(describeAnalyzeFailure("aborted"), "vp analyze was aborted");
+});
+
 test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 	for (const fn of [
 		parsePositiveInt,
@@ -458,6 +475,7 @@ test("HOOK_RUNTIME_SOURCE ships the tested functions without drift", () => {
 		vpEntryToSpawn,
 		resolveVpBin,
 		buildAnalyzeArgs,
+		describeAnalyzeFailure,
 		isUnflaggedAnalyzeCommand,
 		appendContextFileArg,
 		contextFileDir,

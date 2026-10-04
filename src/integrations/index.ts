@@ -9,6 +9,7 @@
  */
 export {
 	AGENT_ALIASES,
+	allKnownAgents,
 	canonicalAgentId,
 	claudeCodeConfigPath,
 	claudeHookScriptPath,
@@ -20,7 +21,7 @@ export {
 	legacyMarkerPath,
 	legacyOpencodePluginFiles,
 	legacyOpencodePluginsDir,
-	makeTsHookCommand,
+	makeHookCommand,
 	piExtensionsDir,
 	quotePath,
 	removeLegacyCodexConfigToml,

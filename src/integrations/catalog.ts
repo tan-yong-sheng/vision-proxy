@@ -41,6 +41,20 @@ export function canonicalAgentId(agent: string): string {
 	return Object.hasOwn(AGENT_ALIASES, agent) ? AGENT_ALIASES[agent]! : agent;
 }
 
+/**
+ * Every agent id `vp integration` knows about, including paused ones.
+ *
+ * opencode has no install spec while its v2 plugin API stabilizes (see
+ * SUPPORTED), but status/uninstall must still enumerate it to surface and
+ * clean up orphaned v1 installs — so lifecycle iterates this list, not
+ * SUPPORTED, wherever paused hosts count.
+ *
+ * @tags integration, catalog
+ */
+export function allKnownAgents(): string[] {
+	return [...SUPPORTED, "opencode"];
+}
+
 /** Installed host artifact name (feature-suffix convention: the Read-time analyze hooks). */
 export const ARTIFACT_FILENAME = "vision-proxy_read.ts";
 const PI_EXTENSION_FILENAME = ARTIFACT_FILENAME;
@@ -97,7 +111,13 @@ export function codexHookScriptPath(): string {
 
 /** Legacy marker file left by older installs (version used to live outside the config). */
 export function legacyMarkerPath(agent: string): string {
-	return join(getHomeDir(), agent === "codex" ? ".codex" : ".claude", "vision-proxy.hook.json");
+	const id = canonicalAgentId(agent);
+	if (id === "codex") return join(getHomeDir(), ".codex", "vision-proxy.hook.json");
+	if (id === "claude") return join(getHomeDir(), ".claude", "vision-proxy.hook.json");
+	// No other agent ever wrote a legacy marker: fall back to the .claude
+	// location (callers probe it with existsSync, so this is a no-op for pi
+	// and a miss for unknown ids) rather than throwing inside install.
+	return join(getHomeDir(), ".claude", "vision-proxy.hook.json");
 }
 
 /**
@@ -141,7 +161,7 @@ export function quotePath(p: string, platform: string = process.platform): strin
  *
  * @tags integration, catalog
  */
-export function makeTsHookCommand(scriptPath: string, platform: string = process.platform): string {
+export function makeHookCommand(scriptPath: string, platform: string = process.platform): string {
 	return `node --experimental-strip-types ${quotePath(scriptPath, platform)}`;
 }
 
@@ -274,11 +294,11 @@ function makeHookAgentSpec(opts: {
 			return { raw };
 		},
 		configPath: opts.configPath,
-		hookCommand: () => makeTsHookCommand(opts.scriptPath()),
+		hookCommand: () => makeHookCommand(opts.scriptPath()),
 		apply: (raw) =>
 			applyHooks(
 				raw,
-				makeTsHookCommand(opts.scriptPath()),
+				makeHookCommand(opts.scriptPath()),
 				opts.id === "codex" ? ["view_image", "Bash"] : ["Read", "Bash"],
 			),
 		remove: (raw) => removeHooks(raw),
@@ -297,7 +317,7 @@ function makeHookAgentSpec(opts: {
 	};
 }
 
-const claudeCode: AgentSpec = makeHookAgentSpec({
+const claude: AgentSpec = makeHookAgentSpec({
 	id: "claude",
 	scriptPath: claudeHookScriptPath,
 	configPath: claudeCodeConfigPath,
@@ -449,7 +469,7 @@ export function legacyOpencodePluginFiles(dir: string): string[] {
 export function specFor(agent: string): AgentSpec | undefined {
 	const id = canonicalAgentId(agent);
 	if (id === "pi") return piSpec;
-	if (id === "claude") return claudeCode;
+	if (id === "claude") return claude;
 	if (id === "codex") return codex;
 	return undefined;
 }

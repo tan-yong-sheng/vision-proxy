@@ -122,7 +122,7 @@ function sessionBranchContext(ctx: unknown): string {
 // Coarse reason for the last failed analyze, used by the fail-closed tool_result.
 // Never carries paths or child stderr: diagnostics stay on stderr for the logs,
 // and the model gets only enough to name the failure.
-var analyzeFailure = "";
+let analyzeFailure = "";
 
 async function runAnalyze(images: string[], extras, signal?: unknown): Promise<string | null> {
   return new Promise((resolve) => {

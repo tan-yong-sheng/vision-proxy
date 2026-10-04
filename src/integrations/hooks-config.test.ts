@@ -140,11 +140,14 @@ test("mergeHookGroups overwrites vp groups in place to preserve host trust indic
 	assert.deepEqual(shrunk[0], foreign("dcg"));
 	assert.deepEqual((shrunk[1] as { matcher: string }).matcher, "view_image");
 	assert.deepEqual((shrunk[2] as { matcher: string }).matcher, "Bash");
-	// Growing inserts after the last reused slot, preserving earlier indices.
-	const grown = mergeHookGroups([foreign("dcg"), vp("view_image")], [vp("view_image"), vp("Bash")]);
-	assert.equal(grown.length, 3);
-	assert.deepEqual(grown[0], foreign("dcg"));
-	assert.deepEqual((grown[2] as { matcher: string }).matcher, "Bash");
+	// Growing appends after all existing entries, so no foreign group's index
+	// moves -- including one trailing after the vp slots.
+	const interleaved = [foreign("dcg"), vp("view_image"), foreign("tail")];
+	const grown = mergeHookGroups(interleaved, [vp("view_image"), vp("Bash")]);
+	assert.equal(grown.length, 4);
+	assert.deepEqual(grown[0], foreign("dcg"), "leading foreign group must not move");
+	assert.deepEqual(grown[2], foreign("tail"), "trailing foreign group must not move");
+	assert.deepEqual((grown[3] as { matcher: string }).matcher, "Bash");
 	// Re-apply is idempotent.
 	const twice = mergeHookGroups(merged, [vp("view_image"), vp("Bash")]);
 	assert.deepEqual(twice, merged);

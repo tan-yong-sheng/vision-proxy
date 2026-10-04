@@ -6,7 +6,7 @@ Install `vp` into an agent so it can see images in your prompts.
 
 Prerequisite: Node 22.6+ must be on PATH for the `node --experimental-strip-types` hook command to run.
 
-Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers two hooks in `~/.claude/settings.json`, both running it as a plain `node --experimental-strip-types ~/.claude/hooks/vision-proxy_read.ts` command with only standard hook keys (no vision-proxy metadata in the config):
+Writes a `vision-proxy_read.ts` hook script to `~/.claude/hooks/` and registers three hook groups across two hook events in `~/.claude/settings.json`, all running it as a plain `node --experimental-strip-types ~/.claude/hooks/vision-proxy_read.ts` command with only standard hook keys (no vision-proxy metadata in the config):
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Pasted/attached images (rendered as `[Image #N]` refs) are resolved via Claude Code's `image-cache/<session>/<N>.<ext>` so each gets a reminder line too. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse Read` - the single analysis point: describes an image read via the `Read` tool (`file_path`).
@@ -39,7 +39,7 @@ with `--all`.
 
 Prerequisite: Node 22.6+ must be on PATH for the `node --experimental-strip-types` hook command to run.
 
-Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and registers two hooks in `~/.codex/hooks.json` as plain `node --experimental-strip-types ~/.codex/hooks/vision-proxy_read.ts` commands with only standard hook keys:
+Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and registers three hook groups across two hook events in `~/.codex/hooks.json` as plain `node --experimental-strip-types ~/.codex/hooks/vision-proxy_read.ts` commands with only standard hook keys:
 
 - `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `view_image` tool. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse view_image` - analyzes Codex's native image-view request (`path`) and denies it before Codex reads image bytes, returning the vision description as hook context.

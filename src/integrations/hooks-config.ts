@@ -88,7 +88,7 @@ export function isVisionProxyGroup(group: Record<string, unknown>): boolean {
  * command and matchers are unchanged) the hash, so a reinstall preserves
  * trust. Surplus groups (fewer matchers than before) are removed last-to-first
  * so surviving indices never shift; extra groups (more matchers than before)
- * are inserted directly after the last reused slot.
+ * are appended after all existing entries, so no foreign group's index moves.
  *
  * A non-array existing value is REPLACED, not merged: install must yield a
  * valid array registration (the host schema requires arrays), and an unknown
@@ -115,10 +115,10 @@ export function mergeHookGroups(
 	const reused = Math.min(vpIndices.length, groups.length);
 	for (let k = 0; k < reused; k++) list[vpIndices[k]!] = groups[k]!;
 	if (groups.length > vpIndices.length) {
-		// More matchers than before: insert the remainder directly after the
-		// last reused slot so earlier indices never shift.
-		const insertAt = vpIndices[vpIndices.length - 1]! + 1;
-		list.splice(insertAt, 0, ...groups.slice(vpIndices.length));
+		// More matchers than before: append the remainder after all existing
+		// entries. Inserting mid-array would shift trailing foreign groups
+		// and orphan their Codex trust hashes; appending moves no index.
+		list.push(...groups.slice(vpIndices.length));
 	} else {
 		// Fewer (or equal) matchers: drop surplus slots last-to-first.
 		for (let k = vpIndices.length - 1; k >= groups.length; k--) list.splice(vpIndices[k]!, 1);

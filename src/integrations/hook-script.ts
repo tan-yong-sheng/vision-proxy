@@ -172,7 +172,7 @@ var TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 // Coarse reason for the last failed analyze, used by the fail-closed deny.
 // Deliberately never carries paths or child stderr: diagnostics stay on stderr
 // for the logs, and the model gets only enough to name the failure.
-var analyzeFailure = "";
+let analyzeFailure = "";
 
 function runAnalyze(images: string[], extras): string | null {
   analyzeFailure = "";
@@ -412,7 +412,7 @@ function runHook(event: Record<string, any> | null): void {
       // it bypasses the analyzer fence. Denying with the cause lets a
       // long-running agent report the real problem instead of retrying against
       // an API error it cannot interpret.
-      var cause = analyzeFailure || "vp analyze produced no description";
+      const cause = analyzeFailure || "vp analyze produced no description";
       emit(
         "PreToolUse",
         "vision-proxy could not analyze this image (" + cause + ").\n" +

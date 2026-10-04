@@ -39,14 +39,13 @@ with `--all`.
 
 Prerequisite: Node 22.6+ must be on PATH for the `node --experimental-strip-types` hook command to run.
 
-Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and registers three hooks in `~/.codex/hooks.json` as plain `node --experimental-strip-types ~/.codex/hooks/vision-proxy_read.ts` commands with only standard hook keys:
+Writes the same `vision-proxy_read.ts` hook script to `~/.codex/hooks/` and registers two hooks in `~/.codex/hooks.json` as plain `node --experimental-strip-types ~/.codex/hooks/vision-proxy_read.ts` commands with only standard hook keys:
 
-- `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `Read` tool. Never shells out, so prompt submission is never blocked on a vision call.
-- `PreToolUse Read` - analyzes image reads requested through the `Read` tool (`file_path`).
+- `UserPromptSubmit` - appends a static reminder to inspect each image mentioned in the prompt with the `view_image` tool. Never shells out, so prompt submission is never blocked on a vision call.
 - `PreToolUse view_image` - analyzes Codex's native image-view request (`path`) and denies it before Codex reads image bytes, returning the vision description as hook context.
 - `PreToolUse Bash` - rewrites a model-invoked `vp analyze` command to append `--context-file <path>` (same tempfile handoff as Claude Code).
 
-The `Read` matcher remains as a fallback for direct file reads. The `view_image` matcher is Codex-specific; Claude Code keeps its existing `Read` registration.
+Codex has no `Read` tool (its image path is `view_image`), so no `Read` matcher is registered for this host. Claude Code keeps its existing `Read` registration.
 
 Legacy installs that appended a `[[UserPromptSubmit]]` block to `~/.codex/config.toml` are migrated automatically: `vp integration install codex` and `vp integration uninstall codex` both remove that stale block.
 

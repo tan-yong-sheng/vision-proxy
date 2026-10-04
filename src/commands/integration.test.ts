@@ -1225,10 +1225,10 @@ test("install codex writes its hook script under ~/.codex and registers it in ho
 	assert.match(source, new RegExp(`__VP_VERSION__:${VERSION.replace(/\./g, "\\.")}`));
 	const cfg = parseHooks(readFileSync(join(home, ".codex", "hooks.json"), "utf8"));
 	assert.equal(cfg.hooks.UserPromptSubmit.length, 1);
-	assert.equal(cfg.hooks.PreToolUse.length, 3);
+	assert.equal(cfg.hooks.PreToolUse.length, 2);
 	assert.deepEqual(
 		cfg.hooks.PreToolUse.map((group: { matcher: string }) => group.matcher),
-		["Read", "view_image", "Bash"],
+		["view_image", "Bash"],
 	);
 	assert.equal(
 		cfg.hooks.UserPromptSubmit[0].hooks[0].command,
